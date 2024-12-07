@@ -5,7 +5,26 @@
 #include <unistd.h>
 #include <vector>
 
-class ARM64JITCompiler {
+class JITCompiler {
+    virtual std::vector<uint8_t> get_prelude() = 0;
+    virtual std::vector<uint8_t> get_postlude() = 0;
+
+    virtual std::vector<uint8_t> call(uint64_t addr) = 0;
+    virtual std::vector<uint8_t> set_temp1(uint64_t value) = 0;
+
+  public:
+    std::vector<uint8_t> generateSqrtCode() {
+        uint64_t sqrtf_addr = (uint64_t)&sqrtf;
+
+        std::vector<uint8_t> code;
+        code.insert(code.end(), get_prelude().begin(), get_prelude().end());
+        code.insert(code.end(), call(sqrtf_addr).begin(),
+                    call(sqrtf_addr).end());
+        code.insert(code.end(), get_postlude().begin(), get_postlude().end());
+    }
+};
+
+class ARM64JITCompiler : JITCompiler {
   private:
     // Page size and memory protection flags
     const size_t PAGE_SIZE = getpagesize();
