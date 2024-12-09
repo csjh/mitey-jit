@@ -39,7 +39,7 @@ class ARM64JITCompiler : JITCompiler {
                                     (uint8_t *)(u32.data() + u32.size()));
     }
 
-    std::vector<uint32_t> movabs(uint64_t value, uint8_t reg) {
+    std::vector<uint32_t> mov64(uint64_t value, uint8_t reg) {
         return {movk((value >> 0) & 0xffff, 0, reg),
                 movk((value >> 16) & 0xffff, 1, reg),
                 movk((value >> 32) & 0xffff, 2, reg),
@@ -70,13 +70,13 @@ class ARM64JITCompiler : JITCompiler {
 
     std::vector<uint8_t> set_temp1(uint64_t value) {
         constexpr uint8_t x6 = 6;
-        auto instructions = movabs(value, x6);
+        auto instructions = mov64(value, x6);
         return u32_to_u8(instructions);
     }
 
     std::vector<uint8_t> call(uint64_t addr) {
         constexpr uint8_t x7 = 7;
-        auto instructions = movabs(addr, x7);
+        auto instructions = mov64(addr, x7);
         instructions.push_back((0b1101011000111111000000u << 10) | (x7 << 5));
         return u32_to_u8(instructions);
     }
