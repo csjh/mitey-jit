@@ -40,13 +40,13 @@ class ARM64JITCompiler : JITCompiler {
     }
 
     std::vector<uint32_t> mov64(uint64_t value, uint8_t reg) {
-        return {movk((value >> 0) & 0xffff, 0, reg),
-                movk((value >> 16) & 0xffff, 1, reg),
-                movk((value >> 32) & 0xffff, 2, reg),
-                movk((value >> 48) & 0xffff, 3, reg)};
+        return {mov16((value >> 0) & 0xffff, 0, reg),
+                mov16((value >> 16) & 0xffff, 1, reg),
+                mov16((value >> 32) & 0xffff, 2, reg),
+                mov16((value >> 48) & 0xffff, 3, reg)};
     }
 
-    uint32_t movk(uint16_t imm, uint8_t shift, uint8_t reg) {
+    uint32_t mov16(uint16_t imm, uint8_t shift, uint8_t reg) {
         return (0b111100101 << 23) | (shift << 21) | (imm << 5) | reg;
     }
 
