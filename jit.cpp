@@ -50,7 +50,7 @@ class ARM64JITCompiler : JITCompiler {
         return (0b111100101 << 23) | (shift << 21) | (imm << 5) | reg;
     }
 
-    std::vector<uint8_t> get_prelude() {
+    std::vector<uint8_t> get_prelude() override {
         auto arm = std::vector<uint32_t>{
             0xa9bf7bfd, // stp     x29, x30, [sp, #-0x10]!
             0x910003fd  // mov     x29, sp
@@ -59,7 +59,7 @@ class ARM64JITCompiler : JITCompiler {
         return u32_to_u8(arm);
     }
 
-    std::vector<uint8_t> get_postlude() {
+    std::vector<uint8_t> get_postlude() override {
         auto arm = std::vector<uint32_t>{
             0xa8c17bfd, // ldp     x29, x30, [sp], #0x10
             0xd65f03c0  // ret
@@ -68,13 +68,13 @@ class ARM64JITCompiler : JITCompiler {
         return u32_to_u8(arm);
     }
 
-    std::vector<uint8_t> set_temp1(uint64_t value) {
+    std::vector<uint8_t> set_temp1(uint64_t value) override {
         constexpr uint8_t x6 = 6;
         auto instructions = mov64(value, x6);
         return u32_to_u8(instructions);
     }
 
-    std::vector<uint8_t> call(uint64_t addr) {
+    std::vector<uint8_t> call(uint64_t addr) override {
         constexpr uint8_t x7 = 7;
         auto instructions = mov64(addr, x7);
         instructions.push_back((0b1101011000111111000000u << 10) | (x7 << 5));
