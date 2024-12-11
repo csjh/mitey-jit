@@ -2,16 +2,12 @@
 #include <cstdint>
 #include <cstring>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 namespace mitey {
-[[noreturn]] static inline void trap(const char *msg) {
-    throw std::runtime_error(msg);
-}
 
 #define HANDLER(name)                                                          \
-    static void name(uint8_t *memory, WasmValue *stack, WasmValue *locals,     \
+    static void name(WasmMemory *memory, WasmValue *stack, WasmValue *locals,  \
                      void **globals_and_tables, uint64_t tmp1, uint64_t tmp2)
 #define PARAMS memory, stack, locals, globals_and_tables, tmp1, tmp2
 #define PRELUDE                                                                \
@@ -141,14 +137,12 @@ HANDLER(globalset) {
 }
 HANDLER(memorysize) {
     PRELUDE;
-    auto mem = reinterpret_cast<WasmMemory *>(memory - sizeof(WasmMemory));
-    *stack++ = mem->size();
+    *stack++ = memory->size();
     POSTLUDE;
 }
 HANDLER(memorygrow) {
     PRELUDE;
-    auto mem = reinterpret_cast<WasmMemory *>(memory - sizeof(WasmMemory));
-    stack[-1].u32 = WasmMemory::grow(mem, stack[-1].u32);
+    stack[-1].u32 = memory->grow(stack[-1].u32);
     POSTLUDE;
 }
 HANDLER(ifXXconst) {
@@ -264,23 +258,18 @@ using f64 = double;
         POSTLUDE;                                                              \
     }
 
-#define LOAD(type, memtype)                                                    \
+#define LOAD(stacktype, memtype)                                               \
     {                                                                          \
         PRELUDE;                                                               \
-        auto offset = tmp1;                                                    \
-        memtype val;                                                           \
-        std::memcpy(&val, memory + stack[-1].u32 + offset, sizeof(val));       \
-        stack[-1].type = val;                                                  \
+        stack[-1] = memory->load<stacktype, memtype>(stack[-1].u32, tmp1);     \
         POSTLUDE;                                                              \
     }
 
-#define STORE(type, memtype)                                                   \
+#define STORE(stacktype, memtype)                                              \
     {                                                                          \
         PRELUDE;                                                               \
         stack -= 2;                                                            \
-        auto offset = tmp1;                                                    \
-        memtype val = stack[1].type;                                           \
-        std::memcpy(memory + stack[0].u32 + offset, &val, sizeof(val));        \
+        memory->store<stacktype, memtype>(stack[0].u32, tmp1, stack[1]);       \
         POSTLUDE;                                                              \
     }
 
@@ -477,7 +466,7 @@ HANDLER(memory_copy) {
     auto size = (--stack)->u32;
     auto src = (--stack)->u32;
     auto dst = (--stack)->u32;
-    reinterpret_cast<WasmMemory*>(memory - sizeof(WasmMemory))->memcpy(dst, src, size);
+    memory->memcpy(dst, src, size);
     POSTLUDE;
 }
 HANDLER(memory_fill) {
@@ -485,7 +474,7 @@ HANDLER(memory_fill) {
     auto size = (--stack)->u32;
     auto value = (--stack)->u32;
     auto ptr = (--stack)->u32;
-    reinterpret_cast<WasmMemory*>(memory - sizeof(WasmMemory))->memset(ptr, value, size);
+    memory->memset(ptr, value, size);
     POSTLUDE;
 }
 // HANDLER(table_init) {

@@ -1,8 +1,12 @@
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace mitey {
+[[noreturn]] static inline void trap(const char *msg) {
+    throw std::runtime_error(msg);
+}
 
 enum class valtype : uint8_t {
     empty = 0x40,
@@ -108,6 +112,8 @@ struct WasmMemory {
 
     uint32_t current;
     uint32_t maximum;
+    // todo: make this be passed around in calling convetion
+    // can be updated after memory.grow or unknown calls
     uint8_t *memory;
 
     WasmMemory(uint32_t initial, uint32_t maximum)
@@ -125,6 +131,25 @@ struct WasmMemory {
     uint32_t size() { return current; }
     uint32_t max() { return maximum; }
     uint32_t grow(uint32_t delta);
+
+    template <typename StackT, typename MemT>
+    WasmValue load(uint32_t addr, uint64_t offset) {
+        if (addr + offset + sizeof(MemT) > current * PAGE_SIZE) {
+            trap("out of bounds memory access");
+        }
+        MemT val;
+        std::memcpy(&val, memory + addr + offset, sizeof(val));
+        return WasmValue(StackT(val));
+    }
+
+    template <typename StackT, typename MemT>
+    void store(uint32_t addr, uint64_t offset, StackT value) {
+        if (addr + offset + sizeof(MemT) > current * PAGE_SIZE) {
+            trap("out of bounds memory access");
+        }
+        MemT val = value;
+        std::memcpy(memory + addr + offset, &val, sizeof(val));
+    }
 
     void copy_into(uint32_t dest, uint32_t src, const Segment &segment,
                    uint32_t length);
