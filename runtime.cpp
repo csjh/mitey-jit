@@ -553,25 +553,24 @@ HANDLER(table_fill) {
 #undef TRUNC
 #undef UNARY_OP
 
-uint32_t WasmMemory::grow(WasmMemory *&thith, uint32_t delta) {
+uint32_t WasmMemory::grow(uint32_t delta) {
     if (delta == 0)
-        return thith->current;
+        return current;
     // subtraction to avoid overflow
-    if (delta > thith->maximum - thith->current) {
+    if (delta > maximum - current) {
         return -1;
     }
 
-    auto new_current = thith->current + delta;
-    auto that = static_cast<WasmMemory *>(
-        realloc(thith, sizeof(WasmMemory) + new_current * PAGE_SIZE));
-    if (that == NULL)
+    auto new_current = current + delta;
+    auto new_memory =
+        static_cast<uint8_t *>(realloc(memory, new_current * PAGE_SIZE));
+    if (new_memory == NULL)
         return -1;
-    thith = that;
-    std::memset(thith->memory + thith->current * PAGE_SIZE, 0,
-                delta * PAGE_SIZE);
+    memory = new_memory;
+    std::memset(memory + current * PAGE_SIZE, 0, delta * PAGE_SIZE);
 
-    auto old_current = thith->current;
-    thith->current = new_current;
+    auto old_current = current;
+    current = new_current;
     return old_current;
 }
 
@@ -599,25 +598,24 @@ void WasmMemory::memset(uint32_t dst, uint8_t value, uint32_t length) {
     std::memset(memory + dst, value, length);
 }
 
-uint32_t WasmTable::grow(WasmTable *&thith, uint32_t delta, WasmValue value) {
+uint32_t WasmTable::grow(uint32_t delta, WasmValue value) {
     if (delta == 0)
-        return thith->current;
+        return current;
     // subtraction to avoid overflow
-    if (delta > thith->maximum - thith->current) {
+    if (delta > maximum - current) {
         return -1;
     }
 
-    auto new_current = thith->current + delta;
-    auto that = static_cast<WasmTable *>(
-        realloc(thith, sizeof(WasmTable) + new_current * sizeof(WasmValue)));
-    if (that == NULL)
+    auto new_current = current + delta;
+    auto new_elements = static_cast<WasmValue *>(
+        realloc(elements, new_current * sizeof(WasmValue)));
+    if (new_elements == NULL)
         return -1;
-    thith = that;
-    std::fill(thith->elements + thith->current, thith->elements + new_current,
-              value);
+    elements = new_elements;
+    std::fill(elements + current, elements + new_current, value);
 
-    auto old_current = thith->current;
-    thith->current = new_current;
+    auto old_current = current;
+    current = new_current;
     return old_current;
 }
 

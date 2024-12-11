@@ -22,8 +22,9 @@ enum class valtype : uint8_t {
 };
 
 union WasmValue;
+struct WasmMemory;
 
-using Signature = void(uint8_t *memory, WasmValue *stack, WasmValue *locals,
+using Signature = void(WasmMemory *memory, WasmValue *stack, WasmValue *locals,
                        void **globals_and_tables, uint64_t tmp1, uint64_t tmp2);
 
 using Funcref = Signature *;
@@ -68,11 +69,22 @@ struct ElementSegment {
 struct WasmTable {
     uint32_t current;
     uint32_t maximum;
-    WasmValue elements[];
+    WasmValue *elements;
+
+    WasmTable(uint32_t initial, uint32_t maximum)
+        : current(initial), maximum(maximum),
+          elements(
+              static_cast<WasmValue *>(calloc(initial, sizeof(WasmValue)))) {}
+
+    WasmTable() = delete;
+    WasmTable(const WasmTable &) = delete;
+    WasmTable(WasmTable &&) = delete;
+    WasmTable &operator=(const WasmTable &) = delete;
+    WasmTable &operator=(WasmTable &&) = delete;
 
     uint32_t size() { return current; }
     uint32_t max() { return maximum; }
-    static uint32_t grow(WasmTable *&thith, uint32_t delta, WasmValue value);
+    uint32_t grow(uint32_t delta, WasmValue value);
 
     WasmValue get(uint32_t idx);
     void set(uint32_t idx, WasmValue value);
@@ -96,11 +108,23 @@ struct WasmMemory {
 
     uint32_t current;
     uint32_t maximum;
-    uint8_t memory[];
+    uint8_t *memory;
+
+    WasmMemory(uint32_t initial, uint32_t maximum)
+        : current(initial), maximum(std::min(maximum, MAX_PAGES)),
+          memory(static_cast<uint8_t *>(calloc(initial, PAGE_SIZE))) {}
+
+    ~WasmMemory() { free(memory); }
+
+    WasmMemory() = delete;
+    WasmMemory(const WasmMemory &) = delete;
+    WasmMemory(WasmTable &&) = delete;
+    WasmMemory &operator=(const WasmMemory &) = delete;
+    WasmMemory &operator=(WasmMemory &&) = delete;
 
     uint32_t size() { return current; }
     uint32_t max() { return maximum; }
-    static uint32_t grow(WasmMemory *&thith, uint32_t delta);
+    uint32_t grow(uint32_t delta);
 
     void copy_into(uint32_t dest, uint32_t src, const Segment &segment,
                    uint32_t length);
