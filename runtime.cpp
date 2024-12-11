@@ -8,14 +8,15 @@ namespace mitey {
 
 #define HANDLER(name)                                                          \
     static void name(WasmMemory *memory, WasmValue *stack, WasmValue *locals,  \
-                     void **globals_and_tables, uint64_t tmp1, uint64_t tmp2)
-#define PARAMS memory, stack, locals, globals_and_tables, tmp1, tmp2
+                     void **misc, uint64_t tmp1, uint64_t tmp2)
+#define PARAMS memory, stack, locals, misc, tmp1, tmp2
 #define PRELUDE                                                                \
     start: {}
 #define POSTLUDE                                                               \
     end:                                                                       \
     asm goto("" :: ::start, end);                                              \
     return
+#define MISC_GET(type, name) *reinterpret_cast<type *>(misc[name])
 
 HANDLER(unreachable) { trap("unreachable"); }
 
@@ -54,9 +55,7 @@ HANDLER(call) {
 }
 // HANDLER(call_indirect) {
 //     auto type = tmp1;
-//     auto table_idx = tmp2;
-//     auto table = reinterpret_cast<WasmTable *>(globals_and_tables +
-//     table_idx);
+//     auto &table = MISC_GET(WasmTable, tmp2);
 
 //     --stack;
 //     auto elem_idx = stack->u32;
@@ -103,35 +102,29 @@ HANDLER(localtee) {
 }
 HANDLER(tableget) {
     PRELUDE;
-    auto table_idx = tmp1;
-    auto table = reinterpret_cast<WasmTable *>(globals_and_tables + table_idx);
+    auto &table = MISC_GET(WasmTable, tmp1);
     auto idx = (--stack)->u32;
-    *stack++ = table->get(idx);
+    *stack++ = table.get(idx);
     POSTLUDE;
 }
 HANDLER(tableset) {
     PRELUDE;
-    auto table_idx = tmp1;
-    auto table = reinterpret_cast<WasmTable *>(globals_and_tables + table_idx);
+    auto &table = MISC_GET(WasmTable, tmp1);
     stack -= 2;
     auto idx = stack[0].u32;
     auto val = stack[1];
-    table->set(idx, val);
+    table.set(idx, val);
     POSTLUDE;
 }
 HANDLER(globalget) {
     PRELUDE;
-    auto global_idx = static_cast<int64_t>(~tmp1);
-    auto global =
-        reinterpret_cast<WasmValue *>(globals_and_tables + global_idx);
+    auto global = MISC_GET(WasmValue *, tmp1);
     *stack++ = *global;
     POSTLUDE;
 }
 HANDLER(globalset) {
     PRELUDE;
-    auto global_idx = static_cast<int64_t>(~tmp1);
-    auto global =
-        reinterpret_cast<WasmValue *>(globals_and_tables + global_idx);
+    auto global = MISC_GET(WasmValue *, tmp1);
     *global = *--stack;
     POSTLUDE;
 }
@@ -432,11 +425,12 @@ HANDLER(ref_is_null) {
     stack[-1].i32 = stack[-1].externref == nullptr;
     POSTLUDE;
 }
-// HANDLER(ref_func) {
-//     auto func_idx = static_cast<uint32_t>(tmp1);
-//     stack.push(&functions[func_idx]);
-//     nextop();
-// }
+HANDLER(ref_func) {
+    PRELUDE;
+    auto funcref = &MISC_GET(Funcref, tmp1);
+    *stack++ = funcref;
+    POSTLUDE;
+}
 // bitwise comparison applies to both
 HANDLER(ref_eq) { BINARY_OP(externref, ==); }
 HANDLER(i32_trunc_sat_f32_s) { TRUNC_SAT(f32, i32); }
@@ -447,20 +441,21 @@ HANDLER(i64_trunc_sat_f32_s) { TRUNC_SAT(f32, i64); }
 HANDLER(i64_trunc_sat_f32_u) { TRUNC_SAT(f32, u64); }
 HANDLER(i64_trunc_sat_f64_s) { TRUNC_SAT(f64, i64); }
 HANDLER(i64_trunc_sat_f64_u) { TRUNC_SAT(f64, u64); }
-// HANDLER(memory_init) {
-//     PRELUDE;
-//     uint32_t seg_idx = read_leb128(iter);
-//     uint32_t size = (--stack)->u32;
-//     uint32_t src = (--stack)->u32;
-//     uint32_t dest = (--stack)->u32;
-//     reinterpret_cast<WasmMemory*>(memory - sizeof(WasmMemory))->copy_into(dest, src, data_segments[seg_idx], size);
-//     POSTLUDE;
-// }
-// HANDLER(data_drop) {
-//     uint32_t seg_idx = read_leb128(iter);
-//     instance.data_segments[seg_idx].data = {};
-//     nextop();
-// }
+HANDLER(memory_init) {
+    PRELUDE;
+    auto &segment = MISC_GET(Segment, tmp1);
+    auto size = (--stack)->u32;
+    auto src = (--stack)->u32;
+    auto dest = (--stack)->u32;
+    memory->copy_into(dest, src, segment, size);
+    POSTLUDE;
+}
+HANDLER(data_drop) {
+    PRELUDE;
+    auto &segment = MISC_GET(Segment, tmp1);
+    segment.data = {};
+    POSTLUDE;
+}
 HANDLER(memory_copy) {
     PRELUDE;
     auto size = (--stack)->u32;
@@ -477,54 +472,55 @@ HANDLER(memory_fill) {
     memory->memset(ptr, value, size);
     POSTLUDE;
 }
-// HANDLER(table_init) {
-//     auto seg_idx = tmp1;
-//     auto table_idx = tmp2;
-//     auto size = (--stack)->u32;
-//     auto src = (--stack)->u32;
-//     auto dest = (--stack)->u32;
+HANDLER(table_init) {
+    PRELUDE;
+    auto& element = MISC_GET(ElementSegment, tmp1);
+    auto& table = MISC_GET(WasmTable, tmp2);
 
-//     auto& table = tables[table_idx];
-//     auto& element = elements[seg_idx];
-//     table->copy_into(dest, src, element, size);
-//     nextop();
-// }
-// HANDLER(elem_drop) {
-//     uint32_t seg_idx = read_leb128(iter);
-//     instance.elements[seg_idx].elements.clear();
-//     nextop();
-// }
+    auto size = (--stack)->u32;
+    auto src = (--stack)->u32;
+    auto dest = (--stack)->u32;
+
+    table.copy_into(dest, src, element, size);
+    POSTLUDE;
+}
+HANDLER(elem_drop) {
+    PRELUDE;
+    auto& element = MISC_GET(ElementSegment, tmp1);
+    element.elements.clear();
+    POSTLUDE;
+}
 HANDLER(table_copy) {
     PRELUDE;
-    auto dst_table = reinterpret_cast<WasmTable*>(globals_and_tables + tmp1);
-    auto src_table = reinterpret_cast<WasmTable*>(globals_and_tables + tmp2);
+    auto &dst_table = MISC_GET(WasmTable, tmp1);
+    auto &src_table = MISC_GET(WasmTable, tmp2);
     auto size = (--stack)->u32;
     auto src = (--stack)->u32;
     auto dst = (--stack)->u32;
-    src_table->memcpy(*dst_table, dst, src, size);
+    src_table.memcpy(dst_table, dst, src, size);
     POSTLUDE;
 }
 HANDLER(table_grow) {
     PRELUDE;
-    auto table = reinterpret_cast<WasmTable*>(globals_and_tables + tmp1);
+    auto &table = MISC_GET(WasmTable, tmp1);
     auto delta = (--stack)->u32;
     auto init = *--stack;
-    *stack++ = WasmTable::grow(table, delta, init);
+    *stack++ = table.grow(delta, init);
     POSTLUDE;
 }
 HANDLER(table_size) {
     PRELUDE;
-    auto table = reinterpret_cast<WasmTable*>(globals_and_tables + tmp1);
-    *stack++ = table->size();
+    auto &table = MISC_GET(WasmTable, tmp1);
+    *stack++ = table.size();
     POSTLUDE;
 }
 HANDLER(table_fill) {
     PRELUDE;
-    auto table = reinterpret_cast<WasmTable*>(globals_and_tables + tmp1);
+    auto &table = MISC_GET(WasmTable, tmp1);
     auto size = (--stack)->u32;
     auto value = (--stack);
     auto ptr = (--stack)->u32;
-    table->memset(ptr, value, size);
+    table.memset(ptr, value, size);
     POSTLUDE;
 }
 // clang-format on
