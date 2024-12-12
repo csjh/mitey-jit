@@ -6,14 +6,24 @@
 #include <vector>
 
 class JITCompiler {
-    // wasm function prelude
-    virtual std::vector<uint8_t> get_prelude() = 0;
-    // wasm function postlude
-    virtual std::vector<uint8_t> get_postlude() = 0;
+    // wasm function prelude/postlude
+    virtual constexpr std::vector<uint8_t> get_prelude() = 0;
+    virtual constexpr std::vector<uint8_t> get_postlude() = 0;
 
-    // (non-wasm?) function call
-    virtual std::vector<uint8_t> call(uint64_t addr) = 0;
-    virtual std::vector<uint8_t> set_temp1(uint64_t value) = 0;
+    // (non-wasm?) function call (ideally wasm calls would just be relative jmp)
+    virtual constexpr std::vector<uint8_t> call(uint64_t addr) = 0;
+
+    // temp registers, used for passing compile-time constants (i.e. lookup
+    // table address)
+    virtual constexpr std::vector<uint8_t> set_temp1(uint64_t value) = 0;
+    virtual constexpr std::vector<uint8_t> set_temp2(uint64_t value) = 0;
+
+    // used for calculating memory offsets and such
+    virtual constexpr size_t prelude_size() = 0;
+    virtual constexpr size_t postlude_size() = 0;
+    virtual constexpr size_t call_size() = 0;
+    virtual constexpr size_t temp1_size() = 0;
+    virtual constexpr size_t temp2_size() = 0;
 
   public:
     std::vector<uint8_t> generateSqrtCode() {
@@ -40,6 +50,7 @@ class ARM64JITCompiler : JITCompiler {
     }
 
     std::vector<uint32_t> mov64(uint64_t value, uint8_t reg) {
+        // todo: test pc-relative ldr instead (smaller, maybe more perf?)
         return {mov16((value >> 0) & 0xffff, 0, reg),
                 mov16((value >> 16) & 0xffff, 1, reg),
                 mov16((value >> 32) & 0xffff, 2, reg),
@@ -50,6 +61,7 @@ class ARM64JITCompiler : JITCompiler {
         return (0b111100101 << 23) | (shift << 21) | (imm << 5) | reg;
     }
 
+    size_t prelude_size() override { return get_prelude().size(); }
     std::vector<uint8_t> get_prelude() override {
         auto arm = std::vector<uint32_t>{
             0xa9bf7bfd, // stp     x29, x30, [sp, #-0x10]!
@@ -59,6 +71,7 @@ class ARM64JITCompiler : JITCompiler {
         return u32_to_u8(arm);
     }
 
+    size_t postlude_size() override { return get_postlude().size(); }
     std::vector<uint8_t> get_postlude() override {
         auto arm = std::vector<uint32_t>{
             0xa8c17bfd, // ldp     x29, x30, [sp], #0x10
@@ -68,16 +81,25 @@ class ARM64JITCompiler : JITCompiler {
         return u32_to_u8(arm);
     }
 
-    std::vector<uint8_t> set_temp1(uint64_t value) override {
+    size_t call_size() override { return call(0).size(); }
+    std::vector<uint8_t> call(uint64_t addr) override {
         constexpr uint8_t x6 = 6;
-        auto instructions = mov64(value, x6);
+        auto instructions = mov64(addr, x6);
+        instructions.push_back((0b1101011000111111000000u << 10) | (x6 << 5));
         return u32_to_u8(instructions);
     }
 
-    std::vector<uint8_t> call(uint64_t addr) override {
+    size_t temp1_size() override { return set_temp1(0).size(); }
+    std::vector<uint8_t> set_temp1(uint64_t value) override {
         constexpr uint8_t x7 = 7;
-        auto instructions = mov64(addr, x7);
-        instructions.push_back((0b1101011000111111000000u << 10) | (x7 << 5));
+        auto instructions = mov64(value, x7);
+        return u32_to_u8(instructions);
+    }
+
+    size_t temp2_size() override { return set_temp2(0).size(); }
+    std::vector<uint8_t> set_temp2(uint64_t value) override {
+        constexpr uint8_t x8 = 8;
+        auto instructions = mov64(value, x8);
         return u32_to_u8(instructions);
     }
 
