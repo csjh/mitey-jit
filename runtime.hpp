@@ -133,23 +133,22 @@ struct WasmMemory {
     uint32_t max() { return maximum; }
     uint32_t grow(uint32_t delta);
 
-    template <typename StackT, typename MemT>
-    WasmValue load(uint32_t addr, uint64_t offset) {
-        if (addr + offset + sizeof(MemT) > current * PAGE_SIZE) {
+    template <typename StackT, typename MemT> WasmValue load(uint32_t addr) {
+        if (addr + sizeof(MemT) > current * PAGE_SIZE) {
             trap("out of bounds memory access");
         }
         MemT val;
-        std::memcpy(&val, memory + addr + offset, sizeof(val));
+        std::memcpy(&val, memory + addr, sizeof(val));
         return WasmValue(StackT(val));
     }
 
     template <typename StackT, typename MemT>
-    void store(uint32_t addr, uint64_t offset, StackT value) {
-        if (addr + offset + sizeof(MemT) > current * PAGE_SIZE) {
+    void store(uint32_t addr, StackT value) {
+        if (addr + sizeof(MemT) > current * PAGE_SIZE) {
             trap("out of bounds memory access");
         }
         MemT val = value;
-        std::memcpy(memory + addr + offset, &val, sizeof(val));
+        std::memcpy(memory + addr, &val, sizeof(val));
     }
 
     void copy_into(uint32_t dest, uint32_t src, const Segment &segment,

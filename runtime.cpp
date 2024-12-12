@@ -255,7 +255,7 @@ using f64 = double;
 #define LOAD(stacktype, memtype)                                               \
     {                                                                          \
         PRELUDE;                                                               \
-        stack[-1] = memory->load<stacktype, memtype>(stack[-1].u32, tmp1);     \
+        stack[-1] = memory->load<stacktype, memtype>(stack[-1].u32 + tmp1);    \
         POSTLUDE;                                                              \
     }
 
@@ -263,7 +263,7 @@ using f64 = double;
     {                                                                          \
         PRELUDE;                                                               \
         stack -= 2;                                                            \
-        memory->store<stacktype, memtype>(stack[0].u32, tmp1, stack[1]);       \
+        memory->store<stacktype, memtype>(stack[0].u32 + tmp1, stack[1]);      \
         POSTLUDE;                                                              \
     }
 
