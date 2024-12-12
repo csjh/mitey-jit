@@ -6,8 +6,8 @@
 namespace mitey {
 
 #define HANDLER(name)                                                          \
-    static void name(WasmMemory *memory, WasmValue *stack, void **misc,        \
-                     uint64_t tmp1, uint64_t tmp2)
+    void name(WasmMemory *memory, WasmValue *stack, void **misc,               \
+              uint64_t tmp1, uint64_t tmp2)
 #define PARAMS memory, stack, misc, tmp1, tmp2
 #define PRELUDE                                                                \
     start: {}

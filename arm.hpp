@@ -5,10 +5,8 @@
 #include <unistd.h>
 #include <vector>
 
-class ARM64JITCompiler : JITCompiler {
+class ARM64JITCompiler : public JITCompiler {
   private:
-    const size_t PAGE_SIZE = getpagesize();
-
     std::vector<uint8_t> u32_to_u8(std::vector<uint32_t> u32) {
         return std::vector<uint8_t>((uint8_t *)u32.data(),
                                     (uint8_t *)(u32.data() + u32.size()));
@@ -56,46 +54,15 @@ class ARM64JITCompiler : JITCompiler {
 
     size_t temp1_size() override { return set_temp1(0).size(); }
     std::vector<uint8_t> set_temp1(uint64_t value) override {
-        constexpr uint8_t x7 = 7;
-        auto instructions = mov64(value, x7);
+        constexpr uint8_t x3 = 3;
+        auto instructions = mov64(value, x3);
         return u32_to_u8(instructions);
     }
 
     size_t temp2_size() override { return set_temp2(0).size(); }
     std::vector<uint8_t> set_temp2(uint64_t value) override {
-        constexpr uint8_t x8 = 8;
-        auto instructions = mov64(value, x8);
+        constexpr uint8_t x4 = 4;
+        auto instructions = mov64(value, x4);
         return u32_to_u8(instructions);
-    }
-
-  public:
-    float compiledSqrt(float input) {
-        void *execMemory =
-            mmap(nullptr, PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
-                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
-
-        if (execMemory == MAP_FAILED) {
-            throw std::runtime_error("Memory allocation failed");
-        }
-
-        pthread_jit_write_protect_np(false);
-
-        std::vector<uint8_t> code = generateSqrtCode();
-
-        memcpy(execMemory, code.data(), code.size());
-
-        pthread_jit_write_protect_np(true);
-
-        // flush instruction cache to ensure code is executable
-        sys_icache_invalidate(execMemory, code.size());
-
-        using SqrtFunc = float (*)(float);
-
-        SqrtFunc jittedSqrt = reinterpret_cast<SqrtFunc>(execMemory);
-        float result = jittedSqrt(input);
-
-        munmap(execMemory, PAGE_SIZE);
-
-        return result;
     }
 };

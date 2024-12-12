@@ -1,7 +1,7 @@
 #include <cstdint>
 #include <vector>
 
-class JITCompiler {
+struct JITCompiler {
     // wasm function prelude/postlude
     virtual constexpr std::vector<uint8_t> get_prelude() = 0;
     virtual constexpr std::vector<uint8_t> get_postlude() = 0;
@@ -21,17 +21,5 @@ class JITCompiler {
     virtual constexpr size_t temp1_size() = 0;
     virtual constexpr size_t temp2_size() = 0;
 
-  public:
-    std::vector<uint8_t> generateSqrtCode() {
-        uint64_t sqrtf_addr = (uint64_t)&sqrtf;
-
-        std::vector<uint8_t> code;
-        auto prelude = get_prelude(), postlude = get_postlude(),
-             call_sqrtf = call(sqrtf_addr);
-        code.insert(code.end(), prelude.begin(), prelude.end());
-        code.insert(code.end(), call_sqrtf.begin(), call_sqrtf.end());
-        code.insert(code.end(), postlude.begin(), postlude.end());
-
-        return code;
-    }
+    virtual ~JITCompiler() = default;
 };

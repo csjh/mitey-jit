@@ -158,4 +158,8 @@ struct WasmMemory {
     void memset(uint32_t dst, uint8_t value, uint32_t length);
 };
 
+Signature ifXXconst;
+Signature i32mul;
+Signature i32add;
+
 }; // namespace mitey
