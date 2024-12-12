@@ -1,7 +1,6 @@
 #include <cstdint>
-#include <span>
+#include <memory>
 #include <stdexcept>
-#include <vector>
 
 namespace mitey {
 [[noreturn]] static inline void trap(const char *msg) {
@@ -28,7 +27,7 @@ enum class valtype : uint8_t {
 union WasmValue;
 struct WasmMemory;
 
-using Signature = void(WasmMemory *memory, WasmValue *stack, WasmValue *locals,
+using Signature = void(WasmMemory *memory, WasmValue *stack,
                        void **globals_and_tables, uint64_t tmp1, uint64_t tmp2);
 
 using Funcref = Signature *;
@@ -67,7 +66,8 @@ union WasmValue {
 
 struct ElementSegment {
     valtype type;
-    std::vector<WasmValue> elements;
+    uint32_t size;
+    std::unique_ptr<WasmValue[]> elements;
 };
 
 struct WasmTable {
@@ -102,7 +102,8 @@ struct WasmTable {
 
 struct Segment {
     uint32_t memidx;
-    std::span<uint8_t> data;
+    uint32_t size;
+    std::unique_ptr<uint8_t[]> data;
     uint8_t *initializer;
 };
 

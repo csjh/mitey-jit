@@ -1,15 +1,16 @@
 #include "runtime.hpp"
+#include <algorithm>
+#include <bit>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <span>
-#include <vector>
 
 namespace mitey {
 
 #define HANDLER(name)                                                          \
-    static void name(WasmMemory *memory, WasmValue *stack, WasmValue *locals,  \
-                     void **misc, uint64_t tmp1, uint64_t tmp2)
-#define PARAMS memory, stack, locals, misc, tmp1, tmp2
+    static void name(WasmMemory *memory, WasmValue *stack, void **misc,        \
+                     uint64_t tmp1, uint64_t tmp2)
+#define PARAMS memory, stack, misc, tmp1, tmp2
 #define PRELUDE                                                                \
     start: {}
 #define POSTLUDE                                                               \
@@ -87,17 +88,17 @@ HANDLER(select) {
 }
 HANDLER(localget) {
     PRELUDE;
-    *stack++ = locals[tmp1];
+    *stack++ = stack[tmp1];
     POSTLUDE;
 }
 HANDLER(localset) {
     PRELUDE;
-    locals[tmp1] = *--stack;
+    stack[tmp1] = *--stack;
     POSTLUDE;
 }
 HANDLER(localtee) {
     PRELUDE;
-    locals[tmp1] = stack[-1];
+    stack[tmp1] = stack[-1];
     POSTLUDE;
 }
 HANDLER(tableget) {
@@ -487,7 +488,8 @@ HANDLER(table_init) {
 HANDLER(elem_drop) {
     PRELUDE;
     auto& element = MISC_GET(ElementSegment, tmp1);
-    element.elements.clear();
+    element.size = 0;
+    element.elements = nullptr;
     POSTLUDE;
 }
 HANDLER(table_copy) {
@@ -562,10 +564,10 @@ uint32_t WasmMemory::grow(uint32_t delta) {
 void WasmMemory::copy_into(uint32_t dest, uint32_t src, const Segment &segment,
                            uint32_t length) {
     if (static_cast<uint64_t>(dest) + length > current * PAGE_SIZE ||
-        src + length > segment.data.size()) {
+        src + length > segment.size) {
         trap("out of bounds memory access");
     }
-    std::memcpy(memory + dest, segment.data.data() + src, length);
+    std::memcpy(memory + dest, segment.data.get() + src, length);
 }
 
 void WasmMemory::memcpy(uint32_t dst, uint32_t src, uint32_t length) {
@@ -621,10 +623,10 @@ void WasmTable::set(uint32_t idx, WasmValue value) {
 void WasmTable::copy_into(uint32_t dst, uint32_t src,
                           const ElementSegment &segment, uint32_t length) {
     if (static_cast<uint64_t>(dst) + length > current ||
-        src + length > segment.elements.size()) {
+        src + length > segment.size) {
         trap("out of bounds table access");
     }
-    std::memcpy(elements + dst, segment.elements.data() + src,
+    std::memcpy(elements + dst, segment.elements.get() + src,
                 length * sizeof(WasmValue));
 }
 
