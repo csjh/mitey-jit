@@ -2,8 +2,6 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
-#include <cstdint>
-#include <cstring>
 
 namespace mitey {
 
@@ -88,12 +86,14 @@ HANDLER(select) {
 }
 HANDLER(localget) {
     PRELUDE;
-    *stack++ = stack[tmp1];
+    auto &local = stack[tmp1];
+    *stack++ = local;
     POSTLUDE;
 }
 HANDLER(localset) {
     PRELUDE;
-    stack[tmp1] = *--stack;
+    auto &local = stack[tmp1];
+    local = *--stack;
     POSTLUDE;
 }
 HANDLER(localtee) {
@@ -242,9 +242,11 @@ using f64 = double;
 #define TRUNC_SAT(from, to)                                                    \
     {                                                                          \
         PRELUDE;                                                               \
-        if (stack[-1].from < std::numeric_limits<to>::min()) {                 \
+        if (stack[-1].from <                                                   \
+            static_cast<from>(std::numeric_limits<to>::min())) {               \
             stack[-1].to = std::numeric_limits<to>::min();                     \
-        } else if (stack[-1].from > std::numeric_limits<to>::max()) {          \
+        } else if (stack[-1].from >                                            \
+                   static_cast<from>(std::numeric_limits<to>::max())) {        \
             stack[-1].to = std::numeric_limits<to>::max();                     \
         } else {                                                               \
             stack[-1].to = static_cast<to>(stack[-1].from);                    \
