@@ -1,24 +1,11 @@
-#include "arm.hpp"
+#include "backend/arm64.hpp"
+#include "pager/mac.hpp"
 #include "runtime.hpp"
 #include <iostream>
 
 int main() {
-    std::unique_ptr<JITCompiler> jit = std::make_unique<ARM64JITCompiler>();
-
-    auto PAGE_SIZE = getpagesize();
-
-    void *execMemory =
-        mmap(nullptr, PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
-             MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
-
-    if (execMemory == MAP_FAILED) {
-        throw std::runtime_error("Memory allocation failed");
-    }
-    if (execMemory == nullptr) {
-        throw std::runtime_error("Memory allocation failed (nullptr)");
-    }
-
-    pthread_jit_write_protect_np(false);
+    std::unique_ptr<Target> jit = std::make_unique<Arm64>();
+    std::unique_ptr<Executable> pager = std::make_unique<MacExecutable>();
 
     std::vector<uint8_t> code;
     auto prelude = jit->get_prelude(), postlude = jit->get_postlude(),
@@ -40,18 +27,13 @@ int main() {
     code.insert(code.end(), add.begin(), add.end());
     code.insert(code.end(), postlude.begin(), postlude.end());
 
-    memcpy(execMemory, code.data(), code.size());
+    auto mem = pager->allocate(code.size());
 
-    pthread_jit_write_protect_np(true);
+    pager->write(mem, [&] { memcpy(mem.ptr, code.data(), code.size()); });
 
-    // flush instruction cache to ensure code is executable
-    sys_icache_invalidate(execMemory, code.size());
+    mitey::Signature *addMulMul = reinterpret_cast<mitey::Signature *>(mem.ptr);
 
-    mitey::Signature *addMulMul =
-        reinterpret_cast<mitey::Signature *>(execMemory);
-
-    uint32_t i1 = 42;
-    uint32_t i2 = 59;
+    uint32_t i1 = 42, i2 = 59;
     std::cout << "Input: " << i1 << " " << i2 << std::endl;
 
     mitey::WasmValue stack[16] = {i1, i2};
@@ -64,7 +46,7 @@ int main() {
     std::cout << "C result: " << std_result << std::endl;
     std::cout << "Results match: " << (jit_result == std_result) << std::endl;
 
-    munmap(execMemory, PAGE_SIZE);
+    pager->deallocate(mem);
 
     return 0;
 }

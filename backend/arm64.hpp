@@ -1,29 +1,12 @@
-#include "jit.hpp"
+#include "target.hpp"
 #include <cstring>
 #include <libkern/OSCacheControl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <vector>
 
-class ARM64JITCompiler : public JITCompiler {
-  private:
-    std::vector<uint8_t> u32_to_u8(std::vector<uint32_t> u32) {
-        return std::vector<uint8_t>((uint8_t *)u32.data(),
-                                    (uint8_t *)(u32.data() + u32.size()));
-    }
-
-    std::vector<uint32_t> mov64(uint64_t value, uint8_t reg) {
-        // todo: test pc-relative ldr instead (smaller, maybe more perf?)
-        return {mov16((value >> 0) & 0xffff, 0, reg),
-                mov16((value >> 16) & 0xffff, 1, reg),
-                mov16((value >> 32) & 0xffff, 2, reg),
-                mov16((value >> 48) & 0xffff, 3, reg)};
-    }
-
-    uint32_t mov16(uint16_t imm, uint8_t shift, uint8_t reg) {
-        return (0b111100101 << 23) | (shift << 21) | (imm << 5) | reg;
-    }
-
+class Arm64 : public Target {
+  public:
     size_t prelude_size() override { return get_prelude().size(); }
     std::vector<uint8_t> get_prelude() override {
         auto arm = std::vector<uint32_t>{
@@ -64,5 +47,23 @@ class ARM64JITCompiler : public JITCompiler {
         constexpr uint8_t x4 = 4;
         auto instructions = mov64(value, x4);
         return u32_to_u8(instructions);
+    }
+
+  private:
+    std::vector<uint8_t> u32_to_u8(std::vector<uint32_t> u32) {
+        return std::vector<uint8_t>((uint8_t *)u32.data(),
+                                    (uint8_t *)(u32.data() + u32.size()));
+    }
+
+    std::vector<uint32_t> mov64(uint64_t value, uint8_t reg) {
+        // todo: test pc-relative ldr instead (smaller, maybe more perf?)
+        return {mov16((value >> 0) & 0xffff, 0, reg),
+                mov16((value >> 16) & 0xffff, 1, reg),
+                mov16((value >> 32) & 0xffff, 2, reg),
+                mov16((value >> 48) & 0xffff, 3, reg)};
+    }
+
+    uint32_t mov16(uint16_t imm, uint8_t shift, uint8_t reg) {
+        return (0b111100101 << 23) | (shift << 21) | (imm << 5) | reg;
     }
 };

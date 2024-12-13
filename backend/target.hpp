@@ -1,7 +1,7 @@
 #include <cstdint>
 #include <vector>
 
-struct JITCompiler {
+struct Target {
     // wasm function prelude/postlude
     virtual constexpr std::vector<uint8_t> get_prelude() = 0;
     virtual constexpr std::vector<uint8_t> get_postlude() = 0;
@@ -21,5 +21,5 @@ struct JITCompiler {
     virtual constexpr size_t temp1_size() = 0;
     virtual constexpr size_t temp2_size() = 0;
 
-    virtual ~JITCompiler() = default;
+    virtual ~Target() = default;
 };
