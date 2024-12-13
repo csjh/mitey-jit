@@ -4,15 +4,15 @@
 #include <iostream>
 
 int main() {
-    std::unique_ptr<Target> jit = std::make_unique<Arm64>();
-    std::unique_ptr<Executable> pager = std::make_unique<MacExecutable>();
+    std::unique_ptr<Target> backend = std::make_unique<Arm64>();
+    std::unique_ptr<Executable> exec = std::make_unique<MacExecutable>();
 
     std::vector<uint8_t> code;
-    auto prelude = jit->get_prelude(), postlude = jit->get_postlude(),
-         shove = jit->set_temp1(111),
-         push = jit->call((uint64_t)&mitey::ifXXconst),
-         mul = jit->call((uint64_t)&mitey::i32mul),
-         add = jit->call((uint64_t)&mitey::i32add);
+    auto prelude = backend->get_prelude(), postlude = backend->get_postlude(),
+         shove = backend->set_temp1(111),
+         push = backend->call((uint64_t)&mitey::ifXXconst),
+         mul = backend->call((uint64_t)&mitey::i32mul),
+         add = backend->call((uint64_t)&mitey::i32add);
 
     code.insert(code.end(), prelude.begin(), prelude.end());
     code.insert(code.end(), add.begin(), add.end());
@@ -27,9 +27,9 @@ int main() {
     code.insert(code.end(), add.begin(), add.end());
     code.insert(code.end(), postlude.begin(), postlude.end());
 
-    auto mem = pager->allocate(code.size());
+    auto mem = exec->allocate(code.size());
 
-    pager->write(mem, [&] { memcpy(mem.ptr, code.data(), code.size()); });
+    exec->write(mem, [&] { memcpy(mem.ptr, code.data(), code.size()); });
 
     mitey::Signature *addMulMul = reinterpret_cast<mitey::Signature *>(mem.ptr);
 
@@ -46,7 +46,7 @@ int main() {
     std::cout << "C result: " << std_result << std::endl;
     std::cout << "Results match: " << (jit_result == std_result) << std::endl;
 
-    pager->deallocate(mem);
+    exec->deallocate(mem);
 
     return 0;
 }
