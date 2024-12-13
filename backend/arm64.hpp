@@ -30,6 +30,7 @@ class Arm64 : public Target {
     size_t call_size() override { return call(0).size(); }
     std::vector<uint8_t> call(uint64_t addr) override {
         constexpr uint8_t x6 = 6;
+        // todo: test pc-relative ldr instead (smaller, maybe more perf?)
         auto instructions = mov64(addr, x6);
         instructions.push_back((0b1101011000111111000000u << 10) | (x6 << 5));
         return u32_to_u8(instructions);
@@ -56,7 +57,6 @@ class Arm64 : public Target {
     }
 
     std::vector<uint32_t> mov64(uint64_t value, uint8_t reg) {
-        // todo: test pc-relative ldr instead (smaller, maybe more perf?)
         return {mov16((value >> 0) & 0xffff, 0, reg),
                 mov16((value >> 16) & 0xffff, 1, reg),
                 mov16((value >> 32) & 0xffff, 2, reg),
