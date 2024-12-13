@@ -1,3 +1,5 @@
+#pragma once
+
 #include "target.hpp"
 #include <cstring>
 #include <libkern/OSCacheControl.h>
@@ -5,6 +7,7 @@
 #include <unistd.h>
 #include <vector>
 
+namespace mitey {
 class Arm64 : public Target {
   public:
     size_t prelude_size() override { return get_prelude().size(); }
@@ -28,10 +31,10 @@ class Arm64 : public Target {
     }
 
     size_t call_size() override { return call(0).size(); }
-    std::vector<uint8_t> call(uint64_t addr) override {
+    std::vector<uint8_t> call(Signature *addr) override {
         constexpr uint8_t x6 = 6;
         // todo: test pc-relative ldr instead (smaller, maybe more perf?)
-        auto instructions = mov64(addr, x6);
+        auto instructions = mov64(reinterpret_cast<uint64_t>(addr), x6);
         instructions.push_back((0b1101011000111111000000u << 10) | (x6 << 5));
         return u32_to_u8(instructions);
     }
@@ -67,3 +70,4 @@ class Arm64 : public Target {
         return (0b111100101 << 23) | (shift << 21) | (imm << 5) | reg;
     }
 };
+} // namespace mitey

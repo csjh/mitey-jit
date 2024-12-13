@@ -1,8 +1,11 @@
+#pragma once
+
 #include "executable.hpp"
 #include <libkern/OSCacheControl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
+namespace mitey {
 class MacExecutable : public Executable {
   public:
     Allocation allocate(size_t size) override {
@@ -29,3 +32,4 @@ class MacExecutable : public Executable {
         sys_icache_invalidate(alloc.ptr, alloc.size);
     }
 };
+} // namespace mitey

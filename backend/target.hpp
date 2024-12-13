@@ -1,13 +1,17 @@
+#pragma once
+
+#include "../runtime.hpp"
 #include <cstdint>
 #include <vector>
 
+namespace mitey {
 struct Target {
     // wasm function prelude/postlude
     virtual constexpr std::vector<uint8_t> get_prelude() = 0;
     virtual constexpr std::vector<uint8_t> get_postlude() = 0;
 
     // (non-wasm?) function call (ideally wasm calls would just be relative jmp)
-    virtual constexpr std::vector<uint8_t> call(uint64_t addr) = 0;
+    virtual constexpr std::vector<uint8_t> call(mitey::Signature *) = 0;
 
     // temp registers, used for passing compile-time constants (i.e. lookup
     // table address)
@@ -23,3 +27,4 @@ struct Target {
 
     virtual ~Target() = default;
 };
+} // namespace mitey

@@ -3,6 +3,8 @@
 #include "runtime.hpp"
 #include <iostream>
 
+using namespace mitey;
+
 int main() {
     std::unique_ptr<Target> backend = std::make_unique<Arm64>();
     std::unique_ptr<Executable> exec = std::make_unique<MacExecutable>();
@@ -10,9 +12,8 @@ int main() {
     std::vector<uint8_t> code;
     auto prelude = backend->get_prelude(), postlude = backend->get_postlude(),
          shove = backend->set_temp1(111),
-         push = backend->call((uint64_t)&mitey::ifXXconst),
-         mul = backend->call((uint64_t)&mitey::i32mul),
-         add = backend->call((uint64_t)&mitey::i32add);
+         push = backend->call(ifXXconst),
+         mul = backend->call(i32mul), add = backend->call(i32add);
 
     code.insert(code.end(), prelude.begin(), prelude.end());
     code.insert(code.end(), add.begin(), add.end());
@@ -31,12 +32,12 @@ int main() {
 
     exec->write(mem, [&] { memcpy(mem.ptr, code.data(), code.size()); });
 
-    mitey::Signature *addMulMul = reinterpret_cast<mitey::Signature *>(mem.ptr);
+    Signature *addMulMul = reinterpret_cast<Signature *>(mem.ptr);
 
     uint32_t i1 = 42, i2 = 59;
     std::cout << "Input: " << i1 << " " << i2 << std::endl;
 
-    mitey::WasmValue stack[16] = {i1, i2};
+    WasmValue stack[16] = {i1, i2};
     addMulMul(nullptr, stack + 2, nullptr, 0, 0);
     auto jit_result = stack[0].u32;
     std::cout << "addMulMul result: " << jit_result << std::endl;

@@ -1,6 +1,9 @@
+#pragma once
+
 #include <cstddef>
 #include <functional>
 
+namespace mitey {
 struct Allocation {
     void *ptr;
     size_t size;
@@ -15,3 +18,4 @@ struct Executable {
 
     virtual ~Executable() = default;
 };
+} // namespace mitey
