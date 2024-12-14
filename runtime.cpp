@@ -10,17 +10,17 @@ namespace mitey {
               uint64_t tmp1, uint64_t tmp2)
 #define PARAMS memory, stack, misc, tmp1, tmp2
 #define PRELUDE                                                                \
-    start: {}
-#define POSTLUDE                                                               \
-    end:                                                                       \
-    asm goto("" :: ::start, end);                                              \
-    return
+    do {                                                                       \
+    } while (0)
+#define POSTLUDE return dummy(memory, stack, misc)
 #define MISC_GET(type, name) *reinterpret_cast<type *>(misc[name])
 
-HANDLER(unreachable) { trap("unreachable"); }
+__attribute__((noinline)) void dummy(WasmMemory *memory, WasmValue *stack,
+                                     void **misc) {
+    return;
+}
 
-HANDLER(nop) {}
-HANDLER(loop) {}
+HANDLER(unreachable) { trap("unreachable"); }
 HANDLER(if_) {
     PRELUDE;
     --stack;
@@ -29,10 +29,10 @@ HANDLER(if_) {
     }
     POSTLUDE;
 }
-HANDLER(else_) {}
-HANDLER(end) {}
 HANDLER(br) {
+    PRELUDE;
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
+    POSTLUDE;
 }
 HANDLER(br_if) {
     PRELUDE;
@@ -43,14 +43,17 @@ HANDLER(br_if) {
     POSTLUDE;
 }
 HANDLER(br_table) {
+    PRELUDE;
     auto lookup = reinterpret_cast<Signature **>(tmp1);
     --stack;
     auto jump = std::max(static_cast<uint32_t>(tmp2), stack->u32);
     [[clang::musttail]] return lookup[jump](PARAMS);
+    POSTLUDE;
 }
-HANDLER(return_) { return; }
 HANDLER(call) {
+    PRELUDE;
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
+    POSTLUDE;
 }
 // HANDLER(call_indirect) {
 //     auto type = tmp1;
