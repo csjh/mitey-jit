@@ -17,11 +17,13 @@ namespace mitey {
 
 __attribute__((noinline)) void dummy(WasmMemory *memory, WasmValue *stack,
                                      void **misc) {
+    asm volatile("" ::"r"(memory), "r"(stack), "r"(misc));
     return;
 }
 
 HANDLER(unreachable) { trap("unreachable"); }
 HANDLER(if_) {
+    // tmp1 = else branch
     PRELUDE;
     --stack;
     if (!stack->u32) {
@@ -30,28 +32,58 @@ HANDLER(if_) {
     POSTLUDE;
 }
 HANDLER(br) {
+    // tmp1 = target
+    // tmp2 = brinfo
     PRELUDE;
+    auto info = reinterpret_cast<BrInfo &>(tmp2);
+    auto new_stack = stack - info.stack_offset;
+    std::memmove(new_stack - info.arity, stack - info.arity,
+                 info.arity * sizeof(WasmValue));
+    stack = new_stack;
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
     POSTLUDE;
 }
+// todo:
+// HANDLER(br_0);
+// HANDLER(br_4);
+// HANDLER(br_8);
+// and if/table equivalents
+
 HANDLER(br_if) {
+    // tmp1 = target
+    // tmp2 = brinfo
     PRELUDE;
     --stack;
     if (stack->u32) {
-        [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
+        [[clang::musttail]] return br(PARAMS);
     }
     POSTLUDE;
 }
 HANDLER(br_table) {
+    // tmp1 = lookup table addr
+    // tmp2 = brinfo
     PRELUDE;
-    auto lookup = reinterpret_cast<Signature **>(tmp1);
+    auto lookup = reinterpret_cast<BrTableTarget *>(tmp1);
+    auto info = reinterpret_cast<BrInfo &>(tmp2);
     --stack;
-    auto jump = std::max(static_cast<uint32_t>(tmp2), stack->u32);
-    [[clang::musttail]] return lookup[jump](PARAMS);
+    auto jump = std::max(static_cast<uint32_t>(info.n_targets), stack->u32);
+    auto target = lookup[jump];
+    info.stack_offset = target.stack_offset;
+    tmp1 /* dest */ = reinterpret_cast<uint64_t>(lookup + target.lookup_offset);
+    tmp2 = reinterpret_cast<uint64_t &>(info);
+    [[clang::musttail]] return br(PARAMS);
     POSTLUDE;
 }
 HANDLER(call) {
+    // tmp1 = function start
+    // tmp2 = number of bytes locals take up
     PRELUDE;
+    if (tmp2 & 0b111)
+        __builtin_unreachable();
+    // todo: either zero non-parameter locals here, or lazily zero them just
+    // before the first loop (or usage) in the function (assuming they aren't
+    // given an initial value first)
+    stack += tmp2 / 8;
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
     POSTLUDE;
 }
@@ -88,23 +120,27 @@ HANDLER(select) {
     POSTLUDE;
 }
 HANDLER(localget) {
+    // tmp1 = local index/stack offset to local
     PRELUDE;
     auto &local = stack[tmp1];
     *stack++ = local;
     POSTLUDE;
 }
 HANDLER(localset) {
+    // tmp1 = local index/stack offset to local
     PRELUDE;
     auto &local = stack[tmp1];
     local = *--stack;
     POSTLUDE;
 }
 HANDLER(localtee) {
+    // tmp1 = local index/stack offset to local
     PRELUDE;
     stack[tmp1] = stack[-1];
     POSTLUDE;
 }
 HANDLER(tableget) {
+    // tmp1 = table index in misc table
     PRELUDE;
     auto &table = MISC_GET(WasmTable, tmp1);
     auto idx = (--stack)->u32;
@@ -112,6 +148,7 @@ HANDLER(tableget) {
     POSTLUDE;
 }
 HANDLER(tableset) {
+    // tmp1 = table index in misc table
     PRELUDE;
     auto &table = MISC_GET(WasmTable, tmp1);
     stack -= 2;
@@ -121,12 +158,14 @@ HANDLER(tableset) {
     POSTLUDE;
 }
 HANDLER(globalget) {
+    // tmp1 = global index in misc table
     PRELUDE;
     auto global = MISC_GET(WasmValue *, tmp1);
     *stack++ = *global;
     POSTLUDE;
 }
 HANDLER(globalset) {
+    // tmp1 = global index in misc table
     PRELUDE;
     auto global = MISC_GET(WasmValue *, tmp1);
     *global = *--stack;
@@ -143,6 +182,7 @@ HANDLER(memorygrow) {
     POSTLUDE;
 }
 HANDLER(ifXXconst) {
+    // tmp1 = 64 bits of literal
     PRELUDE;
     *stack++ = tmp1;
     POSTLUDE;
@@ -259,6 +299,7 @@ using f64 = double;
 
 #define LOAD(stacktype, memtype)                                               \
     {                                                                          \
+        /* tmp1 = offset */                                                    \
         PRELUDE;                                                               \
         stack[-1] = memory->load<stacktype, memtype>(stack[-1].u32 + tmp1);    \
         POSTLUDE;                                                              \
@@ -266,6 +307,7 @@ using f64 = double;
 
 #define STORE(stacktype, memtype)                                              \
     {                                                                          \
+        /* tmp1 = offset */                                                    \
         PRELUDE;                                                               \
         stack -= 2;                                                            \
         memory->store<stacktype, memtype>(stack[0].u32 + tmp1, stack[1]);      \
@@ -432,6 +474,7 @@ HANDLER(ref_is_null) {
     POSTLUDE;
 }
 HANDLER(ref_func) {
+    // tmp1 = funcref index in misc table
     PRELUDE;
     auto funcref = &MISC_GET(Funcref, tmp1);
     *stack++ = funcref;
@@ -448,6 +491,7 @@ HANDLER(i64_trunc_sat_f32_u) { TRUNC_SAT(f32, u64); }
 HANDLER(i64_trunc_sat_f64_s) { TRUNC_SAT(f64, i64); }
 HANDLER(i64_trunc_sat_f64_u) { TRUNC_SAT(f64, u64); }
 HANDLER(memory_init) {
+    // tmp1 = segment index in misc table
     PRELUDE;
     auto &segment = MISC_GET(Segment, tmp1);
     auto size = (--stack)->u32;
@@ -457,6 +501,7 @@ HANDLER(memory_init) {
     POSTLUDE;
 }
 HANDLER(data_drop) {
+    // tmp1 = segment index in misc table
     PRELUDE;
     auto &segment = MISC_GET(Segment, tmp1);
     segment.data = {};
@@ -479,6 +524,8 @@ HANDLER(memory_fill) {
     POSTLUDE;
 }
 HANDLER(table_init) {
+    // tmp1 = element index in misc table
+    // tmp2 = table index in misc table
     PRELUDE;
     auto& element = MISC_GET(ElementSegment, tmp1);
     auto& table = MISC_GET(WasmTable, tmp2);
@@ -491,6 +538,7 @@ HANDLER(table_init) {
     POSTLUDE;
 }
 HANDLER(elem_drop) {
+    // tmp1 = element index in misc table
     PRELUDE;
     auto& element = MISC_GET(ElementSegment, tmp1);
     element.size = 0;
@@ -498,6 +546,8 @@ HANDLER(elem_drop) {
     POSTLUDE;
 }
 HANDLER(table_copy) {
+    // tmp1 = destination table index in misc table
+    // tmp2 = source table index in misc table
     PRELUDE;
     auto &dst_table = MISC_GET(WasmTable, tmp1);
     auto &src_table = MISC_GET(WasmTable, tmp2);
@@ -508,6 +558,7 @@ HANDLER(table_copy) {
     POSTLUDE;
 }
 HANDLER(table_grow) {
+    // tmp1 = table index in misc table
     PRELUDE;
     auto &table = MISC_GET(WasmTable, tmp1);
     auto delta = (--stack)->u32;
@@ -516,12 +567,14 @@ HANDLER(table_grow) {
     POSTLUDE;
 }
 HANDLER(table_size) {
+    // tmp1 = table index in misc table
     PRELUDE;
     auto &table = MISC_GET(WasmTable, tmp1);
     *stack++ = table.size();
     POSTLUDE;
 }
 HANDLER(table_fill) {
+    // tmp1 = table index in misc table
     PRELUDE;
     auto &table = MISC_GET(WasmTable, tmp1);
     auto size = (--stack)->u32;

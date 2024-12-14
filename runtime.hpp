@@ -160,6 +160,19 @@ struct WasmMemory {
     void memset(uint32_t dst, uint8_t value, uint32_t length);
 };
 
+struct BrTableTarget {
+    uint32_t lookup_offset;
+    uint32_t stack_offset;
+};
+static_assert(sizeof(BrTableTarget) == sizeof(uint64_t));
+
+struct BrInfo {
+    uint16_t n_targets; // for br_table
+    uint16_t arity;
+    uint32_t stack_offset; // offset from stack base to copy arity to
+};
+static_assert(sizeof(BrInfo) == sizeof(uint64_t));
+
 Signature ifXXconst;
 Signature i32mul;
 Signature i32add;
