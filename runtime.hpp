@@ -1,32 +1,11 @@
 #pragma once
 
+#include "spec.hpp"
 #include <cstdint>
 #include <cstring>
 #include <memory>
-#include <stdexcept>
 
 namespace mitey {
-[[noreturn]] static inline void trap(const char *msg) {
-    throw std::runtime_error(msg);
-}
-
-enum class valtype : uint8_t {
-    empty = 0x40,
-
-    // numtype
-    i32 = 0x7f,
-    i64 = 0x7e,
-    f32 = 0x7d,
-    f64 = 0x7c,
-
-    // // vectype
-    // v128 = 0x7b,
-
-    // reftype
-    funcref = 0x70,
-    externref = 0x6f,
-};
-
 union WasmValue;
 struct WasmMemory;
 
@@ -174,7 +153,9 @@ struct BrInfo {
 static_assert(sizeof(BrInfo) == sizeof(uint64_t));
 
 Signature ifXXconst;
-Signature i32mul;
-Signature i32add;
+#define HANDLER(name, str, byte) Signature name;
+FOREACH_INSTRUCTION(HANDLER)
+FOREACH_MULTIBYTE_INSTRUCTION(HANDLER)
+#undef HANDLER
 
 }; // namespace mitey
