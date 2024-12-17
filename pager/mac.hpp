@@ -17,7 +17,9 @@ class MacExecutable : public Executable {
             throw std::bad_alloc();
         }
 
+        pthread_jit_write_protect_np(false);
         *reinterpret_cast<uint32_t *>(ptr) = size;
+        pthread_jit_write_protect_np(true);
 
         return Allocation(ptr + 4, [](uint8_t *ptr) {
             ptr -= 4;
