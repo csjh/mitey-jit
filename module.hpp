@@ -1,5 +1,7 @@
 #pragma once
 
+#include "jit.hpp"
+#include "pager/executable.hpp"
 #include "runtime.hpp"
 #include "spec.hpp"
 #include <memory>
@@ -65,7 +67,12 @@ struct ElementShell {
 class safe_byte_iterator;
 
 class Module {
+    template <typename Pager, typename Target> friend class JIT;
+
     std::weak_ptr<Module> self;
+
+    Allocation executable;
+    std::unique_ptr<uint32_t[]> function_offsets;
 
     std::vector<WasmSignature> types;
     std::unordered_map<std::string, std::unordered_map<std::string, ImExDesc>>
@@ -94,13 +101,26 @@ class Module {
 
     Module();
 
-    void initialize(std::span<uint8_t> bytes);
+    std::span<uint8_t> initialize(std::span<uint8_t> bytes);
 
   public:
     static constexpr uint32_t MAX_PAGES = 65536;
     static constexpr uint32_t MAX_LOCALS = 50000;
 
-    static std::shared_ptr<Module> compile(std::span<uint8_t> bytes);
+    template <typename Pager, typename Target>
+    static std::shared_ptr<Module> compile(std::span<uint8_t> bytes) {
+        auto mod = std::shared_ptr<Module>(new Module());
+        mod->self = mod;
+
+        auto function_bytes = mod->initialize(bytes);
+
+        auto [exec, offsets] =
+            JIT<Pager, Target>(mod).compile(function_bytes);
+        mod->executable = std::move(exec);
+        mod->function_offsets = std::move(offsets);
+
+        return mod;
+    }
 
     // std::shared_ptr<Instance> instantiate(const Imports &imports = {});
 };

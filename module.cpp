@@ -254,13 +254,6 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
     }
 }
 
-std::shared_ptr<Module> Module::compile(std::span<uint8_t> bytes) {
-    auto module = std::shared_ptr<Module>(new Module());
-    module->self = module;
-    module->initialize(bytes);
-    return module;
-}
-
 // std::shared_ptr<Instance> Module::instantiate(const Imports &imports) {
 //     auto instance = std::shared_ptr<Instance>(new
 //     Instance(this->self.lock())); instance->self = instance;
@@ -268,9 +261,9 @@ std::shared_ptr<Module> Module::compile(std::span<uint8_t> bytes) {
 //     return instance;
 // }
 
-Module::Module() : memory{} {}
+Module::Module() : memory{}, executable(nullptr, [](auto) {}) {}
 
-void Module::initialize(std::span<uint8_t> bytes) {
+std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
     if (bytes.size() < 4) {
         throw malformed_error("unexpected end");
     }
@@ -784,9 +777,12 @@ void Module::initialize(std::span<uint8_t> bytes) {
     skip_custom_section();
 
     // code section
+    std::span<uint8_t> function_bytes;
     section(
         10,
         [&] {
+            auto start = iter;
+
             auto n_functions = safe_read_leb128<uint32_t>(iter);
 
             if (n_functions + n_fn_imports != functions.size()) {
@@ -834,6 +830,10 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 }
                 iter += fn_iter - iter;
             }
+
+            auto end = iter;
+            function_bytes =
+                std::span<uint8_t>(start.unsafe_ptr(), end.unsafe_ptr());
         },
         [&] {
             if (functions.size() != n_fn_imports) {
@@ -929,6 +929,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
     if (!iter.empty()) {
         throw malformed_error("unexpected content after last section");
     }
+
+    return function_bytes;
 }
 
 static inline void ensure(bool condition, const std::string &msg) {
