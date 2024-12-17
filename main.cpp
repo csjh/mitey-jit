@@ -11,8 +11,7 @@ int main() {
 
     std::vector<uint8_t> code;
     auto prelude = backend->get_prelude(), postlude = backend->get_postlude(),
-         shove = backend->set_temp1(111),
-         push = backend->call(ifXXconst),
+         shove = backend->set_temp1(111), push = backend->call(ifXXconst),
          mul = backend->call(i32mul), add = backend->call(i32add);
 
     code.insert(code.end(), prelude.begin(), prelude.end());
@@ -30,9 +29,9 @@ int main() {
 
     auto mem = exec->allocate(code.size());
 
-    exec->write(mem, [&] { memcpy(mem.ptr, code.data(), code.size()); });
+    exec->write(mem, [&] { memcpy(mem.get(), code.data(), code.size()); });
 
-    Signature *addMulMul = reinterpret_cast<Signature *>(mem.ptr);
+    Signature *addMulMul = reinterpret_cast<Signature *>(mem.get());
 
     uint32_t i1 = 42, i2 = 59;
     std::cout << "Input: " << i1 << " " << i2 << std::endl;
@@ -46,8 +45,6 @@ int main() {
 
     std::cout << "C result: " << std_result << std::endl;
     std::cout << "Results match: " << (jit_result == std_result) << std::endl;
-
-    exec->deallocate(mem);
 
     return 0;
 }
