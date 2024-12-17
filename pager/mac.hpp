@@ -17,8 +17,8 @@ class MacExecutable : public Executable {
             throw std::bad_alloc();
         }
 
-        auto alloc = Allocation(ptr + 4, [](uint8_t *ptr) {
-            ptr -= 4;
+        auto alloc = Allocation(ptr + sizeof(uint32_t), [](uint8_t *ptr) {
+            ptr -= sizeof(uint32_t);
             auto size = *reinterpret_cast<uint32_t *>(ptr);
             munmap(ptr, size);
         });
@@ -34,7 +34,7 @@ class MacExecutable : public Executable {
         cb();
         pthread_jit_write_protect_np(true);
 
-        auto ptr = alloc.get() - 4;
+        auto ptr = alloc.get() - sizeof(uint32_t);
 
         // flush instruction cache to ensure code is executable
         sys_icache_invalidate(ptr, *reinterpret_cast<uint32_t *>(ptr));
