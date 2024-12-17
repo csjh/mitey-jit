@@ -17,15 +17,15 @@ class MacExecutable : public Executable {
             throw std::bad_alloc();
         }
 
-        pthread_jit_write_protect_np(false);
-        *reinterpret_cast<uint32_t *>(ptr) = size;
-        pthread_jit_write_protect_np(true);
-
-        return Allocation(ptr + 4, [](uint8_t *ptr) {
+        auto alloc = Allocation(ptr + 4, [](uint8_t *ptr) {
             ptr -= 4;
             auto size = *reinterpret_cast<uint32_t *>(ptr);
             munmap(ptr, size);
         });
+
+        write(alloc, [=] { *reinterpret_cast<uint32_t *>(ptr) = size; });
+
+        return alloc;
     }
 
     void write(const Allocation &alloc,
