@@ -9,10 +9,28 @@ namespace mitey {
 union WasmValue;
 struct WasmMemory;
 
+struct __attribute__((packed)) FunctionType {
+    uint32_t params : 24;
+    uint8_t results;
+    uint64_t hash;
+
+    bool operator==(const FunctionType &other) const {
+        return params == other.params && results == other.results;
+    }
+};
+static_assert(sizeof(FunctionType) == sizeof(uint32_t) + sizeof(uint64_t));
+
 using Signature = void(WasmMemory *memory, WasmValue *stack,
                        void **globals_and_tables, uint64_t tmp1, uint64_t tmp2);
 
-using Funcref = Signature *;
+struct FunctionInfo {
+    FunctionType type;
+    std::shared_ptr<WasmMemory> memory;
+    std::shared_ptr<void *> misc;
+    Signature *signature;
+};
+
+using Funcref = FunctionInfo *;
 using Externref = void *;
 
 union WasmValue {
@@ -151,6 +169,12 @@ struct BrInfo {
     uint32_t stack_offset; // offset from stack base to copy arity to
 };
 static_assert(sizeof(BrInfo) == sizeof(uint64_t));
+
+struct CallIndirectInfo {
+    uint32_t table_idx;
+    FunctionType type;
+};
+static_assert(sizeof(CallIndirectInfo) == 2 * sizeof(uint64_t));
 
 Signature ifXXconst;
 #define HANDLER(name, str, byte) Signature name;

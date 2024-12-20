@@ -87,26 +87,32 @@ HANDLER(call) {
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
     POSTLUDE;
 }
-// HANDLER(call_indirect) {
-//     auto type = tmp1;
-//     auto &table = MISC_GET(WasmTable, tmp2);
+HANDLER(call_indirect) {
+    PRELUDE;
 
-//     --stack;
-//     auto elem_idx = stack->u32;
+    uint64_t combined[] = {tmp1, tmp2};
+    auto info = std::bit_cast<CallIndirectInfo>(combined);
+    auto &table = MISC_GET(WasmTable, info.table_idx);
 
-//     if (elem_idx >= table->size()) {
-//         trap("undefined element");
-//     }
-//     Funcref funcref = table->get(elem_idx);
-//     if (!funcref) {
-//         trap("uninitialized element");
-//     }
-//     if (funcref->type != type) {
-//         trap("indirect call type mismatch");
-//     }
+    --stack;
+    auto elem_idx = stack->u32;
 
-//     [[clang::musttail]] return funcref->function(PARAMS);
-// }
+    if (elem_idx >= table.size()) {
+        trap("undefined element");
+    }
+    auto funcref = table.get(elem_idx).funcref;
+    if (!funcref) {
+        trap("uninitialized element");
+    }
+    if (funcref->type != info.type) {
+        trap("indirect call type mismatch");
+    }
+
+    funcref->signature(funcref->memory.get(), stack, funcref->misc.get(), tmp1,
+                       tmp2);
+
+    POSTLUDE;
+}
 HANDLER(drop) {
     PRELUDE;
     --stack;
