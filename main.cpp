@@ -1,11 +1,37 @@
 #include "backend/arm64.hpp"
+#include "module.hpp"
 #include "pager/mac.hpp"
 #include "runtime.hpp"
 #include <iostream>
 
 using namespace mitey;
 
-int main() {
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        printf("Usage: %s <filename>\n", argv[0]);
+        return 1;
+    }
+
+    auto filename = argv[1];
+
+    auto file = fopen(filename, "rb");
+    if (!file) {
+        printf("Could not open file %s\n", filename);
+        return 1;
+    }
+
+    fseek(file, 0, SEEK_END);
+    auto length = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    auto bytes = std::vector<uint8_t>(length);
+    fread(bytes.data(), 1, length, file);
+    fclose(file);
+
+    auto mod = Module::compile<MacExecutable, Arm64>(bytes);
+
+    return 0;
+
     std::unique_ptr<Target> backend = std::make_unique<Arm64>();
     std::unique_ptr<Executable> exec = std::make_unique<MacExecutable>();
 
