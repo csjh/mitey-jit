@@ -1,6 +1,5 @@
 #pragma once
 
-#include "jit.hpp"
 #include "pager/executable.hpp"
 #include "runtime.hpp"
 #include "spec.hpp"
@@ -64,10 +63,44 @@ struct ElementShell {
     valtype type;
 };
 
+struct Function {};
+
+struct Block {
+    uint8_t *block_start;
+};
+
+struct Loop {};
+
+struct If {
+    uint8_t *if_start;
+};
+
+struct IfElse {
+    uint8_t *if_start;
+    uint8_t *else_start;
+};
+
+struct ControlFlow {
+    std::vector<valtype> &expected;
+    WasmSignature &sig;
+    bool polymorphized;
+    std::variant<Function, Block, Loop, If, IfElse> construct;
+};
+
 class safe_byte_iterator;
+class Module;
+class WasmStack;
+
+using ValidationHandler = void(Module &, safe_byte_iterator &, FunctionShell &,
+                               WasmStack &, std::vector<ControlFlow> &);
 
 class Module {
     template <typename Pager, typename Target> friend class JIT;
+
+#define V(name, _, byte) friend ValidationHandler validate_##name;
+    FOREACH_INSTRUCTION(V)
+    FOREACH_MULTIBYTE_INSTRUCTION(V)
+#undef V
 
     std::weak_ptr<Module> self;
 
@@ -101,7 +134,7 @@ class Module {
 
     Module();
 
-    std::span<uint8_t> initialize(std::span<uint8_t> bytes);
+    void initialize(std::span<uint8_t> bytes);
 
   public:
     static constexpr uint32_t MAX_PAGES = 65536;
@@ -111,14 +144,7 @@ class Module {
     static std::shared_ptr<Module> compile(std::span<uint8_t> bytes) {
         auto mod = std::shared_ptr<Module>(new Module());
         mod->self = mod;
-
-        auto function_bytes = mod->initialize(bytes);
-
-        auto [exec, offsets] =
-            JIT<Pager, Target>(mod).compile(function_bytes);
-        mod->executable = std::move(exec);
-        mod->function_offsets = std::move(offsets);
-
+        mod->initialize(bytes);
         return mod;
     }
 

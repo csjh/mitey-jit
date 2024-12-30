@@ -12,7 +12,8 @@ class safe_byte_iterator {
     uint8_t *end;
 
   public:
-    safe_byte_iterator(uint8_t *begin, uint8_t *end);
+    safe_byte_iterator(uint8_t *ptr, size_t length);
+    safe_byte_iterator(uint8_t *ptr, uint8_t *end);
 
     uint8_t operator*() const;
     uint8_t operator[](ssize_t n) const;
@@ -30,49 +31,40 @@ class safe_byte_iterator {
     uint8_t *unsafe_ptr() const { return iter; }
 };
 
-safe_byte_iterator::safe_byte_iterator(uint8_t *begin, uint8_t *end)
-    : iter(begin), end(end) {}
+safe_byte_iterator::safe_byte_iterator(uint8_t *ptr, size_t length)
+    : iter(ptr), end(ptr + length) {}
+
+safe_byte_iterator::safe_byte_iterator(uint8_t *ptr, uint8_t *end)
+    : iter(ptr), end(end) {}
 
 uint8_t safe_byte_iterator::operator*() const {
     if (iter >= end) {
-        throw malformed_error("unexpected end");
+        error<malformed_error>("unexpected end");
     }
     return *iter;
 }
 
 uint8_t safe_byte_iterator::operator[](ssize_t n) const {
     if (iter + n >= end) {
-        throw malformed_error("unexpected end");
+        error<malformed_error>("unexpected end");
     }
     return iter[n];
 }
 
 safe_byte_iterator &safe_byte_iterator::operator++() {
-    if (iter == end) {
-        throw malformed_error("unexpected end");
-    }
     ++iter;
     return *this;
 }
 
 safe_byte_iterator safe_byte_iterator::operator++(int) {
-    if (iter == end) {
-        throw malformed_error("unexpected end");
-    }
     return safe_byte_iterator(iter++, end);
 }
 
 safe_byte_iterator safe_byte_iterator::operator+(size_t n) const {
-    if (iter + n > end) {
-        throw malformed_error("length out of bounds");
-    }
     return safe_byte_iterator(iter + n, end);
 }
 
 safe_byte_iterator &safe_byte_iterator::operator+=(size_t n) {
-    if (iter + n > end) {
-        throw malformed_error("unexpected end");
-    }
     iter += n;
     return *this;
 }
@@ -91,7 +83,7 @@ bool safe_byte_iterator::operator<(safe_byte_iterator other) const {
 
 uint8_t *safe_byte_iterator::get_with_at_least(size_t n) const {
     if (!has_n_left(n)) {
-        throw malformed_error("length out of bounds");
+        error<malformed_error>("length out of bounds");
     }
     return iter;
 }
@@ -111,11 +103,12 @@ std::tuple<uint32_t, uint32_t> get_limits(safe_byte_iterator &iter,
 std::tuple<uint32_t, uint32_t> get_memory_limits(safe_byte_iterator &iter) {
     auto [initial, max] = get_limits(iter, Module::MAX_PAGES);
     if (initial > Module::MAX_PAGES || max > Module::MAX_PAGES) {
-        throw validation_error(
+        error<validation_error>(
             "memory size must be at most 65536 pages (4GiB)");
     }
     if (max < initial) {
-        throw validation_error("size minimum must not be greater than maximum");
+        error<validation_error>(
+            "size minimum must not be greater than maximum");
     }
     return {initial, max};
 }
@@ -124,20 +117,29 @@ std::tuple<uint32_t, uint32_t> get_table_limits(safe_byte_iterator &iter) {
     auto [initial, max] =
         get_limits(iter, std::numeric_limits<uint32_t>::max());
     if (max < initial) {
-        throw validation_error("size minimum must not be greater than maximum");
+        error<validation_error>(
+            "size minimum must not be greater than maximum");
     }
     return {initial, max};
 }
 
-WasmSignature read_blocktype(std::vector<WasmSignature> &types,
-                             safe_byte_iterator &iter) {
+WasmSignature &read_blocktype(std::vector<WasmSignature> &types,
+                              safe_byte_iterator &iter) {
+    constexpr uint8_t empty_type = 0x40;
+    static WasmSignature singles[] = {
+        [0x40] = {{}, {}},
+        [0x7f] = {{}, {valtype::i32}},
+        [0x7e] = {{}, {valtype::i64}},
+        [0x7d] = {{}, {valtype::f32}},
+        [0x7c] = {{}, {valtype::f64}},
+        [0x70] = {{}, {valtype::funcref}},
+        [0x6f] = {{}, {valtype::externref}},
+    };
+
     uint8_t byte = *iter;
-    if (byte == static_cast<uint8_t>(valtype::empty)) {
+    if (byte == empty_type || is_valtype(byte)) {
         ++iter;
-        return {{}, {}};
-    } else if (is_valtype(byte)) {
-        ++iter;
-        return {{}, {static_cast<valtype>(byte)}};
+        return singles[byte];
     } else {
         int64_t n = safe_read_sleb128<int64_t, 33>(iter);
         return types[n];
@@ -150,13 +152,13 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
 #define OP(ty, op)                                                             \
     {                                                                          \
         if (stack_types.size() < 2) {                                          \
-            throw validation_error("type mismatch");                           \
+            error<validation_error>("type mismatch");                          \
         }                                                                      \
         if (stack_types[stack_types.size() - 1] != stack_types.back()) {       \
-            throw validation_error("type mismatch");                           \
+            error<validation_error>("type mismatch");                          \
         }                                                                      \
         if (stack_types.back() != valtype::ty) {                               \
-            throw validation_error("type mismatch");                           \
+            error<validation_error>("type mismatch");                          \
         }                                                                      \
         stack_types.pop_back();                                                \
         break;                                                                 \
@@ -165,7 +167,7 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
 #define I64_OP(op) OP(i64, op)
 
     while (1) {
-        uint8_t byte = *iter++;
+        auto byte = *iter++;
 #ifdef WASM_DEBUG
         std::cerr << "reading instruction " << instructions[byte].c_str()
                   << " at " << iter - bytes.get() << std::endl;
@@ -197,11 +199,10 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
         case globalget: {
             auto global_idx = safe_read_leb128<uint32_t>(iter);
             if (global_idx >= globals.size() || !globals[global_idx].import) {
-                throw validation_error("unknown global " +
-                                       std::to_string(global_idx));
+                error<validation_error>("unknown global");
             }
             if (globals[global_idx].mutability != mut::const_) {
-                throw validation_error("constant expression required");
+                error<validation_error>("constant expression required");
             }
             stack_types.push_back(globals[global_idx].type);
             break;
@@ -221,7 +222,7 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
         case ref_null: {
             auto reftype = safe_read_leb128<uint32_t>(iter);
             if (!is_reftype(reftype)) {
-                throw validation_error("type mismatch");
+                error<validation_error>("type mismatch");
             }
             stack_types.push_back(static_cast<valtype>(reftype));
             break;
@@ -229,7 +230,7 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
         case ref_func: {
             auto func_idx = safe_read_leb128<uint32_t>(iter);
             if (func_idx >= functions.size()) {
-                throw validation_error("unknown function");
+                error<validation_error>("unknown function");
             }
             // implicit declaration
             functions[func_idx].is_declared = true;
@@ -238,9 +239,9 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
         }
         default:
             if (is_instruction(byte)) {
-                throw validation_error("constant expression required");
+                error<validation_error>("constant expression required");
             } else {
-                throw malformed_error("illegal opcode");
+                error<malformed_error>("illegal opcode");
             }
         }
     }
@@ -250,7 +251,7 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
 #undef I64_OP
 
     if (stack_types.size() != 1 || stack_types[0] != expected) {
-        throw validation_error("type mismatch");
+        error<validation_error>("type mismatch");
     }
 }
 
@@ -261,27 +262,27 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
 //     return instance;
 // }
 
-Module::Module() : memory{}, executable(nullptr, [](auto) {}) {}
+Module::Module() : executable(nullptr, [](auto) {}), memory{} {}
 
-std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
+void Module::initialize(std::span<uint8_t> bytes) {
     if (bytes.size() < 4) {
-        throw malformed_error("unexpected end");
+        error<malformed_error>("unexpected end");
     }
 
-    safe_byte_iterator iter(bytes.data(), bytes.data() + bytes.size());
+    auto iter = safe_byte_iterator(bytes.data(), bytes.size());
 
     if (std::memcmp(reinterpret_cast<char *>(iter.get_with_at_least(4)),
                     "\0asm", 4) != 0) {
-        throw malformed_error("magic header not detected");
+        error<malformed_error>("magic header not detected");
     }
     iter += 4;
 
     if (bytes.size() < 8) {
-        throw malformed_error("unexpected end");
+        error<malformed_error>("unexpected end");
     }
 
     if (*reinterpret_cast<uint32_t *>(iter.get_with_at_least(4)) != 1) {
-        throw malformed_error("unknown binary version");
+        error<malformed_error>("unknown binary version");
     }
     iter += sizeof(uint32_t);
 
@@ -289,16 +290,20 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
         while (!iter.empty() && *iter == 0) [[unlikely]] {
             ++iter;
             auto section_length = safe_read_leb128<uint32_t>(iter);
+            if (!iter.has_n_left(section_length)) {
+                error<malformed_error>("length out of bounds");
+            }
+
             auto start = iter;
 
             auto name_length = safe_read_leb128<uint32_t>(iter);
             if (!is_valid_utf8(iter.get_with_at_least(name_length),
-                               (iter + name_length).unsafe_ptr())) {
-                throw malformed_error("malformed UTF-8 encoding");
+                               name_length)) {
+                error<malformed_error>("malformed UTF-8 encoding");
             }
 
             if (start + section_length < iter) {
-                throw malformed_error("unexpected end");
+                error<malformed_error>("unexpected end");
             }
 
             iter = start + section_length;
@@ -312,22 +317,22 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
             ++iter;
             auto section_length = safe_read_leb128<uint32_t>(iter);
             if (!iter.has_n_left(section_length)) {
-                throw malformed_error("length out of bounds");
+                error<malformed_error>("length out of bounds");
             }
             auto section_start = iter;
 
             body();
 
             if (iter - section_start != section_length) {
-                throw malformed_error("section size mismatch");
+                error<malformed_error>("section size mismatch");
             }
 
             // todo: remove this when validation separates
             if (!iter.empty() && *iter == id) {
-                throw malformed_error("unexpected content after last section");
+                error<malformed_error>("unexpected content after last section");
             }
         } else if (!iter.empty() && *iter > 12) {
-            throw malformed_error("malformed section id");
+            error<malformed_error>("malformed section id");
         } else {
             else_();
         }
@@ -343,12 +348,12 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
 
         for (uint32_t i = 0; i < n_types; ++i) {
             if (iter.empty()) {
-                throw malformed_error("unexpected end of section or function");
+                error<malformed_error>("unexpected end of section or function");
             }
 
             if (*iter != 0x60) {
-                throw malformed_error("integer representation too long");
-                // throw validation_error("invalid function type");
+                error<malformed_error>("integer representation too long");
+                // error<validation_error>("invalid function type");
             }
             ++iter;
 
@@ -358,7 +363,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
             fn.params.reserve(n_params);
             for (uint32_t j = 0; j < n_params; ++j) {
                 if (!is_valtype(iter[j])) {
-                    throw validation_error("invalid parameter type");
+                    error<validation_error>("invalid parameter type");
                 }
                 fn.params.push_back(static_cast<valtype>(iter[j]));
             }
@@ -368,7 +373,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
             fn.results.reserve(n_results);
             for (uint32_t j = 0; j < n_results; ++j) {
                 if (!is_valtype(iter[j])) {
-                    throw validation_error("invalid result type");
+                    error<validation_error>("invalid result type");
                 }
                 fn.results.push_back(static_cast<valtype>(iter[j]));
             }
@@ -388,13 +393,13 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
 
         for (uint32_t i = 0; i < n_imports; i++) {
             if (iter.empty()) {
-                throw malformed_error("unexpected end of section or function");
+                error<malformed_error>("unexpected end of section or function");
             }
 
             auto module_len = safe_read_leb128<uint32_t>(iter);
             if (!is_valid_utf8(iter.get_with_at_least(module_len),
-                               (iter + module_len).unsafe_ptr())) {
-                throw malformed_error("malformed UTF-8 encoding");
+                               module_len)) {
+                error<malformed_error>("malformed UTF-8 encoding");
             }
             auto module = std::string(
                 reinterpret_cast<char *>(iter.get_with_at_least(module_len)),
@@ -402,9 +407,8 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
             iter += module_len;
 
             auto field_len = safe_read_leb128<uint32_t>(iter);
-            if (!is_valid_utf8(iter.get_with_at_least(field_len),
-                               (iter + field_len).unsafe_ptr())) {
-                throw malformed_error("malformed UTF-8 encoding");
+            if (!is_valid_utf8(iter.get_with_at_least(field_len), field_len)) {
+                error<malformed_error>("malformed UTF-8 encoding");
             }
             auto field = std::string(
                 reinterpret_cast<char *>(iter.get_with_at_least(field_len)),
@@ -413,7 +417,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
 
             auto kind = *iter++;
             if (!is_imexdesc(kind)) {
-                throw malformed_error("malformed import kind");
+                error<malformed_error>("malformed import kind");
             }
             auto desc = static_cast<ImExDesc>(kind);
             imports[module][field] = desc;
@@ -424,7 +428,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                 // func
                 auto typeidx = safe_read_leb128<uint32_t>(iter);
                 if (typeidx >= types.size()) {
-                    throw validation_error("unknown type");
+                    error<validation_error>("unknown type");
                 }
                 functions.push_back({nullptr, types[typeidx], {}, specifier});
                 n_fn_imports++;
@@ -432,7 +436,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                 // table
                 auto reftype = safe_read_leb128<uint32_t>(iter);
                 if (!is_reftype(reftype)) {
-                    throw malformed_error("malformed reference type");
+                    error<malformed_error>("malformed reference type");
                 }
 
                 auto [initial, max] = get_table_limits(iter);
@@ -441,7 +445,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
             } else if (desc == ImExDesc::mem) {
                 // mem
                 if (memory.exists) {
-                    throw validation_error("multiple memories");
+                    error<validation_error>("multiple memories");
                 }
 
                 auto [initial, max] = get_memory_limits(iter);
@@ -450,11 +454,11 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                 // global
                 auto maybe_valtype = safe_read_leb128<uint32_t>(iter);
                 if (!is_valtype(maybe_valtype)) {
-                    throw malformed_error("invalid global type");
+                    error<malformed_error>("invalid global type");
                 }
                 auto mutability = *iter++;
                 if (!is_mut(mutability)) {
-                    throw malformed_error("malformed mutability");
+                    error<malformed_error>("malformed mutability");
                 }
 
                 globals.push_back({static_cast<valtype>(maybe_valtype),
@@ -474,12 +478,12 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
 
         for (uint32_t i = 0; i < n_functions; ++i) {
             if (iter.empty()) {
-                throw malformed_error("unexpected end of section or function");
+                error<malformed_error>("unexpected end of section or function");
             }
 
             auto type_idx = safe_read_leb128<uint32_t>(iter);
             if (type_idx >= types.size()) {
-                throw validation_error("unknown type");
+                error<validation_error>("unknown type");
             }
             functions.push_back({nullptr, types[type_idx], {}, std::nullopt});
         }
@@ -494,12 +498,12 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
 
         for (uint32_t i = 0; i < n_tables; ++i) {
             if (iter.empty()) {
-                throw malformed_error("unexpected end of section or function");
+                error<malformed_error>("unexpected end of section or function");
             }
 
             auto elem_type = *iter++;
             if (!is_reftype(elem_type)) {
-                throw validation_error("invalid table element type");
+                error<validation_error>("invalid table element type");
             }
 
             auto [initial, max] = get_table_limits(iter);
@@ -514,13 +518,13 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
     section(5, [&] {
         auto n_memories = safe_read_leb128<uint32_t>(iter);
         if (n_memories > 1) {
-            throw validation_error("multiple memories");
+            error<validation_error>("multiple memories");
         } else if (n_memories == 1) {
             if (iter.empty()) {
-                throw malformed_error("unexpected end of section or function");
+                error<malformed_error>("unexpected end of section or function");
             }
             if (memory.exists) {
-                throw validation_error("multiple memories");
+                error<validation_error>("multiple memories");
             }
 
             auto [initial, max] = get_memory_limits(iter);
@@ -538,18 +542,18 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
 
         for (uint32_t i = 0; i < n_globals; ++i) {
             if (iter.empty()) {
-                throw malformed_error("unexpected end of section or function");
+                error<malformed_error>("unexpected end of section or function");
             }
 
             auto maybe_type = *iter++;
             if (!is_valtype(maybe_type)) {
-                throw malformed_error("invalid global type");
+                error<malformed_error>("invalid global type");
             }
             auto type = static_cast<valtype>(maybe_type);
 
             auto maybe_mut = *iter++;
             if (!is_mut(maybe_mut)) {
-                throw malformed_error("malformed mutability");
+                error<malformed_error>("malformed mutability");
             }
             auto global_mut = static_cast<mut>(maybe_mut);
 
@@ -568,7 +572,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
 
         for (uint32_t i = 0; i < n_exports; ++i) {
             if (iter.empty()) {
-                throw malformed_error("unexpected end of section or function");
+                error<malformed_error>("unexpected end of section or function");
             }
 
             auto name_len = safe_read_leb128<uint32_t>(iter);
@@ -579,33 +583,33 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
 
             auto desc = *iter++;
             if (!is_imexdesc(desc)) {
-                throw validation_error("invalid export description");
+                error<validation_error>("invalid export description");
             }
             auto export_desc = static_cast<ImExDesc>(desc);
 
             auto idx = safe_read_leb128<uint32_t>(iter);
 
             if (exports.contains(name)) {
-                throw validation_error("duplicate export name");
+                error<validation_error>("duplicate export name");
             }
 
             if (export_desc == ImExDesc::func) {
                 if (idx >= functions.size()) {
-                    throw validation_error("unknown function");
+                    error<validation_error>("unknown function");
                 }
                 // implicit declaration
                 functions[idx].is_declared = true;
             } else if (export_desc == ImExDesc::table) {
                 if (idx >= tables.size()) {
-                    throw validation_error("unknown table");
+                    error<validation_error>("unknown table");
                 }
             } else if (export_desc == ImExDesc::mem) {
                 if (idx != 0 || !memory.exists) {
-                    throw validation_error("unknown memory");
+                    error<validation_error>("unknown memory");
                 }
             } else if (export_desc == ImExDesc::global) {
                 if (idx >= globals.size()) {
-                    throw validation_error("unknown global");
+                    error<validation_error>("unknown global");
                 }
             }
             exports[name] = {export_desc, idx};
@@ -619,7 +623,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
         [&] {
             start = safe_read_leb128<uint32_t>(iter);
             if (start >= functions.size()) {
-                throw validation_error("unknown function");
+                error<validation_error>("unknown function");
             }
         },
         [&] { start = std::numeric_limits<uint32_t>::max(); });
@@ -635,12 +639,12 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
         element_start = iter.unsafe_ptr();
         for (uint32_t i = 0; i < n_elements; i++) {
             if (iter.empty()) {
-                throw malformed_error("unexpected end of section or function");
+                error<malformed_error>("unexpected end of section or function");
             }
 
             auto flags = safe_read_leb128<uint32_t>(iter);
             if (flags & ~0b111) {
-                throw validation_error("invalid element flags");
+                error<validation_error>("invalid element flags");
             }
 
             if (flags & 1) {
@@ -650,7 +654,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                         // characteristics: declarative, elem type + exprs
                         auto maybe_reftype = *iter++;
                         if (!is_reftype(maybe_reftype)) {
-                            throw malformed_error("malformed reference type");
+                            error<malformed_error>("malformed reference type");
                         }
                         auto reftype = static_cast<valtype>(maybe_reftype);
                         auto n_elements = safe_read_leb128<uint32_t>(iter);
@@ -664,13 +668,13 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                         // characteristics: declarative, elem kind + indices
                         auto elemkind = *iter++;
                         if (elemkind != 0) {
-                            throw validation_error("invalid elemkind");
+                            error<validation_error>("invalid elemkind");
                         }
                         auto n_elements = safe_read_leb128<uint32_t>(iter);
                         for (uint32_t j = 0; j < n_elements; j++) {
                             auto elem_idx = safe_read_leb128<uint32_t>(iter);
                             if (elem_idx >= functions.size()) {
-                                throw validation_error("unknown function");
+                                error<validation_error>("unknown function");
                             }
                             functions[elem_idx].is_declared = true;
                         }
@@ -682,7 +686,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                         // characteristics: passive, elem type + exprs
                         auto maybe_reftype = *iter++;
                         if (!is_reftype(maybe_reftype)) {
-                            throw malformed_error("malformed reference type");
+                            error<malformed_error>("malformed reference type");
                         }
                         auto reftype = static_cast<valtype>(maybe_reftype);
                         auto n_elements = safe_read_leb128<uint32_t>(iter);
@@ -695,13 +699,13 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                         // characteristics: passive, elem kind + indices
                         auto elemkind = *iter++;
                         if (elemkind != 0) {
-                            throw validation_error("invalid elemkind");
+                            error<validation_error>("invalid elemkind");
                         }
                         auto n_elements = safe_read_leb128<uint32_t>(iter);
                         for (uint32_t j = 0; j < n_elements; j++) {
                             auto elem_idx = safe_read_leb128<uint32_t>(iter);
                             if (elem_idx >= functions.size()) {
-                                throw validation_error("unknown function");
+                                error<validation_error>("unknown function");
                             }
                             // implicit declaration
                             functions[elem_idx].is_declared = true;
@@ -713,10 +717,10 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                 auto table_idx =
                     flags & 0b10 ? safe_read_leb128<uint32_t>(iter) : 0;
                 if (table_idx >= tables.size()) {
-                    throw validation_error("unknown table");
+                    error<validation_error>("unknown table");
                 }
 
-                auto reftype = valtype::empty;
+                auto reftype = valtype::null;
 
                 /* auto offset = */ validate_const(iter, valtype::i32);
                 auto reftype_or_elemkind = flags & 0b10 ? *iter++ : 256;
@@ -729,11 +733,11 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                         reftype_or_elemkind =
                             static_cast<uint16_t>(valtype::funcref);
                     if (!is_reftype(reftype_or_elemkind)) {
-                        throw malformed_error("malformed reference type");
+                        error<malformed_error>("malformed reference type");
                     }
                     reftype = static_cast<valtype>(reftype_or_elemkind);
                     if (tables[table_idx].type != reftype) {
-                        throw validation_error("type mismatch");
+                        error<validation_error>("type mismatch");
                     }
                     for (uint32_t j = 0; j < n_elements; j++) {
                         validate_const(iter, reftype);
@@ -742,18 +746,18 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                     if (reftype_or_elemkind == 256)
                         reftype_or_elemkind = 0;
                     if (reftype_or_elemkind != 0) {
-                        throw validation_error("invalid elemkind");
+                        error<validation_error>("invalid elemkind");
                     }
                     reftype = valtype::funcref;
                     if (tables[table_idx].type != reftype) {
-                        throw validation_error("type mismatch");
+                        error<validation_error>("type mismatch");
                     }
                     // flags = 0 or 2
                     // characteristics: active, elem kind + indices
                     for (uint32_t j = 0; j < n_elements; j++) {
                         auto elem_idx = safe_read_leb128<uint32_t>(iter);
                         if (elem_idx >= functions.size()) {
-                            throw validation_error("unknown function");
+                            error<validation_error>("unknown function");
                         }
                         // implicit declaration
                         functions[elem_idx].is_declared = true;
@@ -777,16 +781,13 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
     skip_custom_section();
 
     // code section
-    std::span<uint8_t> function_bytes;
     section(
         10,
         [&] {
-            auto start = iter;
-
             auto n_functions = safe_read_leb128<uint32_t>(iter);
 
             if (n_functions + n_fn_imports != functions.size()) {
-                throw malformed_error(
+                error<malformed_error>(
                     "function and code section have inconsistent lengths");
             }
 
@@ -800,20 +801,20 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
 
                 auto function_length = safe_read_leb128<uint32_t>(iter);
 
-                safe_byte_iterator start(iter.unsafe_ptr(),
-                                         iter.unsafe_ptr() + function_length);
+                auto start = safe_byte_iterator(
+                    iter.get_with_at_least(function_length), function_length);
 
                 auto n_local_decls = safe_read_leb128<uint32_t>(iter);
                 while (n_local_decls--) {
                     auto n_locals = safe_read_leb128<uint32_t>(iter);
                     auto type = *iter++;
                     if (!is_valtype(type)) {
-                        throw validation_error("invalid local type");
+                        error<validation_error>("invalid local type");
                     }
                     while (n_locals--) {
                         fn.locals.push_back(static_cast<valtype>(type));
                         if (fn.locals.size() > MAX_LOCALS) {
-                            throw malformed_error("too many locals");
+                            error<malformed_error>("too many locals");
                         }
                     }
                 }
@@ -821,23 +822,23 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                 fn.start = iter.get_with_at_least(body_length);
 
                 auto fn_iter = iter;
+#ifdef WASM_DEBUG
+                std::cerr << "validating function " << &fn - functions.data()
+                          << " at " << fn_iter - bytes.get() << std::endl;
+#endif
                 validate(fn_iter, fn);
                 if (fn_iter[-1] != static_cast<uint8_t>(Instruction::end)) {
-                    throw malformed_error("END opcode expected");
+                    error<malformed_error>("END opcode expected");
                 }
                 if (fn_iter - start != function_length) {
-                    throw malformed_error("section size mismatch");
+                    error<malformed_error>("section size mismatch");
                 }
                 iter += fn_iter - iter;
             }
-
-            auto end = iter;
-            function_bytes =
-                std::span<uint8_t>(start.unsafe_ptr(), end.unsafe_ptr());
         },
         [&] {
             if (functions.size() != n_fn_imports) {
-                throw malformed_error(
+                error<malformed_error>(
                     "function and code section have inconsistent lengths");
             }
         });
@@ -850,27 +851,26 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
         [&] {
             auto section_n_data = safe_read_leb128<uint32_t>(iter);
             if (has_data_count && n_data != section_n_data) {
-                throw malformed_error("data count and data section have "
-                                      "inconsistent lengths");
+                error<malformed_error>("data count and data section have "
+                                       "inconsistent lengths");
             }
 
             for (uint32_t i = 0; i < section_n_data; i++) {
                 if (iter.empty()) {
-                    throw malformed_error(
+                    error<malformed_error>(
                         "unexpected end of section or function");
                 }
 
                 auto segment_flag = safe_read_leb128<uint32_t>(iter);
                 if (segment_flag & ~0b11) {
-                    throw validation_error("invalid data segment flag");
+                    error<validation_error>("invalid data segment flag");
                 }
 
                 auto memidx =
                     segment_flag & 0b10 ? safe_read_leb128<uint32_t>(iter) : 0;
 
                 if (memidx != 0) {
-                    throw validation_error("unknown memory " +
-                                           std::to_string(memidx));
+                    error<validation_error>("unknown memory");
                 }
 
                 if (segment_flag & 1) {
@@ -878,7 +878,7 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
 
                     auto data_length = safe_read_leb128<uint32_t>(iter);
                     if (!iter.has_n_left(data_length)) {
-                        throw malformed_error(
+                        error<malformed_error>(
                             "unexpected end of section or function");
                     }
 
@@ -893,15 +893,14 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
                 } else {
                     // active segment
                     if (!memory.exists) {
-                        throw validation_error("unknown memory 0");
+                        error<validation_error>("unknown memory 0");
                     }
 
                     auto initializer = iter.unsafe_ptr();
                     validate_const(iter, valtype::i32);
-
                     auto data_length = safe_read_leb128<uint32_t>(iter);
                     if (!iter.has_n_left(data_length)) {
-                        throw malformed_error(
+                        error<malformed_error>(
                             "unexpected end of section or function");
                     }
 
@@ -919,153 +918,153 @@ std::span<uint8_t> Module::initialize(std::span<uint8_t> bytes) {
         },
         [&] {
             if (has_data_count && n_data != 0) {
-                throw malformed_error("data count and data section have "
-                                      "inconsistent lengths");
+                error<malformed_error>("data count and data section have "
+                                       "inconsistent lengths");
             }
         });
 
     skip_custom_section();
 
     if (!iter.empty()) {
-        throw malformed_error("unexpected content after last section");
+        error<malformed_error>("unexpected content after last section");
     }
-
-    return function_bytes;
 }
 
-static inline void ensure(bool condition, const std::string &msg) {
+static inline void ensure(bool condition, const char *msg) {
     if (!condition) [[unlikely]] {
-        throw validation_error(msg);
+        error<validation_error>(msg);
     }
 }
 
-void Module::validate(safe_byte_iterator &iter, FunctionShell &fn) {
-    if (!fn.start) {
-        // skip imported functions
-        return;
-    }
-
-    current_fn = fn;
-    control_stack.push_back(fn.type.results);
-
-    validate(iter, fn.type, true);
-
-    ensure(control_stack.size() == 1,
-           "control stack not empty at end of function");
-    control_stack.clear();
-}
-
-class WasmStack : protected std::vector<valtype> {
+class WasmStack {
     bool polymorphized = false;
+    valtype buffer_start[65536];
+    valtype *buffer;
 
-    class infinite_iterator {
-        std::vector<valtype>::const_reverse_iterator start, end;
+    auto rbegin() const { return std::reverse_iterator(buffer); }
+    auto rend() const {
+        return std::reverse_iterator(const_cast<valtype *>(buffer_start));
+    }
 
-      public:
-        infinite_iterator(const std::vector<valtype> &vec)
-            : start(vec.rbegin()), end(vec.rend()) {}
+    template <typename T> auto find_diverging(const T &expected) {
+        auto ebegin = expected.rbegin();
+        auto abegin = rbegin();
 
-        valtype operator*() const {
-            if (start == end)
-                return valtype::empty;
-            return *start;
-        }
-        infinite_iterator &operator++() {
-            if (start != end)
-                ++start;
-            return *this;
-        }
-    };
+        for (; ebegin != expected.rend(); ++abegin, ++ebegin)
+            if (*abegin != *ebegin && *abegin != valtype::any)
+                break;
 
-    infinite_iterator rbegin() const { return infinite_iterator(*this); }
+        return abegin;
+    }
 
   public:
-    bool check(const std::vector<valtype> &expected) {
-        // this guarantees non-polymorphized stacks don't accidentally use the
-        // valtype::empty from the infinite_iterator
-        if (expected.size() > size())
+#ifdef WASM_DEBUG
+    auto begin() { return buffer_start; }
+    auto end() { return buffer; }
+    auto size() { return std::distance(begin(), end()); }
+#endif
+
+    WasmStack() : buffer(buffer_start) {
+        std::fill_n(buffer, 1024, valtype::null);
+        buffer += 1024;
+    }
+
+    template <typename T> bool check(const T &expected) {
+        auto diverge = find_diverging(expected);
+        if (static_cast<size_t>(std::distance(rbegin(), diverge)) ==
+            expected.size())
+            return true;
+        return polymorphized && *diverge == valtype::null;
+    }
+
+    template <typename T> bool operator==(const T &rhs) {
+        auto diverge = find_diverging(rhs);
+        if (*diverge != valtype::null)
             return false;
-
-        return std::equal(
-            expected.rbegin(), expected.rend(), rbegin(),
-            [](valtype a, valtype b) { return b == valtype::empty || a == b; });
+        if (static_cast<size_t>(std::distance(rbegin(), diverge)) == rhs.size())
+            return true;
+        return polymorphized;
     }
 
-    bool operator==(const std::vector<valtype> &rhs) {
-        return check(rhs) && (rhs.size() >= std::vector<valtype>::size());
-    }
+    bool polymorphism() { return polymorphized; }
+    void set_polymorphism(bool p) { polymorphized = p; }
+
+    void unpolymorphize() { set_polymorphism(false); }
 
     void polymorphize() {
-        polymorphized = true;
-        clear();
+        set_polymorphism(true);
+
+        buffer = std::find(rbegin(), rend(), valtype::null).base();
     }
 
-    void push(valtype ty) { push(std::vector<valtype>{ty}); }
-    void push(const std::vector<valtype> &values) {
-        insert(end(), values.begin(), values.end());
+    void push(valtype ty) { push(std::array{ty}); }
+    template <typename T> void push(const T &values) {
+        std::copy(values.begin(), values.end(), buffer);
+        buffer += values.size();
     }
-    void pop(valtype expected_ty) { pop(std::vector<valtype>{expected_ty}); }
-    void pop(const std::vector<valtype> &expected) {
+    void pop(valtype expected_ty) { pop(std::array{expected_ty}); }
+    template <typename T> void pop(const T &expected) {
         ensure(check(expected), "type mismatch");
 
-        auto materialized =
-            std::min(std::vector<valtype>::size(), expected.size());
-
-        erase(end() - materialized, end());
+        auto diverge = find_diverging(expected);
+        buffer -= std::distance(rbegin(), diverge);
     }
 
-    bool empty() const {
-        return !polymorphized && std::vector<valtype>::empty();
-    }
+    bool empty() const { return !polymorphized && *rbegin() == valtype::null; }
 
     bool can_be_anything() const {
-        return polymorphized && std::vector<valtype>::empty();
+        return polymorphized && *rbegin() == valtype::null;
     }
 
     valtype back() const {
-        ensure(!empty(), "type mismatch");
-        return *rbegin();
+        if (auto b = *rbegin(); b != valtype::null)
+            return b;
+        if (polymorphized) {
+            return valtype::any;
+        } else {
+            error<validation_error>("type mismatch");
+        }
     }
 
-    unsigned long size() const {
-        return polymorphized ? static_cast<unsigned long>(-1)
-                             : std::vector<valtype>::size();
-    }
-};
-
-void Module::validate(safe_byte_iterator &iter, const WasmSignature &signature,
-                      bool is_func) {
-    WasmStack stack;
-    if (!is_func) {
-        stack.push(signature.params);
+    template <size_t pc, size_t rc>
+    void apply(std::array<valtype, pc> params,
+               std::array<valtype, rc> results) {
+        pop(params);
+        push(results);
     }
 
-    auto apply = [&](WasmSignature signature) {
-        stack.pop(signature.params);
-        stack.push(signature.results);
+    void apply(const WasmSignature &signature) {
+        pop(signature.params);
+        push(signature.results);
     };
 
-    auto check_br = [&](uint32_t depth) {
+    void enter_flow(const std::vector<valtype> &expected) {
+        pop(expected);
+        push(valtype::null);
+        push(expected);
+    };
+
+    void check_br(std::vector<ControlFlow> &control_stack, uint32_t depth) {
         ensure(depth < control_stack.size(), "unknown label");
-        auto &expected_at_target =
-            control_stack[control_stack.size() - depth - 1];
-        stack.pop(expected_at_target);
-        stack.push(expected_at_target);
+        auto &target = control_stack[control_stack.size() - depth - 1];
+        pop(target.expected);
+        push(target.expected);
     };
+};
 
 #define LOAD(type, stacktype)                                                  \
     {                                                                          \
         auto a = safe_read_leb128<uint32_t>(iter);                             \
-        ensure(memory.exists, "unknown memory");                               \
+        ensure(mod.memory.exists, "unknown memory");                           \
         if (a >= 32) {                                                         \
-            throw malformed_error("malformed memop flags");                    \
+            error<malformed_error>("malformed memop flags");                   \
         }                                                                      \
-        auto align = 1 << a;                                                   \
+        auto align = 1ull << a;                                                \
         ensure(align <= sizeof(type),                                          \
                "alignment must not be larger than natural");                   \
         /* auto offset = */ safe_read_leb128<uint32_t>(iter);                  \
-        apply({{valtype::i32}, {stacktype}});                                  \
-        break;                                                                 \
+        stack.apply(std::array{valtype::i32}, std::array{stacktype});          \
+        nextop();                                                              \
     }
 
 #define STORE(type, stacktype)                                                 \
@@ -1076,569 +1075,649 @@ void Module::validate(safe_byte_iterator &iter, const WasmSignature &signature,
             /* todo: test multi memory proposal */                             \
             a = safe_read_leb128<uint32_t>(iter);                              \
         } else {                                                               \
-            ensure(memory.exists, "unknown memory");                           \
+            ensure(mod.memory.exists, "unknown memory");                       \
         }                                                                      \
-        auto align = 1 << a;                                                   \
+        auto align = 1ull << a;                                                \
         ensure(align <= sizeof(type),                                          \
                "alignment must not be larger than natural");                   \
         /* auto offset = */ safe_read_leb128<uint32_t>(iter);                  \
-        apply({{valtype::i32, stacktype}, {}});                                \
-        break;                                                                 \
+        stack.apply(std::array{valtype::i32, stacktype},                       \
+                    std::array<valtype, 0>());                                 \
+        nextop();                                                              \
     }
 
-    using enum Instruction;
-    while (1) {
-        auto byte = *iter++;
+#define HANDLER(name)                                                          \
+    void validate_##name(Module &mod, safe_byte_iterator &iter,                \
+                         FunctionShell &fn, WasmStack &stack,                  \
+                         std::vector<ControlFlow> &control_stack)
+
+#define V(name, _, byte) HANDLER(name);
+FOREACH_INSTRUCTION(V)
+#undef V
 
 #ifdef WASM_DEBUG
-        std::cerr << "reading instruction " << instructions[byte].c_str()
-                  << " at " << iter - bytes.get() << std::endl;
-        std::cerr << "control stack size: " << control_stack.size()
-                  << std::endl;
-        std::cerr << "stack size: " << stack.size() << std::endl;
-        std::cerr << "control stack: ";
-        for (auto &target : control_stack) {
-            std::cerr << target.size() << " ";
-        }
-        std::cerr << std::endl;
+#define nextop()                                                               \
+    do {                                                                       \
+        auto byte = *iter++;                                                   \
+        std::cerr << "reading instruction " << instructions[byte].c_str()      \
+                  << " at " << iter - mod.bytes.get() << std::endl;            \
+        std::cerr << "control stack size: " << control_stack.size()            \
+                  << std::endl;                                                \
+        std::cerr << "control stack: ";                                        \
+        for (auto &target : control_stack) {                                   \
+            std::cerr << target.expected.size() << " ";                        \
+        }                                                                      \
+        std::cerr << std::endl;                                                \
+        std::cerr << "stack size: " << stack.size() << std::endl;              \
+        std::cerr << "stack: ";                                                \
+        for (auto &ty : stack) {                                               \
+            std::cerr << valtype_names[static_cast<uint8_t>(ty)].c_str()       \
+                      << " ";                                                  \
+        }                                                                      \
+        std::cerr << std::endl;                                                \
+        std::cerr << std::endl;                                                \
+        [[clang::musttail]] return funcs[byte](mod, iter, fn, stack,           \
+                                               control_stack);                 \
+    } while (0)
+#else
+#define nextop()                                                               \
+    do {                                                                       \
+        [[clang::musttail]] return funcs[*iter++](mod, iter, fn, stack,        \
+                                                  control_stack);              \
+    } while (0)
 #endif
 
-        ensure(is_instruction(byte), "invalid instruction");
-        switch (static_cast<Instruction>(byte)) {
-        case unreachable:
-            stack.polymorphize();
-            break;
-        case nop:
-            break;
-        case block: {
-            auto signature = read_blocktype(types, iter);
+static ValidationHandler *funcs[] = {
+#define V(name, _, byte) [byte] = &validate_##name,
+    FOREACH_INSTRUCTION(V)
+#undef V
+};
 
-            stack.pop(signature.params);
+HANDLER(unreachable) {
+    stack.polymorphize();
+    nextop();
+}
+HANDLER(nop) { nextop(); }
+HANDLER(block) {
+    auto &signature = read_blocktype(mod.types, iter);
+    auto block_start = iter.unsafe_ptr();
 
-            auto block_start = iter.unsafe_ptr();
+    stack.enter_flow(signature.params);
+    control_stack.emplace_back(ControlFlow(signature.results, signature,
+                                           stack.polymorphism(),
+                                           Block(block_start)));
+    stack.unpolymorphize();
+    nextop();
+}
+HANDLER(loop) {
+    auto &signature = read_blocktype(mod.types, iter);
 
-            control_stack.push_back(signature.results);
-            validate(iter, signature);
-            control_stack.pop_back();
+    stack.enter_flow(signature.params);
+    control_stack.emplace_back(
+        ControlFlow(signature.params, signature, stack.polymorphism(), Loop()));
+    stack.unpolymorphize();
+    nextop();
+}
+HANDLER(if_) {
+    auto &signature = read_blocktype(mod.types, iter);
+    auto if_start = iter.unsafe_ptr();
 
-            stack.push(signature.results);
-            break;
-        }
-        case loop: {
-            auto signature = read_blocktype(types, iter);
+    stack.pop(valtype::i32);
+    stack.enter_flow(signature.params);
+    control_stack.emplace_back(ControlFlow(signature.results, signature,
+                                           stack.polymorphism(), If(if_start)));
+    stack.unpolymorphize();
+    nextop();
+}
+HANDLER(else_) {
+    auto &[_, sig, __, construct] = control_stack.back();
+    ensure(std::holds_alternative<If>(construct), "else must close an if");
+    ensure(stack == sig.results, "type mismatch");
 
-            stack.pop(signature.params);
+    stack.pop(sig.results);
+    stack.push(sig.params);
 
-            control_stack.push_back(signature.params);
-            validate(iter, signature);
-            control_stack.pop_back();
-
-            stack.push(signature.results);
-            break;
-        }
-        case if_: {
-            stack.pop(valtype::i32);
-
-            auto signature = read_blocktype(types, iter);
-
-            stack.pop(signature.params);
-            control_stack.push_back(signature.results);
-
-            validate(iter, signature);
-
-            // validate else branch if previous instruction was else
-            if (iter[-1] == static_cast<uint8_t>(else_)) {
-                validate(iter, signature);
-            } else {
-                // if there's no else branch, params and results must match
-                ensure(signature.params == signature.results, "type mismatch");
-            }
-            control_stack.pop_back();
-            stack.push(signature.results);
-            break;
-        }
-        // else is basically an end to an if
-        case else_:
-        case end:
-            ensure(stack == signature.results, "type mismatch");
-            return;
-        case br: {
-            check_br(safe_read_leb128<uint32_t>(iter));
-            stack.polymorphize();
-            break;
-        }
-        case br_if: {
-            stack.pop(valtype::i32);
-            auto depth = safe_read_leb128<uint32_t>(iter);
-            check_br(depth);
-            break;
-        }
-        case br_table: {
-            stack.pop(valtype::i32);
-            auto n_targets = safe_read_leb128<uint32_t>(iter);
-
-            std::vector<uint32_t> targets;
-            for (uint32_t i = 0; i <= n_targets; ++i) {
-                auto target = safe_read_leb128<uint32_t>(iter);
-                ensure(target < control_stack.size(), "unknown label");
-                targets.push_back(target);
-            }
-            auto &default_target =
-                control_stack[control_stack.size() - targets.back() - 1];
-            for (uint32_t depth : targets) {
-                auto target = control_stack[control_stack.size() - depth - 1];
-                if (stack.can_be_anything()) {
-                    ensure(stack.check(target), "type mismatch");
-                    ensure(default_target.size() == target.size(),
-                           "type mismatch");
-                } else {
-                    check_br(depth);
-                    ensure(default_target == target, "type mismatch");
-                }
-            }
-            stack.polymorphize();
-            break;
-        }
-        case return_:
-            check_br(control_stack.size() - 1);
-            stack.polymorphize();
-            break;
-        case call: {
-            auto fn_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(fn_idx < functions.size(), "unknown function");
-
-            auto &fn = functions[fn_idx];
-            apply(fn.type);
-            break;
-        }
-        case call_indirect: {
-            stack.pop(valtype::i32);
-
-            auto type_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(type_idx < types.size(), "unknown type");
-
-            auto table_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(table_idx < tables.size(), "unknown table");
-            ensure(tables[table_idx].type == valtype::funcref, "type mismatch");
-
-            apply(types[type_idx]);
-            break;
-        }
-        case drop:
-            ensure(!stack.empty(), "type mismatch");
-            stack.pop(stack.back());
-            break;
-        case select: {
-            ensure(stack.size() >= 3, "type mismatch");
-            // first pop the condition
-            stack.pop(valtype::i32);
-
-            auto ty = stack.back();
-            ensure(ty == valtype::empty || is_numtype(ty), "type mismatch");
-
-            // then apply the dynamic type
-            apply({{ty, ty}, {ty}});
-            break;
-        }
-        case select_t: {
-            auto n_results = safe_read_leb128<uint32_t>(iter);
-            ensure(n_results == 1, "invalid result arity");
-            auto maybe_valtype = *iter++;
-            ensure(is_valtype(maybe_valtype), "invalid result type");
-
-            ensure(stack.size() >= 3, "type mismatch");
-            // first pop the condition
-            stack.pop(valtype::i32);
-            auto ty = stack.back();
-            // then apply the dynamic type
-            apply({{ty, ty}, {ty}});
-            break;
-        }
-        case localget: {
-            auto local_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(local_idx < current_fn.locals.size(), "unknown local");
-            auto local_ty = current_fn.locals[local_idx];
-            apply({{}, {local_ty}});
-            break;
-        }
-        case localset: {
-            auto local_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(local_idx < current_fn.locals.size(), "unknown local");
-            auto local_ty = current_fn.locals[local_idx];
-            apply({{local_ty}, {}});
-            break;
-        }
-        case localtee: {
-            auto local_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(local_idx < current_fn.locals.size(), "unknown local");
-            auto local_ty = current_fn.locals[local_idx];
-            apply({{local_ty}, {local_ty}});
-            break;
-        }
-        case tableget: {
-            auto table_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(table_idx < tables.size(), "unknown table");
-            auto table_ty = tables[table_idx].type;
-            apply({{valtype::i32}, {table_ty}});
-            break;
-        }
-        case tableset: {
-            auto table_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(table_idx < tables.size(), "unknown table");
-            auto table_ty = tables[table_idx].type;
-            apply({{valtype::i32, table_ty}, {}});
-            break;
-        }
-        case globalget: {
-            auto global_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(global_idx < globals.size(), "unknown global");
-            auto global_ty = globals[global_idx].type;
-            apply({{}, {global_ty}});
-            break;
-        }
-        case globalset: {
-            auto global_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(global_idx < globals.size(), "unknown global");
-            ensure(globals[global_idx].mutability == mut::var,
-                   "global is immutable");
-            auto global_ty = globals[global_idx].type;
-            apply({{global_ty}, {}});
-            break;
-        }
-        case memorysize: {
-            if (*iter++ != 0)
-                throw malformed_error("zero byte expected");
-            ensure(memory.exists, "unknown memory");
-            apply({{}, {valtype::i32}});
-            break;
-        }
-        case memorygrow: {
-            if (*iter++ != 0)
-                throw malformed_error("zero byte expected");
-            ensure(memory.exists, "unknown memory");
-            apply({{valtype::i32}, {valtype::i32}});
-            break;
-        }
-        case i32const:
-            safe_read_sleb128<uint32_t>(iter);
-            apply({{}, {valtype::i32}});
-            break;
-        case i64const:
-            safe_read_sleb128<uint64_t>(iter);
-            apply({{}, {valtype::i64}});
-            break;
-        case f32const: {
-            iter += sizeof(float);
-            apply({{}, {valtype::f32}});
-            break;
-        }
-        case f64const:
-            iter += sizeof(double);
-            apply({{}, {valtype::f64}});
-            break;
-            // clang-format off
-        case i32load:     LOAD(uint32_t,  valtype::i32);
-        case i64load:     LOAD(uint64_t,  valtype::i64);
-        case f32load:     LOAD(float,     valtype::f32);
-        case f64load:     LOAD(double,    valtype::f64);
-        case i32load8_s:  LOAD(int8_t,    valtype::i32);
-        case i32load8_u:  LOAD(uint8_t,   valtype::i32);
-        case i32load16_s: LOAD(int16_t,   valtype::i32);
-        case i32load16_u: LOAD(uint16_t,  valtype::i32);
-        case i64load8_s:  LOAD(int8_t,    valtype::i64);
-        case i64load8_u:  LOAD(uint8_t,   valtype::i64);
-        case i64load16_s: LOAD(int16_t,   valtype::i64);
-        case i64load16_u: LOAD(uint16_t,  valtype::i64);
-        case i64load32_s: LOAD(int32_t,   valtype::i64);
-        case i64load32_u: LOAD(uint32_t,  valtype::i64);
-        case i32store:    STORE(uint32_t, valtype::i32);
-        case i64store:    STORE(uint64_t, valtype::i64);
-        case f32store:    STORE(float,    valtype::f32);
-        case f64store:    STORE(double,   valtype::f64);
-        case i32store8:   STORE(uint8_t,  valtype::i32);
-        case i32store16:  STORE(uint16_t, valtype::i32);
-        case i64store8:   STORE(uint8_t,  valtype::i64);
-        case i64store16:  STORE(uint16_t, valtype::i64);
-        case i64store32:  STORE(uint32_t, valtype::i64);
-        case i32eqz:      apply({{valtype::i32              }, {valtype::i32}}); break;
-        case i64eqz:      apply({{valtype::i64              }, {valtype::i32}}); break;
-        case i32eq:       apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64eq:       apply({{valtype::i64, valtype::i64}, {valtype::i32}}); break;
-        case i32ne:       apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64ne:       apply({{valtype::i64, valtype::i64}, {valtype::i32}}); break;
-        case i32lt_s:     apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64lt_s:     apply({{valtype::i64, valtype::i64}, {valtype::i32}}); break;
-        case i32lt_u:     apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64lt_u:     apply({{valtype::i64, valtype::i64}, {valtype::i32}}); break;
-        case i32gt_s:     apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64gt_s:     apply({{valtype::i64, valtype::i64}, {valtype::i32}}); break;
-        case i32gt_u:     apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64gt_u:     apply({{valtype::i64, valtype::i64}, {valtype::i32}}); break;
-        case i32le_s:     apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64le_s:     apply({{valtype::i64, valtype::i64}, {valtype::i32}}); break;
-        case i32le_u:     apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64le_u:     apply({{valtype::i64, valtype::i64}, {valtype::i32}}); break;
-        case i32ge_s:     apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64ge_s:     apply({{valtype::i64, valtype::i64}, {valtype::i32}}); break;
-        case i32ge_u:     apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64ge_u:     apply({{valtype::i64, valtype::i64}, {valtype::i32}}); break;
-        case f32eq:       apply({{valtype::f32, valtype::f32}, {valtype::i32}}); break;
-        case f64eq:       apply({{valtype::f64, valtype::f64}, {valtype::i32}}); break;
-        case f32ne:       apply({{valtype::f32, valtype::f32}, {valtype::i32}}); break;
-        case f64ne:       apply({{valtype::f64, valtype::f64}, {valtype::i32}}); break;
-        case f32lt:       apply({{valtype::f32, valtype::f32}, {valtype::i32}}); break;
-        case f64lt:       apply({{valtype::f64, valtype::f64}, {valtype::i32}}); break;
-        case f32gt:       apply({{valtype::f32, valtype::f32}, {valtype::i32}}); break;
-        case f64gt:       apply({{valtype::f64, valtype::f64}, {valtype::i32}}); break;
-        case f32le:       apply({{valtype::f32, valtype::f32}, {valtype::i32}}); break;
-        case f64le:       apply({{valtype::f64, valtype::f64}, {valtype::i32}}); break;
-        case f32ge:       apply({{valtype::f32, valtype::f32}, {valtype::i32}}); break;
-        case f64ge:       apply({{valtype::f64, valtype::f64}, {valtype::i32}}); break;
-        case i32clz:      apply({{valtype::i32              }, {valtype::i32}}); break;
-        case i64clz:      apply({{valtype::i64              }, {valtype::i64}}); break;
-        case i32ctz:      apply({{valtype::i32              }, {valtype::i32}}); break;
-        case i64ctz:      apply({{valtype::i64              }, {valtype::i64}}); break;
-        case i32popcnt:   apply({{valtype::i32              }, {valtype::i32}}); break;
-        case i64popcnt:   apply({{valtype::i64              }, {valtype::i64}}); break;
-        case i32add:      apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64add:      apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32sub:      apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64sub:      apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32mul:      apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64mul:      apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32div_s:    apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64div_s:    apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32div_u:    apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64div_u:    apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32rem_s:    apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64rem_s:    apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32rem_u:    apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64rem_u:    apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32and:      apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64and:      apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32or:       apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64or:       apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32xor:      apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64xor:      apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32shl:      apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64shl:      apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32shr_s:    apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64shr_s:    apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32shr_u:    apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64shr_u:    apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32rotl:     apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64rotl:     apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case i32rotr:     apply({{valtype::i32, valtype::i32}, {valtype::i32}}); break;
-        case i64rotr:     apply({{valtype::i64, valtype::i64}, {valtype::i64}}); break;
-        case f32abs:      apply({{valtype::f32              }, {valtype::f32}}); break;
-        case f64abs:      apply({{valtype::f64              }, {valtype::f64}}); break;
-        case f32neg:      apply({{valtype::f32              }, {valtype::f32}}); break;
-        case f64neg:      apply({{valtype::f64              }, {valtype::f64}}); break;
-        case f32ceil:     apply({{valtype::f32              }, {valtype::f32}}); break;
-        case f64ceil:     apply({{valtype::f64              }, {valtype::f64}}); break;
-        case f32floor:    apply({{valtype::f32              }, {valtype::f32}}); break;
-        case f64floor:    apply({{valtype::f64              }, {valtype::f64}}); break;
-        case f32trunc:    apply({{valtype::f32              }, {valtype::f32}}); break;
-        case f64trunc:    apply({{valtype::f64              }, {valtype::f64}}); break;
-        case f32nearest:  apply({{valtype::f32              }, {valtype::f32}}); break;
-        case f64nearest:  apply({{valtype::f64              }, {valtype::f64}}); break;
-        case f32sqrt:     apply({{valtype::f32              }, {valtype::f32}}); break;
-        case f64sqrt:     apply({{valtype::f64              }, {valtype::f64}}); break;
-        case f32add:      apply({{valtype::f32, valtype::f32}, {valtype::f32}}); break;
-        case f64add:      apply({{valtype::f64, valtype::f64}, {valtype::f64}}); break;
-        case f32sub:      apply({{valtype::f32, valtype::f32}, {valtype::f32}}); break;
-        case f64sub:      apply({{valtype::f64, valtype::f64}, {valtype::f64}}); break;
-        case f32mul:      apply({{valtype::f32, valtype::f32}, {valtype::f32}}); break;
-        case f64mul:      apply({{valtype::f64, valtype::f64}, {valtype::f64}}); break;
-        case f32div:      apply({{valtype::f32, valtype::f32}, {valtype::f32}}); break;
-        case f64div:      apply({{valtype::f64, valtype::f64}, {valtype::f64}}); break;
-        case f32min:      apply({{valtype::f32, valtype::f32}, {valtype::f32}}); break;
-        case f64min:      apply({{valtype::f64, valtype::f64}, {valtype::f64}}); break;
-        case f32max:      apply({{valtype::f32, valtype::f32}, {valtype::f32}}); break;
-        case f64max:      apply({{valtype::f64, valtype::f64}, {valtype::f64}}); break;
-        case f32copysign: apply({{valtype::f32, valtype::f32}, {valtype::f32}}); break;
-        case f64copysign: apply({{valtype::f64, valtype::f64}, {valtype::f64}}); break;
-        case i32wrap_i64:      apply({{valtype::i64}, {valtype::i32}}); break;
-        case i64extend_i32_s:  apply({{valtype::i32}, {valtype::i64}}); break;
-        case i64extend_i32_u:  apply({{valtype::i32}, {valtype::i64}}); break;
-        case i32trunc_f32_s:   apply({{valtype::f32}, {valtype::i32}}); break;
-        case i64trunc_f32_s:   apply({{valtype::f32}, {valtype::i64}}); break;
-        case i32trunc_f32_u:   apply({{valtype::f32}, {valtype::i32}}); break;
-        case i64trunc_f32_u:   apply({{valtype::f32}, {valtype::i64}}); break;
-        case i32trunc_f64_s:   apply({{valtype::f64}, {valtype::i32}}); break;
-        case i64trunc_f64_s:   apply({{valtype::f64}, {valtype::i64}}); break;
-        case i32trunc_f64_u:   apply({{valtype::f64}, {valtype::i32}}); break;
-        case i64trunc_f64_u:   apply({{valtype::f64}, {valtype::i64}}); break;
-        case f32convert_i32_s: apply({{valtype::i32}, {valtype::f32}}); break;
-        case f64convert_i32_s: apply({{valtype::i32}, {valtype::f64}}); break;
-        case f32convert_i32_u: apply({{valtype::i32}, {valtype::f32}}); break;
-        case f64convert_i32_u: apply({{valtype::i32}, {valtype::f64}}); break;
-        case f32convert_i64_s: apply({{valtype::i64}, {valtype::f32}}); break;
-        case f64convert_i64_s: apply({{valtype::i64}, {valtype::f64}}); break;
-        case f32convert_i64_u: apply({{valtype::i64}, {valtype::f32}}); break;
-        case f64convert_i64_u: apply({{valtype::i64}, {valtype::f64}}); break;
-        case f32demote_f64:    apply({{valtype::f64}, {valtype::f32}}); break;
-        case f64promote_f32:   apply({{valtype::f32}, {valtype::f64}}); break;
-        case i32reinterpret_f32: apply({{valtype::f32}, {valtype::i32}}); break;
-        case f32reinterpret_i32: apply({{valtype::i32}, {valtype::f32}}); break;
-        case i64reinterpret_f64: apply({{valtype::f64}, {valtype::i64}}); break;
-        case f64reinterpret_i64: apply({{valtype::i64}, {valtype::f64}}); break;
-        case i32extend8_s:  apply({{valtype::i32}, {valtype::i32}}); break;
-        case i32extend16_s: apply({{valtype::i32}, {valtype::i32}}); break;
-        case i64extend8_s:  apply({{valtype::i64}, {valtype::i64}}); break;
-        case i64extend16_s: apply({{valtype::i64}, {valtype::i64}}); break;
-        case i64extend32_s: apply({{valtype::i64}, {valtype::i64}}); break;
-        case ref_null: {
-            auto type_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(is_reftype(type_idx), "type mismatch");
-            apply({{}, {static_cast<valtype>(type_idx)}});
-            break;
-        }
-        case ref_is_null: {
-            auto peek = stack.back();
-            ensure(peek == valtype::empty || is_reftype(peek), "type mismatch");
-            apply({{peek}, {valtype::i32}});
-            break;
-        }
-        case ref_func: {
-            auto func_idx = safe_read_leb128<uint32_t>(iter);
-            ensure(func_idx < functions.size(), "invalid function index");
-            ensure(functions[func_idx].is_declared, "undeclared function reference");
-            apply({{}, {valtype::funcref}});
-            break;
-        }
-        case ref_eq: {
-            auto peek = stack.back();
-            ensure(peek == valtype::empty || is_reftype(peek), "type mismatch");
-            apply({{peek, peek}, {valtype::i32}});
-            break;
-        }
-        case multibyte: {
-            auto byte = safe_read_leb128<uint32_t>(iter);
-#if WASM_DEBUG
-            std::cerr << "reading multibyte instruction " << multibyte_instructions[byte].c_str()
-                      << " at " << iter - bytes.get() << std::endl;
-#endif
-
-            using enum FCInstruction;
-            switch (static_cast<FCInstruction>(byte)) {
-                case i32_trunc_sat_f32_s:
-                    apply({{valtype::f32}, {valtype::i32}});
-                    break;
-                case i32_trunc_sat_f32_u:
-                    apply({{valtype::f32}, {valtype::i32}});
-                    break;
-                case i32_trunc_sat_f64_s:
-                    apply({{valtype::f64}, {valtype::i32}});
-                    break;
-                case i32_trunc_sat_f64_u:
-                    apply({{valtype::f64}, {valtype::i32}});
-                    break;
-                case i64_trunc_sat_f32_s:
-                    apply({{valtype::f32}, {valtype::i64}});
-                    break;
-                case i64_trunc_sat_f32_u:
-                    apply({{valtype::f32}, {valtype::i64}});
-                    break;
-                case i64_trunc_sat_f64_s:
-                    apply({{valtype::f64}, {valtype::i64}});
-                    break;
-                case i64_trunc_sat_f64_u:
-                    apply({{valtype::f64}, {valtype::i64}});
-                    break;
-                case memory_init: {
-                    auto seg_idx = safe_read_leb128<uint32_t>(iter);
-                    if (*iter++ != 0) throw malformed_error("zero byte expected");
-
-                    ensure(memory.exists, "unknown memory 0");
-                    if (n_data == std::numeric_limits<uint32_t>::max()) {
-                        throw malformed_error("data count section required");
-                    }
-                    ensure(seg_idx < n_data, "unknown data segment");
-
-                    apply({{valtype::i32, valtype::i32, valtype::i32}, {}});
-                    break;
-                }
-                case data_drop: {
-                    auto seg_idx = safe_read_leb128<uint32_t>(iter);
-                    if (n_data == std::numeric_limits<uint32_t>::max()) {
-                        throw malformed_error("data count section required");
-                    }
-                    ensure(seg_idx < n_data, "unknown data segment");
-                    break;
-                }
-                case memory_copy: {
-                    if (*iter++ != 0) throw malformed_error("zero byte expected");
-                    if (*iter++ != 0) throw malformed_error("zero byte expected");
-                    ensure(memory.exists, "unknown memory 0");
-
-                    apply({{valtype::i32, valtype::i32, valtype::i32}, {}});
-                    break;
-                }
-                case memory_fill: {
-                    if (*iter++ != 0) throw malformed_error("zero byte expected");
-                    ensure(memory.exists, "unknown memory 0");
-
-                    apply({{valtype::i32, valtype::i32, valtype::i32}, {}});
-                    break;
-                }
-                case table_init: {
-                    auto seg_idx = safe_read_leb128<uint32_t>(iter);
-                    auto table_idx = safe_read_leb128<uint32_t>(iter);
-
-                    ensure(table_idx < tables.size(), "unknown table " + std::to_string(table_idx));
-                    ensure(seg_idx < elements.size(), "unknown data segment");
-                    ensure(tables[table_idx].type == elements[seg_idx].type, "type mismatch");
-
-                    apply({{valtype::i32, valtype::i32, valtype::i32}, {}});
-                    break;
-                }
-                case elem_drop: {
-                    auto seg_idx = safe_read_leb128<uint32_t>(iter);
-                    ensure(seg_idx < elements.size(), "unknown elem segment " + std::to_string(seg_idx));
-                    break;
-                }
-                case table_copy: {
-                    auto src_table_idx = safe_read_leb128<uint32_t>(iter);
-                    ensure(src_table_idx < tables.size(), "unknown table");
-                    auto dst_table_idx = safe_read_leb128<uint32_t>(iter);
-                    ensure(dst_table_idx < tables.size(), "unknown table");
-                    ensure(tables[src_table_idx].type == tables[dst_table_idx].type, "type mismatch");
-
-                    apply({{valtype::i32, valtype::i32, valtype::i32}, {}});
-                    break;
-                }
-                case table_grow: {
-                    auto table_idx = safe_read_leb128<uint32_t>(iter);
-                    ensure(table_idx < tables.size(), "unknown table");
-
-                    apply({{tables[table_idx].type, valtype::i32}, {valtype::i32}});
-                    break;
-                }
-                case table_size: {
-                    auto table_idx = safe_read_leb128<uint32_t>(iter);
-                    ensure(table_idx < tables.size(), "unknown table");
-
-                    apply({{}, {valtype::i32}});
-                    break;
-                }
-                case table_fill: {
-                    auto table_idx = safe_read_leb128<uint32_t>(iter);
-                    ensure(table_idx < tables.size(), "unknown table");
-
-                    apply({{valtype::i32, tables[table_idx].type, valtype::i32}, {}});
-                    break;
-                }
-                default: ensure(false, "unimplemented FC extension instruction " + std::to_string(byte));
-            }
-            break;
-        }
-        default: ensure(false, "unimplemented instruction " + std::to_string(byte));
-            // clang-format on
-        };
+    auto &if_ = std::get<If>(construct);
+    control_stack.back().construct = IfElse(if_.if_start, iter.unsafe_ptr());
+    stack.unpolymorphize();
+    nextop();
+}
+HANDLER(end) {
+    if (control_stack.size() == 1) {
+        ensure(stack == fn.type.results, "type mismatch stack vs. results");
+        return;
     }
 
-    ensure(false, "unreachable");
+    auto &[_, sig, polymorphism, construct] = control_stack.back();
+
+    ensure(stack == sig.results, "type mismatch stack vs. results");
+
+    if (std::holds_alternative<Block>(construct)) {
+        // todo
+    } else if (std::holds_alternative<Loop>(construct)) {
+        // todo
+    } else if (std::holds_alternative<If>(construct)) {
+        ensure(sig.params == sig.results, "type mismatch params vs. results");
+        // todo
+    } else if (std::holds_alternative<IfElse>(construct)) {
+        // todo
+    }
+    stack.pop(sig.results);
+    stack.pop(valtype::null);
+
+    stack.set_polymorphism(polymorphism);
+    stack.push(sig.results);
+
+    control_stack.pop_back();
+    nextop();
+}
+HANDLER(br) {
+    stack.check_br(control_stack, safe_read_leb128<uint32_t>(iter));
+    stack.polymorphize();
+    nextop();
+}
+HANDLER(br_if) {
+    stack.pop(valtype::i32);
+    auto depth = safe_read_leb128<uint32_t>(iter);
+    stack.check_br(control_stack, depth);
+    nextop();
+}
+HANDLER(br_table) {
+    stack.pop(valtype::i32);
+    auto n_targets = safe_read_leb128<uint32_t>(iter);
+
+    auto targets = (uint32_t *)alloca(sizeof(uint32_t) * (n_targets + 1));
+    for (uint32_t i = 0; i <= n_targets; ++i) {
+        auto target = safe_read_leb128<uint32_t>(iter);
+        ensure(target < control_stack.size(), "unknown label");
+        targets[i] = target;
+    }
+    auto base = control_stack.size() - 1;
+    auto &default_target = control_stack[base - targets[n_targets]].expected;
+    for (uint32_t i = 0; i <= n_targets; ++i) {
+        auto &target = control_stack[base - targets[i]].expected;
+        if (stack.can_be_anything()) {
+            ensure(stack.check(target), "type mismatch");
+            ensure(default_target.size() == target.size(), "type mismatch");
+        } else {
+            stack.check_br(control_stack, targets[i]);
+            ensure(default_target == target, "type mismatch");
+        }
+    }
+    stack.polymorphize();
+    nextop();
+}
+HANDLER(return_) {
+    stack.check_br(control_stack, control_stack.size() - 1);
+    stack.polymorphize();
+    nextop();
+}
+HANDLER(call) {
+    auto fn_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(fn_idx < mod.functions.size(), "unknown function");
+
+    auto &func = mod.functions[fn_idx];
+    stack.apply(func.type);
+    nextop();
+}
+HANDLER(call_indirect) {
+    stack.pop(valtype::i32);
+
+    auto type_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(type_idx < mod.types.size(), "unknown type");
+
+    auto table_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(table_idx < mod.tables.size(), "unknown table");
+    ensure(mod.tables[table_idx].type == valtype::funcref, "type mismatch");
+
+    stack.apply(mod.types[type_idx]);
+    nextop();
+}
+HANDLER(drop) {
+    stack.pop(stack.back());
+    nextop();
+}
+HANDLER(select) {
+    // first pop the condition
+    stack.pop(valtype::i32);
+
+    auto ty = stack.back();
+    ensure(ty == valtype::any || is_numtype(ty), "type mismatch");
+
+    // then apply the dynamic type
+    stack.apply(std::array{ty, ty}, std::array{ty});
+    nextop();
+}
+HANDLER(select_t) {
+    auto n_results = safe_read_leb128<uint32_t>(iter);
+    ensure(n_results == 1, "invalid result arity");
+    auto maybe_valtype = *iter++;
+    ensure(is_valtype(maybe_valtype), "invalid result type");
+
+    // first pop the condition
+    stack.pop(valtype::i32);
+    auto ty = stack.back();
+    // then apply the dynamic type
+    stack.apply(std::array{ty, ty}, std::array{ty});
+    nextop();
+}
+HANDLER(localget) {
+    auto local_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(local_idx < fn.locals.size(), "unknown local");
+    auto local_ty = fn.locals[local_idx];
+    stack.apply(std::array<valtype, 0>(), std::array{local_ty});
+    nextop();
+}
+HANDLER(localset) {
+    auto local_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(local_idx < fn.locals.size(), "unknown local");
+    auto local_ty = fn.locals[local_idx];
+    stack.apply(std::array{local_ty}, std::array<valtype, 0>());
+    nextop();
+}
+HANDLER(localtee) {
+    auto local_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(local_idx < fn.locals.size(), "unknown local");
+    auto local_ty = fn.locals[local_idx];
+    stack.apply(std::array{local_ty}, std::array{local_ty});
+    nextop();
+}
+HANDLER(tableget) {
+    auto table_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(table_idx < mod.tables.size(), "unknown table");
+    auto table_ty = mod.tables[table_idx].type;
+    stack.apply(std::array{valtype::i32}, std::array{table_ty});
+    nextop();
+}
+HANDLER(tableset) {
+    auto table_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(table_idx < mod.tables.size(), "unknown table");
+    auto table_ty = mod.tables[table_idx].type;
+    stack.apply(std::array{valtype::i32, table_ty}, std::array<valtype, 0>());
+    nextop();
+}
+HANDLER(globalget) {
+    auto global_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(global_idx < mod.globals.size(), "unknown global");
+    auto global_ty = mod.globals[global_idx].type;
+    stack.apply(std::array<valtype, 0>(), std::array{global_ty});
+    nextop();
+}
+HANDLER(globalset) {
+    auto global_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(global_idx < mod.globals.size(), "unknown global");
+    ensure(mod.globals[global_idx].mutability == mut::var,
+           "global is immutable");
+    auto global_ty = mod.globals[global_idx].type;
+    stack.apply(std::array{global_ty}, std::array<valtype, 0>());
+    nextop();
+}
+HANDLER(memorysize) {
+    if (*iter++ != 0)
+        error<malformed_error>("zero byte expected");
+    ensure(mod.memory.exists, "unknown memory");
+    stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
+    nextop();
+}
+HANDLER(memorygrow) {
+    if (*iter++ != 0)
+        error<malformed_error>("zero byte expected");
+    ensure(mod.memory.exists, "unknown memory");
+    stack.apply(std::array{valtype::i32}, std::array{valtype::i32});
+    nextop();
+}
+HANDLER(i32const) {
+    safe_read_sleb128<uint32_t>(iter);
+    stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
+    nextop();
+}
+HANDLER(i64const) {
+    safe_read_sleb128<uint64_t>(iter);
+    stack.apply(std::array<valtype, 0>(), std::array{valtype::i64});
+    nextop();
+}
+HANDLER(f32const) {
+    iter += sizeof(float);
+    stack.apply(std::array<valtype, 0>(), std::array{valtype::f32});
+    nextop();
+}
+HANDLER(f64const) {
+    iter += sizeof(double);
+    stack.apply(std::array<valtype, 0>(), std::array{valtype::f64});
+    nextop();
+}
+// clang-format off
+HANDLER(i32load) {     LOAD(uint32_t,  valtype::i32); }
+HANDLER(i64load) {     LOAD(uint64_t,  valtype::i64); }
+HANDLER(f32load) {     LOAD(float,     valtype::f32); }
+HANDLER(f64load) {     LOAD(double,    valtype::f64); }
+HANDLER(i32load8_s) {  LOAD(int8_t,    valtype::i32); }
+HANDLER(i32load8_u) {  LOAD(uint8_t,   valtype::i32); }
+HANDLER(i32load16_s) { LOAD(int16_t,   valtype::i32); }
+HANDLER(i32load16_u) { LOAD(uint16_t,  valtype::i32); }
+HANDLER(i64load8_s) {  LOAD(int8_t,    valtype::i64); }
+HANDLER(i64load8_u) {  LOAD(uint8_t,   valtype::i64); }
+HANDLER(i64load16_s) { LOAD(int16_t,   valtype::i64); }
+HANDLER(i64load16_u) { LOAD(uint16_t,  valtype::i64); }
+HANDLER(i64load32_s) { LOAD(int32_t,   valtype::i64); }
+HANDLER(i64load32_u) { LOAD(uint32_t,  valtype::i64); }
+HANDLER(i32store) {    STORE(uint32_t, valtype::i32); }
+HANDLER(i64store) {    STORE(uint64_t, valtype::i64); }
+HANDLER(f32store) {    STORE(float,    valtype::f32); }
+HANDLER(f64store) {    STORE(double,   valtype::f64); }
+HANDLER(i32store8) {   STORE(uint8_t,  valtype::i32); }
+HANDLER(i32store16) {  STORE(uint16_t, valtype::i32); }
+HANDLER(i64store8) {   STORE(uint8_t,  valtype::i64); }
+HANDLER(i64store16) {  STORE(uint16_t, valtype::i64); }
+HANDLER(i64store32) {  STORE(uint32_t, valtype::i64); }
+HANDLER(i32eqz) {      stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); nextop(); }
+HANDLER(i64eqz) {      stack.apply(std::array{valtype::i64              }, std::array{valtype::i32}); nextop(); }
+HANDLER(i32eq) {       stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64eq) {       stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32ne) {       stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64ne) {       stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32lt_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64lt_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32lt_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64lt_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32gt_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64gt_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32gt_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64gt_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32le_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64le_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32le_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64le_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32ge_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64ge_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32ge_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64ge_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(f32eq) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); nextop(); }
+HANDLER(f64eq) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); nextop(); }
+HANDLER(f32ne) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); nextop(); }
+HANDLER(f64ne) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); nextop(); }
+HANDLER(f32lt) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); nextop(); }
+HANDLER(f64lt) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); nextop(); }
+HANDLER(f32gt) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); nextop(); }
+HANDLER(f64gt) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); nextop(); }
+HANDLER(f32le) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); nextop(); }
+HANDLER(f64le) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); nextop(); }
+HANDLER(f32ge) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); nextop(); }
+HANDLER(f64ge) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32clz) {      stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); nextop(); }
+HANDLER(i64clz) {      stack.apply(std::array{valtype::i64              }, std::array{valtype::i64}); nextop(); }
+HANDLER(i32ctz) {      stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); nextop(); }
+HANDLER(i64ctz) {      stack.apply(std::array{valtype::i64              }, std::array{valtype::i64}); nextop(); }
+HANDLER(i32popcnt) {   stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); nextop(); }
+HANDLER(i64popcnt) {   stack.apply(std::array{valtype::i64              }, std::array{valtype::i64}); nextop(); }
+HANDLER(i32add) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64add) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32sub) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64sub) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32mul) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64mul) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32div_s) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64div_s) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32div_u) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64div_u) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32rem_s) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64rem_s) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32rem_u) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64rem_u) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32and) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64and) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32or) {       stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64or) {       stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32xor) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64xor) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32shl) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64shl) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32shr_s) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64shr_s) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32shr_u) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64shr_u) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32rotl) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64rotl) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32rotr) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64rotr) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(f32abs) {      stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); nextop(); }
+HANDLER(f64abs) {      stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); nextop(); }
+HANDLER(f32neg) {      stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); nextop(); }
+HANDLER(f64neg) {      stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); nextop(); }
+HANDLER(f32ceil) {     stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); nextop(); }
+HANDLER(f64ceil) {     stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); nextop(); }
+HANDLER(f32floor) {    stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); nextop(); }
+HANDLER(f64floor) {    stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); nextop(); }
+HANDLER(f32trunc) {    stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); nextop(); }
+HANDLER(f64trunc) {    stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); nextop(); }
+HANDLER(f32nearest) {  stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); nextop(); }
+HANDLER(f64nearest) {  stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); nextop(); }
+HANDLER(f32sqrt) {     stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); nextop(); }
+HANDLER(f64sqrt) {     stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); nextop(); }
+HANDLER(f32add) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64add) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); nextop(); }
+HANDLER(f32sub) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64sub) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); nextop(); }
+HANDLER(f32mul) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64mul) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); nextop(); }
+HANDLER(f32div) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64div) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); nextop(); }
+HANDLER(f32min) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64min) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); nextop(); }
+HANDLER(f32max) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64max) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); nextop(); }
+HANDLER(f32copysign) { stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64copysign) { stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); nextop(); }
+HANDLER(i32wrap_i64) {      stack.apply(std::array{valtype::i64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64extend_i32_s) {  stack.apply(std::array{valtype::i32}, std::array{valtype::i64}); nextop(); }
+HANDLER(i64extend_i32_u) {  stack.apply(std::array{valtype::i32}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32trunc_f32_s) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64trunc_f32_s) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32trunc_f32_u) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64trunc_f32_u) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32trunc_f64_s) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64trunc_f64_s) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i32trunc_f64_u) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64trunc_f64_u) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); nextop(); }
+HANDLER(f32convert_i32_s) { stack.apply(std::array{valtype::i32}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64convert_i32_s) { stack.apply(std::array{valtype::i32}, std::array{valtype::f64}); nextop(); }
+HANDLER(f32convert_i32_u) { stack.apply(std::array{valtype::i32}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64convert_i32_u) { stack.apply(std::array{valtype::i32}, std::array{valtype::f64}); nextop(); }
+HANDLER(f32convert_i64_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64convert_i64_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::f64}); nextop(); }
+HANDLER(f32convert_i64_u) { stack.apply(std::array{valtype::i64}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64convert_i64_u) { stack.apply(std::array{valtype::i64}, std::array{valtype::f64}); nextop(); }
+HANDLER(f32demote_f64) {    stack.apply(std::array{valtype::f64}, std::array{valtype::f32}); nextop(); }
+HANDLER(f64promote_f32) {   stack.apply(std::array{valtype::f32}, std::array{valtype::f64}); nextop(); }
+HANDLER(i32reinterpret_f32) { stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); nextop(); }
+HANDLER(f32reinterpret_i32) { stack.apply(std::array{valtype::i32}, std::array{valtype::f32}); nextop(); }
+HANDLER(i64reinterpret_f64) { stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); nextop(); }
+HANDLER(f64reinterpret_i64) { stack.apply(std::array{valtype::i64}, std::array{valtype::f64}); nextop(); }
+HANDLER(i32extend8_s) {  stack.apply(std::array{valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i32extend16_s) { stack.apply(std::array{valtype::i32}, std::array{valtype::i32}); nextop(); }
+HANDLER(i64extend8_s) {  stack.apply(std::array{valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i64extend16_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::i64}); nextop(); }
+HANDLER(i64extend32_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::i64}); nextop(); }
+// clang-format on
+HANDLER(ref_null) {
+    auto type_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(is_reftype(type_idx), "type mismatch");
+    stack.apply(std::array<valtype, 0>(),
+                std::array{static_cast<valtype>(type_idx)});
+    nextop();
+}
+HANDLER(ref_is_null) {
+    auto peek = stack.back();
+    ensure(peek == valtype::any || is_reftype(peek), "type mismatch");
+    stack.apply(std::array{peek}, std::array{valtype::i32});
+    nextop();
+}
+HANDLER(ref_func) {
+    auto func_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(func_idx < mod.functions.size(), "invalid function index");
+    ensure(mod.functions[func_idx].is_declared,
+           "undeclared function reference");
+    stack.apply(std::array<valtype, 0>(), std::array{valtype::funcref});
+    nextop();
+}
+HANDLER(ref_eq) {
+    auto peek = stack.back();
+    ensure(peek == valtype::any || is_reftype(peek), "type mismatch");
+    stack.apply(std::array{peek, peek}, std::array{valtype::i32});
+    nextop();
+}
+HANDLER(i32_trunc_sat_f32_s) {
+    stack.apply(std::array{valtype::f32}, std::array{valtype::i32});
+    nextop();
+}
+HANDLER(i32_trunc_sat_f32_u) {
+    stack.apply(std::array{valtype::f32}, std::array{valtype::i32});
+    nextop();
+}
+HANDLER(i32_trunc_sat_f64_s) {
+    stack.apply(std::array{valtype::f64}, std::array{valtype::i32});
+    nextop();
+}
+HANDLER(i32_trunc_sat_f64_u) {
+    stack.apply(std::array{valtype::f64}, std::array{valtype::i32});
+    nextop();
+}
+HANDLER(i64_trunc_sat_f32_s) {
+    stack.apply(std::array{valtype::f32}, std::array{valtype::i64});
+    nextop();
+}
+HANDLER(i64_trunc_sat_f32_u) {
+    stack.apply(std::array{valtype::f32}, std::array{valtype::i64});
+    nextop();
+}
+HANDLER(i64_trunc_sat_f64_s) {
+    stack.apply(std::array{valtype::f64}, std::array{valtype::i64});
+    nextop();
+}
+HANDLER(i64_trunc_sat_f64_u) {
+    stack.apply(std::array{valtype::f64}, std::array{valtype::i64});
+    nextop();
+}
+HANDLER(memory_init) {
+    auto seg_idx = safe_read_leb128<uint32_t>(iter);
+    if (*iter++ != 0)
+        error<malformed_error>("zero byte expected");
+
+    ensure(mod.memory.exists, "unknown memory 0");
+    if (mod.n_data == std::numeric_limits<uint32_t>::max()) {
+        error<malformed_error>("data count section required");
+    }
+    ensure(seg_idx < mod.n_data, "unknown data segment");
+
+    stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
+                std::array<valtype, 0>());
+    nextop();
+}
+HANDLER(data_drop) {
+    auto seg_idx = safe_read_leb128<uint32_t>(iter);
+    if (mod.n_data == std::numeric_limits<uint32_t>::max()) {
+        error<malformed_error>("data count section required");
+    }
+    ensure(seg_idx < mod.n_data, "unknown data segment");
+    nextop();
+}
+HANDLER(memory_copy) {
+    if (*iter++ != 0)
+        error<malformed_error>("zero byte expected");
+    if (*iter++ != 0)
+        error<malformed_error>("zero byte expected");
+    ensure(mod.memory.exists, "unknown memory 0");
+
+    stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
+                std::array<valtype, 0>());
+    nextop();
+}
+HANDLER(memory_fill) {
+    if (*iter++ != 0)
+        error<malformed_error>("zero byte expected");
+    ensure(mod.memory.exists, "unknown memory 0");
+
+    stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
+                std::array<valtype, 0>());
+    nextop();
+}
+HANDLER(table_init) {
+    auto seg_idx = safe_read_leb128<uint32_t>(iter);
+    auto table_idx = safe_read_leb128<uint32_t>(iter);
+
+    ensure(table_idx < mod.tables.size(), "unknown table");
+    ensure(seg_idx < mod.elements.size(), "unknown data segment");
+    ensure(mod.tables[table_idx].type == mod.elements[seg_idx].type,
+           "type mismatch");
+
+    stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
+                std::array<valtype, 0>());
+    nextop();
+}
+HANDLER(elem_drop) {
+    auto seg_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(seg_idx < mod.elements.size(), "unknown elem segment");
+    nextop();
+}
+HANDLER(table_copy) {
+    auto src_table_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(src_table_idx < mod.tables.size(), "unknown table");
+    auto dst_table_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(dst_table_idx < mod.tables.size(), "unknown table");
+    ensure(mod.tables[src_table_idx].type == mod.tables[dst_table_idx].type,
+           "type mismatch");
+
+    stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
+                std::array<valtype, 0>());
+    nextop();
+}
+HANDLER(table_grow) {
+    auto table_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(table_idx < mod.tables.size(), "unknown table");
+
+    stack.apply(std::array{mod.tables[table_idx].type, valtype::i32},
+                std::array{valtype::i32});
+    nextop();
+}
+HANDLER(table_size) {
+    auto table_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(table_idx < mod.tables.size(), "unknown table");
+
+    stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
+    nextop();
+}
+HANDLER(table_fill) {
+    auto table_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(table_idx < mod.tables.size(), "unknown table");
+
+    stack.apply(
+        std::array{valtype::i32, mod.tables[table_idx].type, valtype::i32},
+        std::array<valtype, 0>());
+    nextop();
+}
+HANDLER(multibyte) {
+    static ValidationHandler *fc_funcs[] = {
+#define V(name, _, byte) [byte] = &validate_##name,
+        FOREACH_MULTIBYTE_INSTRUCTION(V)
+#undef V
+    };
+
+    [[clang::musttail]] return fc_funcs[safe_read_leb128<uint32_t>(iter)](
+        mod, iter, fn, stack, control_stack);
+}
+
+void Module::validate(safe_byte_iterator &iter, FunctionShell &fn) {
+    if (!fn.start) {
+        // skip imported functions
+        return;
+    }
+
+    auto stack = WasmStack();
+
+    auto control_stack = std::vector<ControlFlow>(
+        {ControlFlow(fn.type.results, fn.type, false, Function())});
+
+    return funcs[*iter++](*this, iter, fn, stack, control_stack);
 }
 
 #undef ensure
