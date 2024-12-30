@@ -168,10 +168,6 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
 
     while (1) {
         auto byte = *iter++;
-#ifdef WASM_DEBUG
-        std::cerr << "reading instruction " << instructions[byte].c_str()
-                  << " at " << iter - bytes.get() << std::endl;
-#endif
 
         using enum Instruction;
         if (static_cast<Instruction>(byte) == end) {
@@ -264,6 +260,7 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
 
 Module::Module() : executable(nullptr, [](auto) {}), memory{} {}
 
+template <typename Pager, typename Target>
 void Module::initialize(std::span<uint8_t> bytes) {
     if (bytes.size() < 4) {
         error<malformed_error>("unexpected end");
@@ -430,7 +427,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 if (typeidx >= types.size()) {
                     error<validation_error>("unknown type");
                 }
-                functions.push_back({nullptr, types[typeidx], {}, specifier});
+                functions.push_back({0, types[typeidx], {}, specifier});
                 n_fn_imports++;
             } else if (desc == ImExDesc::table) {
                 // table
@@ -485,7 +482,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
             if (type_idx >= types.size()) {
                 error<validation_error>("unknown type");
             }
-            functions.push_back({nullptr, types[type_idx], {}, std::nullopt});
+            functions.push_back({0, types[type_idx], {}, std::nullopt});
         }
     });
 
@@ -791,6 +788,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     "function and code section have inconsistent lengths");
             }
 
+            auto code = std::vector<uint8_t>();
+
             for (FunctionShell &fn : functions) {
                 if (fn.import) {
                     // skip imported functions
@@ -819,22 +818,30 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     }
                 }
                 auto body_length = function_length - (iter - start);
-                fn.start = iter.get_with_at_least(body_length);
+                fn.start = code.size();
+                if (!iter.has_n_left(body_length)) {
+                    error<malformed_error>("length out of bounds");
+                }
 
-                auto fn_iter = iter;
 #ifdef WASM_DEBUG
                 std::cerr << "validating function " << &fn - functions.data()
-                          << " at " << fn_iter - bytes.get() << std::endl;
+                          << " at " << iter - bytes.data() << std::endl;
 #endif
-                validate(fn_iter, fn);
+                auto fn_iter = iter;
+                validate_and_compile<Pager, Target>(fn_iter, code, fn);
                 if (fn_iter[-1] != static_cast<uint8_t>(Instruction::end)) {
                     error<malformed_error>("END opcode expected");
                 }
                 if (fn_iter - start != function_length) {
                     error<malformed_error>("section size mismatch");
                 }
-                iter += fn_iter - iter;
+                iter = fn_iter;
             }
+
+            executable = Pager::allocate(code.size());
+            Pager::write(executable, [&] {
+                std::copy(code.begin(), code.end(), executable.get());
+            });
         },
         [&] {
             if (functions.size() != n_fn_imports) {
@@ -1087,9 +1094,11 @@ class WasmStack {
     }
 
 #define HANDLER(name)                                                          \
+    template <typename Target>                                                 \
     void validate_##name(Module &mod, safe_byte_iterator &iter,                \
                          FunctionShell &fn, WasmStack &stack,                  \
-                         std::vector<ControlFlow> &control_stack)
+                         std::vector<ControlFlow> &control_stack,              \
+                         std::vector<uint8_t> &code)
 
 #define V(name, _, byte) HANDLER(name);
 FOREACH_INSTRUCTION(V)
@@ -1100,7 +1109,7 @@ FOREACH_INSTRUCTION(V)
     do {                                                                       \
         auto byte = *iter++;                                                   \
         std::cerr << "reading instruction " << instructions[byte].c_str()      \
-                  << " at " << iter - mod.bytes.get() << std::endl;            \
+                  << std::endl;                                                \
         std::cerr << "control stack size: " << control_stack.size()            \
                   << std::endl;                                                \
         std::cerr << "control stack: ";                                        \
@@ -1116,19 +1125,20 @@ FOREACH_INSTRUCTION(V)
         }                                                                      \
         std::cerr << std::endl;                                                \
         std::cerr << std::endl;                                                \
-        [[clang::musttail]] return funcs[byte](mod, iter, fn, stack,           \
-                                               control_stack);                 \
+        [[clang::musttail]] return funcs<Target>[byte](mod, iter, fn, stack,   \
+                                                       control_stack, code);   \
     } while (0)
 #else
 #define nextop()                                                               \
     do {                                                                       \
-        [[clang::musttail]] return funcs[*iter++](mod, iter, fn, stack,        \
-                                                  control_stack);              \
+        [[clang::musttail]] return funcs<Target>[*iter++](                     \
+            mod, iter, fn, stack, control_stack, code);                        \
     } while (0)
 #endif
 
-static ValidationHandler *funcs[] = {
-#define V(name, _, byte) [byte] = &validate_##name,
+template <typename Target>
+static CompilationHandler *funcs[] = {
+#define V(name, _, byte) [byte] = &validate_##name<Target>,
     FOREACH_INSTRUCTION(V)
 #undef V
 };
@@ -1696,17 +1706,20 @@ HANDLER(table_fill) {
     nextop();
 }
 HANDLER(multibyte) {
-    static ValidationHandler *fc_funcs[] = {
-#define V(name, _, byte) [byte] = &validate_##name,
+    static CompilationHandler *fc_funcs[] = {
+#define V(name, _, byte) [byte] = &validate_##name<Target>,
         FOREACH_MULTIBYTE_INSTRUCTION(V)
 #undef V
     };
 
     [[clang::musttail]] return fc_funcs[safe_read_leb128<uint32_t>(iter)](
-        mod, iter, fn, stack, control_stack);
+        mod, iter, fn, stack, control_stack, code);
 }
 
-void Module::validate(safe_byte_iterator &iter, FunctionShell &fn) {
+template <typename Pager, typename Target>
+void Module::validate_and_compile(safe_byte_iterator &iter,
+                                  std::vector<uint8_t> &code,
+                                  FunctionShell &fn) {
     if (!fn.start) {
         // skip imported functions
         return;
@@ -1717,7 +1730,7 @@ void Module::validate(safe_byte_iterator &iter, FunctionShell &fn) {
     auto control_stack = std::vector<ControlFlow>(
         {ControlFlow(fn.type.results, fn.type, false, Function())});
 
-    return funcs[*iter++](*this, iter, fn, stack, control_stack);
+    return funcs<Target>[*iter++](*this, iter, fn, stack, control_stack, code);
 }
 
 #undef ensure

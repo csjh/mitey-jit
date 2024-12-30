@@ -55,6 +55,38 @@ enum class valtype : uint8_t {
     externref = 0x6f,
 };
 
+#ifdef WASM_DEBUG
+static std::string valtype_names[] = {
+    [static_cast<uint8_t>(valtype::null)] = "null",
+    [static_cast<uint8_t>(valtype::any)] = "any",
+    [static_cast<uint8_t>(valtype::i32)] = "i32",
+    [static_cast<uint8_t>(valtype::i64)] = "i64",
+    [static_cast<uint8_t>(valtype::f32)] = "f32",
+    [static_cast<uint8_t>(valtype::f64)] = "f64",
+    [static_cast<uint8_t>(valtype::funcref)] = "funcref",
+    [static_cast<uint8_t>(valtype::externref)] = "externref"};
+#endif
+
+static inline uint32_t valtype_size(valtype type) {
+    switch (type) {
+    case valtype::any:
+    case valtype::null:
+        return 0;
+    case valtype::i32:
+        return sizeof(uint32_t);
+    case valtype::i64:
+        return sizeof(uint64_t);
+    case valtype::f32:
+        return sizeof(float);
+    case valtype::f64:
+        return sizeof(double);
+    case valtype::funcref:
+        return sizeof(void *);
+    case valtype::externref:
+        return sizeof(void *);
+    }
+}
+
 [[noreturn]] static inline void trap(const char *message) {
     error<trap_error>(message);
 }

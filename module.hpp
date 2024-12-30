@@ -26,7 +26,7 @@ static inline bool is_imexdesc(uint8_t byte) {
 using ImportSpecifier = std::pair<std::string, std::string>;
 
 struct FunctionShell {
-    uint8_t *start;
+    uint32_t start;
     WasmSignature type;
     std::vector<valtype> locals;
     std::optional<ImportSpecifier> import;
@@ -91,13 +91,15 @@ class safe_byte_iterator;
 class Module;
 class WasmStack;
 
-using ValidationHandler = void(Module &, safe_byte_iterator &, FunctionShell &,
-                               WasmStack &, std::vector<ControlFlow> &);
+using CompilationHandler = void(Module &, safe_byte_iterator &, FunctionShell &,
+                                WasmStack &, std::vector<ControlFlow> &,
+                                std::vector<uint8_t> &);
 
 class Module {
     template <typename Pager, typename Target> friend class JIT;
 
-#define V(name, _, byte) friend ValidationHandler validate_##name;
+#define V(name, _, byte)                                                       \
+    template <typename Target> friend CompilationHandler validate_##name;
     FOREACH_INSTRUCTION(V)
     FOREACH_MULTIBYTE_INSTRUCTION(V)
 #undef V
@@ -105,7 +107,6 @@ class Module {
     std::weak_ptr<Module> self;
 
     Allocation executable;
-    std::unique_ptr<uint32_t[]> function_offsets;
 
     std::vector<WasmSignature> types;
     std::unordered_map<std::string, std::unordered_map<std::string, ImExDesc>>
@@ -125,15 +126,15 @@ class Module {
     FunctionShell current_fn;
     std::vector<std::vector<valtype>> control_stack;
 
-    void validate(safe_byte_iterator &iter, FunctionShell &fn);
-
-    void validate(safe_byte_iterator &iter, const WasmSignature &signature,
-                  bool is_func = false);
+    template <typename Pager, typename Target>
+    void validate_and_compile(safe_byte_iterator &iter,
+                              std::vector<uint8_t> &code, FunctionShell &fn);
 
     void validate_const(safe_byte_iterator &iter, valtype expected);
 
     Module();
 
+    template <typename Pager, typename Target>
     void initialize(std::span<uint8_t> bytes);
 
   public:
@@ -144,7 +145,7 @@ class Module {
     static std::shared_ptr<Module> compile(std::span<uint8_t> bytes) {
         auto mod = std::shared_ptr<Module>(new Module());
         mod->self = mod;
-        mod->initialize(bytes);
+        mod->initialize<Pager, Target>(bytes);
         return mod;
     }
 
