@@ -6,9 +6,9 @@
 #include <unistd.h>
 
 namespace mitey {
-class MacExecutable : public Executable {
+class MacExecutable {
   public:
-    Allocation allocate(uint32_t size) override {
+    static Allocation allocate(uint32_t size) {
         auto ptr = reinterpret_cast<uint8_t *>(
             mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0));
@@ -28,8 +28,8 @@ class MacExecutable : public Executable {
         return alloc;
     }
 
-    void write(const Allocation &alloc,
-               const std::function<void()> &cb) override {
+    static void write(const Allocation &alloc,
+                      const std::function<void()> &cb) {
         pthread_jit_write_protect_np(false);
         cb();
         pthread_jit_write_protect_np(true);
