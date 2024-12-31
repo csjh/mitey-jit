@@ -9,6 +9,9 @@ namespace mitey {
 class MacExecutable {
   public:
     static Allocation allocate(uint32_t size) {
+        if (size == 0)
+            return Allocation(nullptr, [](auto) {});
+
         auto ptr = reinterpret_cast<uint8_t *>(
             mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0));
@@ -30,6 +33,9 @@ class MacExecutable {
 
     static void write(const Allocation &alloc,
                       const std::function<void()> &cb) {
+        if (!alloc)
+            return;
+
         pthread_jit_write_protect_np(false);
         cb();
         pthread_jit_write_protect_np(true);
