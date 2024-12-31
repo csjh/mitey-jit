@@ -950,122 +950,168 @@ class WasmStack {
     valtype *buffer;
     uint32_t stack_size = 0;
 
-    auto rbegin() const { return std::reverse_iterator(buffer); }
-    auto rend() const {
-        return std::reverse_iterator(const_cast<valtype *>(buffer_start));
-    }
+    auto rbegin() const;
+    auto rend() const;
 
-    template <typename T> auto find_diverging(const T &expected) {
-        auto ebegin = expected.rbegin();
-        auto abegin = rbegin();
-
-        for (; ebegin != expected.rend(); ++abegin, ++ebegin)
-            if (*abegin != *ebegin && *abegin != valtype::any)
-                break;
-
-        return abegin;
-    }
+    template <typename T> auto find_diverging(const T &expected) const;
 
   public:
-#ifdef WASM_DEBUG
-    auto begin() { return buffer_start + 1024; }
-    auto end() { return buffer; }
-    auto size() { return std::distance(begin(), end()); }
-#endif
+    auto begin() const;
+    auto end() const;
+    auto size() const;
 
-    WasmStack() : buffer(buffer_start) {
-        std::fill_n(buffer, 1024, valtype::null);
-        buffer += 1024;
-    }
+    WasmStack();
 
-    template <typename T> bool check(const T &expected) {
-        auto diverge = find_diverging(expected);
-        if (static_cast<size_t>(std::distance(rbegin(), diverge)) ==
-            expected.size())
-            return true;
-        return polymorphized && *diverge == valtype::null;
-    }
+    template <typename T> bool check(const T &expected) const;
 
-    template <typename T> bool operator==(const T &rhs) {
-        auto diverge = find_diverging(rhs);
-        if (*diverge != valtype::null)
-            return false;
-        if (static_cast<size_t>(std::distance(rbegin(), diverge)) == rhs.size())
-            return true;
-        return polymorphized;
-    }
+    template <typename T> bool operator==(const T &rhs) const;
 
-    bool polymorphism() { return polymorphized; }
-    void set_polymorphism(bool p) { polymorphized = p; }
+    bool polymorphism() const;
+    void set_polymorphism(bool p);
+    void unpolymorphize();
+    void polymorphize();
 
-    void unpolymorphize() { set_polymorphism(false); }
+    void push(valtype ty);
+    template <typename T> void push(const T &values);
+    void pop(valtype expected_ty);
+    template <typename T> void pop(const T &expected);
 
-    void polymorphize() {
-        set_polymorphism(true);
+    bool empty() const;
+    bool can_be_anything() const;
 
-        buffer = std::find(rbegin(), rend(), valtype::null).base();
-    }
-
-    void push(valtype ty) { push(std::array{ty}); }
-    template <typename T> void push(const T &values) {
-        std::copy(values.begin(), values.end(), buffer);
-        buffer += values.size();
-        stack_size +=
-            std::reduce(values.begin(), values.end(), 0,
-                        [](auto a, auto b) { return a + valtype_size(b); });
-    }
-    void pop(valtype expected_ty) { pop(std::array{expected_ty}); }
-    template <typename T> void pop(const T &expected) {
-        ensure(check(expected), "type mismatch");
-
-        auto diverge = find_diverging(expected);
-        buffer -= std::distance(rbegin(), diverge);
-        stack_size -=
-            std::reduce(expected.begin(), expected.end(), 0,
-                        [](auto a, auto b) { return a + valtype_size(b); });
-    }
-
-    bool empty() const { return !polymorphized && *rbegin() == valtype::null; }
-
-    bool can_be_anything() const {
-        return polymorphized && *rbegin() == valtype::null;
-    }
-
-    valtype back() const {
-        if (auto b = *rbegin(); b != valtype::null)
-            return b;
-        if (polymorphized) {
-            return valtype::any;
-        } else {
-            error<validation_error>("type mismatch");
-        }
-    }
+    valtype back() const;
 
     template <size_t pc, size_t rc>
-    void apply(std::array<valtype, pc> params,
-               std::array<valtype, rc> results) {
-        pop(params);
-        push(results);
-    }
+    void apply(std::array<valtype, pc> params, std::array<valtype, rc> results);
 
-    void apply(const WasmSignature &signature) {
-        pop(signature.params);
-        push(signature.results);
-    };
-
-    void enter_flow(const std::vector<valtype> &expected) {
-        pop(expected);
-        push(valtype::null);
-        push(expected);
-    };
-
-    void check_br(std::vector<ControlFlow> &control_stack, uint32_t depth) {
-        ensure(depth < control_stack.size(), "unknown label");
-        auto &target = control_stack[control_stack.size() - depth - 1];
-        pop(target.expected);
-        push(target.expected);
-    };
+    void apply(const WasmSignature &signature);
+    void enter_flow(const std::vector<valtype> &expected);
+    void check_br(std::vector<ControlFlow> &control_stack, uint32_t depth);
 };
+
+auto WasmStack::rbegin() const { return std::reverse_iterator(buffer); }
+
+auto WasmStack::rend() const {
+    return std::reverse_iterator(const_cast<valtype *>(buffer_start));
+}
+
+template <typename T> auto WasmStack::find_diverging(const T &expected) const {
+    auto ebegin = expected.rbegin();
+    auto abegin = rbegin();
+
+    for (; ebegin != expected.rend(); ++abegin, ++ebegin)
+        if (*abegin != *ebegin && *abegin != valtype::any)
+            break;
+
+    return abegin;
+}
+
+#ifdef WASM_DEBUG
+auto WasmStack::begin() { return buffer_start + 1024; }
+
+auto WasmStack::end() { return buffer; }
+
+auto WasmStack::size() { return std::distance(begin(), end()); }
+#endif
+
+WasmStack::WasmStack() : buffer(buffer_start) {
+    std::fill_n(buffer, 1024, valtype::null);
+    buffer += 1024;
+}
+
+template <typename T> bool WasmStack::check(const T &expected) const {
+    auto diverge = find_diverging(expected);
+    if (static_cast<size_t>(std::distance(rbegin(), diverge)) ==
+        expected.size())
+        return true;
+    return polymorphized && *diverge == valtype::null;
+}
+
+template <typename T> bool WasmStack::operator==(const T &rhs) const {
+    auto diverge = find_diverging(rhs);
+    if (*diverge != valtype::null)
+        return false;
+    if (static_cast<size_t>(std::distance(rbegin(), diverge)) == rhs.size())
+        return true;
+    return polymorphized;
+}
+
+bool WasmStack::polymorphism() const { return polymorphized; }
+
+void WasmStack::set_polymorphism(bool p) { polymorphized = p; }
+
+void WasmStack::unpolymorphize() { set_polymorphism(false); }
+
+void WasmStack::polymorphize() {
+    set_polymorphism(true);
+    buffer = std::find(rbegin(), rend(), valtype::null).base();
+}
+
+void WasmStack::push(valtype ty) { push(std::array{ty}); }
+
+template <typename T> void WasmStack::push(const T &values) {
+    std::copy(values.begin(), values.end(), buffer);
+    buffer += values.size();
+    stack_size +=
+        std::reduce(values.begin(), values.end(), 0,
+                    [](auto a, auto b) { return a + valtype_size(b); });
+}
+
+void WasmStack::pop(valtype expected_ty) { pop(std::array{expected_ty}); }
+
+template <typename T> void WasmStack::pop(const T &expected) {
+    ensure(check(expected), "type mismatch");
+
+    auto diverge = find_diverging(expected);
+    buffer -= std::distance(rbegin(), diverge);
+    stack_size -=
+        std::reduce(expected.begin(), expected.end(), 0,
+                    [](auto a, auto b) { return a + valtype_size(b); });
+}
+
+bool WasmStack::empty() const {
+    return !polymorphized && *rbegin() == valtype::null;
+}
+
+bool WasmStack::can_be_anything() const {
+    return polymorphized && *rbegin() == valtype::null;
+}
+
+valtype WasmStack::back() const {
+    if (auto b = *rbegin(); b != valtype::null)
+        return b;
+    if (polymorphized) {
+        return valtype::any;
+    } else {
+        error<validation_error>("type mismatch");
+    }
+}
+
+template <size_t pc, size_t rc>
+void WasmStack::apply(std::array<valtype, pc> params,
+                      std::array<valtype, rc> results) {
+    pop(params);
+    push(results);
+}
+
+void WasmStack::apply(const WasmSignature &signature) {
+    pop(signature.params);
+    push(signature.results);
+}
+
+void WasmStack::enter_flow(const std::vector<valtype> &expected) {
+    pop(expected);
+    push(valtype::null);
+    push(expected);
+}
+
+void WasmStack::check_br(std::vector<ControlFlow> &control_stack,
+                         uint32_t depth) {
+    ensure(depth < control_stack.size(), "unknown label");
+    auto &target = control_stack[control_stack.size() - depth - 1];
+    pop(target.expected);
+    push(target.expected);
+}
 
 #define LOAD(type, stacktype)                                                  \
     {                                                                          \
