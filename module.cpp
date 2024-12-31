@@ -966,7 +966,7 @@ class WasmStack {
 
   public:
 #ifdef WASM_DEBUG
-    auto begin() { return buffer_start; }
+    auto begin() { return buffer_start + 1024; }
     auto end() { return buffer; }
     auto size() { return std::distance(begin(), end()); }
 #endif
