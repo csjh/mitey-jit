@@ -822,12 +822,21 @@ FOREACH_INSTRUCTION(V)
     } while (0)
 #endif
 
+HANDLER(missing) { error<malformed_error>("invalid instruction"); }
+
 template <typename Target>
-static CompilationHandler *funcs[] = {
-#define V(name, _, byte) [byte] = &validate_##name<Target>,
+consteval std::array<CompilationHandler *, 256> make_funcs() {
+    std::array<CompilationHandler *, 256> funcs;
+    funcs.fill(validate_missing<Target>);
+
+#define V(name, _, byte) funcs[byte] = &validate_##name<Target>;
     FOREACH_INSTRUCTION(V)
 #undef V
-};
+
+    return funcs;
+}
+
+template <typename Target> static auto funcs = make_funcs<Target>();
 
 HANDLER(unreachable) {
     stack.polymorphize();
@@ -1391,14 +1400,23 @@ HANDLER(table_fill) {
         std::array<valtype, 0>());
     nextop();
 }
-HANDLER(multibyte) {
-    static CompilationHandler *fc_funcs[] = {
-#define V(name, _, byte) [byte] = &validate_##name<Target>,
-        FOREACH_MULTIBYTE_INSTRUCTION(V)
-#undef V
-    };
 
-    [[clang::musttail]] return fc_funcs[safe_read_leb128<uint32_t>(iter)](
+template <typename Target>
+consteval std::array<CompilationHandler *, 256> make_fc_funcs() {
+    std::array<CompilationHandler *, 256> fc_funcs;
+    fc_funcs.fill(validate_missing<Target>);
+
+#define V(name, _, byte) fc_funcs[byte] = &validate_##name<Target>;
+    FOREACH_INSTRUCTION(V)
+#undef V
+
+    return fc_funcs;
+}
+
+HANDLER(multibyte) {
+    constexpr auto fc_funcs = make_fc_funcs<Target>();
+
+    [[clang::musttail]] return fc_funcs[safe_read_leb128<uint8_t>(iter)](
         mod, iter, fn, stack, control_stack, code);
 }
 
