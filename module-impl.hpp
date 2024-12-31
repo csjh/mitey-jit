@@ -203,7 +203,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 if (typeidx >= types.size()) {
                     error<validation_error>("unknown type");
                 }
-                functions.push_back({0, types[typeidx], {}, specifier});
+                functions.emplace_back(
+                    FunctionShell(nullptr, types[typeidx], {}, specifier));
                 n_fn_imports++;
             } else if (desc == ImExDesc::table) {
                 // table
@@ -213,8 +214,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 }
 
                 auto [initial, max] = get_table_limits(iter);
-                tables.push_back(
-                    {initial, max, static_cast<valtype>(reftype), specifier});
+                tables.emplace_back(TableShell(
+                    initial, max, static_cast<valtype>(reftype), specifier));
             } else if (desc == ImExDesc::mem) {
                 // mem
                 if (memory.exists) {
@@ -234,9 +235,9 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     error<malformed_error>("malformed mutability");
                 }
 
-                globals.push_back({static_cast<valtype>(maybe_valtype),
-                                   static_cast<mut>(mutability), nullptr,
-                                   specifier});
+                globals.emplace_back(GlobalShell(
+                    static_cast<valtype>(maybe_valtype),
+                    static_cast<mut>(mutability), nullptr, specifier));
             }
         }
     });
@@ -258,7 +259,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
             if (type_idx >= types.size()) {
                 error<validation_error>("unknown type");
             }
-            functions.push_back({0, types[type_idx], {}, std::nullopt});
+            functions.emplace_back(
+                FunctionShell(nullptr, types[type_idx], {}, std::nullopt));
         }
     });
 
@@ -280,8 +282,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
             }
 
             auto [initial, max] = get_table_limits(iter);
-            tables.push_back(
-                {initial, max, static_cast<valtype>(elem_type), std::nullopt});
+            tables.emplace_back(TableShell(
+                initial, max, static_cast<valtype>(elem_type), std::nullopt));
         }
     });
 
@@ -330,8 +332,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
             }
             auto global_mut = static_cast<mut>(maybe_mut);
 
-            globals.push_back(
-                {type, global_mut, iter.unsafe_ptr(), std::nullopt});
+            globals.emplace_back(
+                GlobalShell(type, global_mut, iter.unsafe_ptr(), std::nullopt));
 
             validate_const(iter, type);
         }
