@@ -26,7 +26,11 @@ class MacExecutable {
             munmap(ptr, size);
         });
 
-        write(alloc, [=] { *reinterpret_cast<uint32_t *>(ptr) = size; });
+        // note: doesn't go through write because
+        // sys_icache_invalidate is expensive
+        pthread_jit_write_protect_np(false);
+        *reinterpret_cast<uint32_t *>(ptr) = size;
+        pthread_jit_write_protect_np(true);
 
         return alloc;
     }
