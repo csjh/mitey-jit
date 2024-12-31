@@ -573,9 +573,10 @@ void Module::initialize(std::span<uint8_t> bytes) {
                                            sizeof(Target::set_temp1(0)) +
                                            sizeof(Target::set_temp2(0)));
 
-            auto code = Pager::allocate(ludes + other);
+            executable = Pager::allocate(ludes + other);
 
-            Pager::write(code, [&] {
+            auto code = executable.get();
+            Pager::write(executable, [&] {
                 for (FunctionShell &fn : functions) {
                     if (fn.import) {
                         // skip imported functions
@@ -605,7 +606,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                         }
                     }
                     auto body_length = function_length - (iter - start);
-                    fn.start = code.get();
+                    fn.start = code;
                     if (!iter.has_n_left(body_length)) {
                         error<malformed_error>("length out of bounds");
                     }
@@ -616,8 +617,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                               << iter - bytes.data() << std::endl;
 #endif
                     auto fn_iter = iter;
-                    validate_and_compile<Pager, Target>(fn_iter, code.get(),
-                                                        fn);
+                    code =
+                        validate_and_compile<Pager, Target>(fn_iter, code, fn);
                     if (fn_iter[-1] != static_cast<uint8_t>(Instruction::end)) {
                         error<malformed_error>("END opcode expected");
                     }
@@ -626,9 +627,9 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     }
                     iter = fn_iter;
                 }
-            });
 
-            executable = std::move(code);
+                return code - executable.get();
+            });
         },
         [&] {
             if (functions.size() != n_fn_imports) {
@@ -812,10 +813,10 @@ void WasmStack::apply(std::array<valtype, pc> params,
 
 #define HANDLER(name)                                                          \
     template <typename Target>                                                 \
-    void validate_##name(Module &mod, safe_byte_iterator &iter,                \
-                         FunctionShell &fn, WasmStack &stack,                  \
-                         std::vector<ControlFlow> &control_stack,              \
-                         uint8_t *code)
+    uint8_t *validate_##name(Module &mod, safe_byte_iterator &iter,            \
+                             FunctionShell &fn, WasmStack &stack,              \
+                             std::vector<ControlFlow> &control_stack,          \
+                             uint8_t *code)
 
 #define V(name, _, byte) HANDLER(name);
 FOREACH_INSTRUCTION(V)
@@ -921,7 +922,7 @@ HANDLER(else_) {
 HANDLER(end) {
     if (control_stack.size() == 1) {
         ensure(stack == fn.type.results, "type mismatch stack vs. results");
-        return;
+        return code;
     }
 
     auto &[_, sig, polymorphism, construct] = control_stack.back();
@@ -1452,8 +1453,8 @@ HANDLER(multibyte) {
 }
 
 template <typename Pager, typename Target>
-void Module::validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
-                                  FunctionShell &fn) {
+uint8_t *Module::validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
+                                      FunctionShell &fn) {
     auto stack = WasmStack();
 
     auto control_stack = std::vector<ControlFlow>(

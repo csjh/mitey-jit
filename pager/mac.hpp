@@ -26,28 +26,25 @@ class MacExecutable {
             munmap(ptr, size);
         });
 
-        // note: doesn't go through write because
-        // sys_icache_invalidate is expensive
-        pthread_jit_write_protect_np(false);
-        *reinterpret_cast<uint32_t *>(ptr) = size;
-        pthread_jit_write_protect_np(true);
+        write(alloc, [&] {
+            std::memcpy(ptr, &size, sizeof(uint32_t));
+            return 0;
+        });
 
         return alloc;
     }
 
     static void write(const Allocation &alloc,
-                      const std::function<void()> &cb) {
+                      const std::function<size_t()> &cb) {
         if (!alloc)
             return;
 
         pthread_jit_write_protect_np(false);
-        cb();
+        auto written = cb();
         pthread_jit_write_protect_np(true);
 
-        auto ptr = alloc.get() - sizeof(uint32_t);
-
         // flush instruction cache to ensure code is executable
-        sys_icache_invalidate(ptr, *reinterpret_cast<uint32_t *>(ptr));
+        sys_icache_invalidate(alloc.get(), written);
     }
 };
 } // namespace mitey

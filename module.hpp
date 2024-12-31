@@ -160,9 +160,9 @@ class WasmStack {
 
 class Module;
 
-using CompilationHandler = void(Module &, safe_byte_iterator &, FunctionShell &,
-                                WasmStack &, std::vector<ControlFlow> &,
-                                uint8_t *);
+using CompilationHandler = uint8_t *(Module &, safe_byte_iterator &,
+                                     FunctionShell &, WasmStack &,
+                                     std::vector<ControlFlow> &, uint8_t *);
 
 class Module {
     template <typename Pager, typename Target> friend class JIT;
@@ -196,8 +196,8 @@ class Module {
     std::vector<std::vector<valtype>> control_stack;
 
     template <typename Pager, typename Target>
-    void validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
-                              FunctionShell &fn);
+    uint8_t *validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
+                                  FunctionShell &fn);
 
     void validate_const(safe_byte_iterator &iter, valtype expected);
 
