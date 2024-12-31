@@ -16,6 +16,20 @@ static inline void ensure(bool condition, const char *msg) {
     }
 }
 
+template <typename T> constexpr auto arity = arity<decltype(&T::operator())>;
+
+template <typename R, typename... Args>
+constexpr auto arity<R(Args...)> = sizeof...(Args);
+
+template <typename R, typename... Args>
+constexpr auto arity<R (*)(Args...)> = arity<R(Args...)>;
+
+template <typename C, typename R, typename... Args>
+constexpr auto arity<R (C::*)(Args...)> = arity<R(Args...)>;
+
+template <typename C, typename R, typename... Args>
+constexpr auto arity<R (C::*)(Args...) const> = arity<R(Args...)>;
+
 template <typename Pager, typename Target>
 void Module::initialize(std::span<uint8_t> bytes) {
     if (bytes.size() < 4) {
@@ -64,8 +78,10 @@ void Module::initialize(std::span<uint8_t> bytes) {
     };
 
     auto section = [&](
-                       uint32_t id, std::function<void()> body,
+                       uint32_t id, auto body,
                        std::function<void()> else_ = [] {}) {
+        static_assert(arity<decltype(body)> <= 1);
+
         if (!iter.empty() && *iter == id) {
             ++iter;
             auto section_length = safe_read_leb128<uint32_t>(iter);
@@ -74,7 +90,11 @@ void Module::initialize(std::span<uint8_t> bytes) {
             }
             auto section_start = iter;
 
-            body();
+            if constexpr (arity<decltype(body)> == 1) {
+                body(section_length);
+            } else {
+                body();
+            }
 
             if (iter - section_start != section_length) {
                 error<malformed_error>("section size mismatch");
@@ -536,7 +556,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
     // code section
     section(
         10,
-        [&] {
+        [&](uint32_t section_length) {
             auto n_functions = safe_read_leb128<uint32_t>(iter);
 
             if (n_functions + n_fn_imports != functions.size()) {
@@ -544,60 +564,69 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     "function and code section have inconsistent lengths");
             }
 
-            auto code = std::vector<uint8_t>();
+            auto ludes = n_functions * (sizeof(Target::get_prelude()) +
+                                        sizeof(Target::get_postlude()));
 
-            for (FunctionShell &fn : functions) {
-                if (fn.import) {
-                    // skip imported functions
-                    continue;
-                }
+            auto other = section_length * (sizeof(Target::call(nullptr)) +
+                                           sizeof(Target::set_temp1(0)) +
+                                           sizeof(Target::set_temp2(0)));
 
-                fn.locals = fn.type.params;
+            auto code = Pager::allocate(ludes + other);
 
-                auto function_length = safe_read_leb128<uint32_t>(iter);
-
-                auto start = safe_byte_iterator(
-                    iter.get_with_at_least(function_length), function_length);
-
-                auto n_local_decls = safe_read_leb128<uint32_t>(iter);
-                while (n_local_decls--) {
-                    auto n_locals = safe_read_leb128<uint32_t>(iter);
-                    auto type = *iter++;
-                    if (!is_valtype(type)) {
-                        error<validation_error>("invalid local type");
+            Pager::write(code, [&] {
+                for (FunctionShell &fn : functions) {
+                    if (fn.import) {
+                        // skip imported functions
+                        continue;
                     }
-                    while (n_locals--) {
-                        fn.locals.push_back(static_cast<valtype>(type));
-                        if (fn.locals.size() > MAX_LOCALS) {
-                            error<malformed_error>("too many locals");
+
+                    fn.locals = fn.type.params;
+
+                    auto function_length = safe_read_leb128<uint32_t>(iter);
+
+                    auto start = safe_byte_iterator(
+                        iter.get_with_at_least(function_length),
+                        function_length);
+
+                    auto n_local_decls = safe_read_leb128<uint32_t>(iter);
+                    while (n_local_decls--) {
+                        auto n_locals = safe_read_leb128<uint32_t>(iter);
+                        auto type = *iter++;
+                        if (!is_valtype(type)) {
+                            error<validation_error>("invalid local type");
+                        }
+                        while (n_locals--) {
+                            fn.locals.push_back(static_cast<valtype>(type));
+                            if (fn.locals.size() > MAX_LOCALS) {
+                                error<malformed_error>("too many locals");
+                            }
                         }
                     }
-                }
-                auto body_length = function_length - (iter - start);
-                fn.start = code.size();
-                if (!iter.has_n_left(body_length)) {
-                    error<malformed_error>("length out of bounds");
-                }
+                    auto body_length = function_length - (iter - start);
+                    fn.start = code.get();
+                    if (!iter.has_n_left(body_length)) {
+                        error<malformed_error>("length out of bounds");
+                    }
 
 #ifdef WASM_DEBUG
-                std::cerr << "validating function " << &fn - functions.data()
-                          << " at " << iter - bytes.data() << std::endl;
+                    std::cerr << "validating function "
+                              << &fn - functions.data() << " at "
+                              << iter - bytes.data() << std::endl;
 #endif
-                auto fn_iter = iter;
-                validate_and_compile<Pager, Target>(fn_iter, code, fn);
-                if (fn_iter[-1] != static_cast<uint8_t>(Instruction::end)) {
-                    error<malformed_error>("END opcode expected");
+                    auto fn_iter = iter;
+                    validate_and_compile<Pager, Target>(fn_iter, code.get(),
+                                                        fn);
+                    if (fn_iter[-1] != static_cast<uint8_t>(Instruction::end)) {
+                        error<malformed_error>("END opcode expected");
+                    }
+                    if (fn_iter - start != function_length) {
+                        error<malformed_error>("section size mismatch");
+                    }
+                    iter = fn_iter;
                 }
-                if (fn_iter - start != function_length) {
-                    error<malformed_error>("section size mismatch");
-                }
-                iter = fn_iter;
-            }
-
-            executable = Pager::allocate(code.size());
-            Pager::write(executable, [&] {
-                std::copy(code.begin(), code.end(), executable.get());
             });
+
+            executable = std::move(code);
         },
         [&] {
             if (functions.size() != n_fn_imports) {
@@ -784,7 +813,7 @@ void WasmStack::apply(std::array<valtype, pc> params,
     void validate_##name(Module &mod, safe_byte_iterator &iter,                \
                          FunctionShell &fn, WasmStack &stack,                  \
                          std::vector<ControlFlow> &control_stack,              \
-                         std::vector<uint8_t> &code)
+                         uint8_t *code)
 
 #define V(name, _, byte) HANDLER(name);
 FOREACH_INSTRUCTION(V)
@@ -1421,8 +1450,7 @@ HANDLER(multibyte) {
 }
 
 template <typename Pager, typename Target>
-void Module::validate_and_compile(safe_byte_iterator &iter,
-                                  std::vector<uint8_t> &code,
+void Module::validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
                                   FunctionShell &fn) {
     auto stack = WasmStack();
 
