@@ -1,6 +1,7 @@
 #include "module.hpp"
 #include "spec.hpp"
 #include <limits>
+#include <numeric>
 
 #ifdef WASM_DEBUG
 #include <iostream>
@@ -947,6 +948,7 @@ class WasmStack {
     bool polymorphized = false;
     valtype buffer_start[65536];
     valtype *buffer;
+    uint32_t stack_size = 0;
 
     auto rbegin() const { return std::reverse_iterator(buffer); }
     auto rend() const {
@@ -1008,6 +1010,9 @@ class WasmStack {
     template <typename T> void push(const T &values) {
         std::copy(values.begin(), values.end(), buffer);
         buffer += values.size();
+        stack_size +=
+            std::reduce(values.begin(), values.end(), 0,
+                        [](auto a, auto b) { return a + valtype_size(b); });
     }
     void pop(valtype expected_ty) { pop(std::array{expected_ty}); }
     template <typename T> void pop(const T &expected) {
@@ -1015,6 +1020,9 @@ class WasmStack {
 
         auto diverge = find_diverging(expected);
         buffer -= std::distance(rbegin(), diverge);
+        stack_size -=
+            std::reduce(expected.begin(), expected.end(), 0,
+                        [](auto a, auto b) { return a + valtype_size(b); });
     }
 
     bool empty() const { return !polymorphized && *rbegin() == valtype::null; }
