@@ -56,9 +56,7 @@ class Arm64 {
   private:
     template <size_t N>
     static std::array<uint8_t, N * 4> u32_to_u8(std::array<uint32_t, N> u32) {
-        std::array<uint8_t, N * 4> u8{};
-        std::memcpy(u8.data(), u32.data(), N * 4);
-        return u8;
+        return std::bit_cast<std::array<uint8_t, N * 4>>(u32);
     }
 
     static std::array<uint32_t, 4> mov64(uint64_t value, uint8_t reg) {
