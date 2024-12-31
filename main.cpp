@@ -32,13 +32,13 @@ int main(int argc, char **argv) {
 
     return 0;
 
-    std::unique_ptr<Target> backend = std::make_unique<Arm64>();
-    std::unique_ptr<Executable> exec = std::make_unique<MacExecutable>();
-
     std::vector<uint8_t> code;
-    auto prelude = backend->get_prelude(), postlude = backend->get_postlude(),
-         shove = backend->set_temp1(111), push = backend->call(ifXXconst),
-         mul = backend->call(i32mul), add = backend->call(i32add);
+    auto prelude = Arm64::get_prelude();
+    auto postlude = Arm64::get_postlude();
+    auto shove = Arm64::set_temp1(111);
+    auto push = Arm64::call(ifXXconst);
+    auto mul = Arm64::call(i32mul);
+    auto add = Arm64::call(i32add);
 
     code.insert(code.end(), prelude.begin(), prelude.end());
     code.insert(code.end(), add.begin(), add.end());
@@ -53,9 +53,10 @@ int main(int argc, char **argv) {
     code.insert(code.end(), add.begin(), add.end());
     code.insert(code.end(), postlude.begin(), postlude.end());
 
-    auto mem = exec->allocate(code.size());
+    auto mem = MacExecutable::allocate(code.size());
 
-    exec->write(mem, [&] { memcpy(mem.get(), code.data(), code.size()); });
+    MacExecutable::write(mem,
+                         [&] { memcpy(mem.get(), code.data(), code.size()); });
 
     Signature *addMulMul = reinterpret_cast<Signature *>(mem.get());
 
