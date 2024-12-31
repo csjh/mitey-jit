@@ -1728,11 +1728,6 @@ template <typename Pager, typename Target>
 void Module::validate_and_compile(safe_byte_iterator &iter,
                                   std::vector<uint8_t> &code,
                                   FunctionShell &fn) {
-    if (!fn.start) {
-        // skip imported functions
-        return;
-    }
-
     auto stack = WasmStack();
 
     auto control_stack = std::vector<ControlFlow>(
