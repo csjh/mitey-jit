@@ -10,6 +10,30 @@
 
 namespace mitey {
 
+class safe_byte_iterator {
+    uint8_t *iter;
+    uint8_t *end;
+
+  public:
+    safe_byte_iterator(uint8_t *ptr, size_t length);
+    safe_byte_iterator(uint8_t *ptr, uint8_t *end);
+
+    uint8_t operator*() const;
+    uint8_t operator[](ssize_t n) const;
+    safe_byte_iterator &operator++();
+    safe_byte_iterator operator++(int);
+    safe_byte_iterator operator+(size_t n) const;
+    safe_byte_iterator &operator+=(size_t n);
+    ptrdiff_t operator-(safe_byte_iterator other) const;
+    ptrdiff_t operator-(const uint8_t *other) const;
+    bool operator<(safe_byte_iterator other) const;
+    uint8_t *get_with_at_least(size_t n) const;
+    bool empty() const;
+    bool has_n_left(size_t n) const;
+
+    uint8_t *unsafe_ptr() const { return iter; }
+};
+
 enum class ImExDesc {
     func,
     table,
@@ -87,9 +111,54 @@ struct ControlFlow {
     std::variant<Function, Block, Loop, If, IfElse> construct;
 };
 
-class safe_byte_iterator;
+class WasmStack {
+    bool polymorphized = false;
+    valtype buffer_start[65536];
+    valtype *buffer;
+    uint32_t stack_size = 0;
+
+    auto rbegin() const { return std::reverse_iterator(buffer); }
+    auto rend() const {
+        return std::reverse_iterator(const_cast<valtype *>(buffer_start));
+    }
+
+    template <typename T> auto find_diverging(const T &expected) const;
+
+  public:
+    auto begin() const { return const_cast<valtype *>(buffer_start + 1024); }
+    auto end() const { return buffer; }
+    auto size() const { return std::distance(begin(), end()); }
+
+    WasmStack();
+
+    template <typename T> bool check(const T &expected) const;
+
+    template <typename T> bool operator==(const T &rhs) const;
+
+    bool polymorphism() const;
+    void set_polymorphism(bool p);
+    void unpolymorphize();
+    void polymorphize();
+
+    void push(valtype ty);
+    template <typename T> void push(const T &values);
+    void pop(valtype expected_ty);
+    template <typename T> void pop(const T &expected);
+
+    bool empty() const;
+    bool can_be_anything() const;
+
+    valtype back() const;
+
+    template <size_t pc, size_t rc>
+    void apply(std::array<valtype, pc> params, std::array<valtype, rc> results);
+
+    void apply(const WasmSignature &signature);
+    void enter_flow(const std::vector<valtype> &expected);
+    void check_br(std::vector<ControlFlow> &control_stack, uint32_t depth);
+};
+
 class Module;
-class WasmStack;
 
 using CompilationHandler = void(Module &, safe_byte_iterator &, FunctionShell &,
                                 WasmStack &, std::vector<ControlFlow> &,
@@ -153,3 +222,5 @@ class Module {
 };
 
 } // namespace mitey
+
+#include "module-impl.hpp"
