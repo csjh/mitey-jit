@@ -55,8 +55,10 @@ int main(int argc, char **argv) {
 
     auto mem = MacExecutable::allocate(code.size());
 
-    MacExecutable::write(mem,
-                         [&] { memcpy(mem.get(), code.data(), code.size()); });
+    MacExecutable::write(mem, [&] {
+        memcpy(mem.get(), code.data(), code.size());
+        return code.size();
+    });
 
     Signature *addMulMul = reinterpret_cast<Signature *>(mem.get());
 
