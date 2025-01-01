@@ -39,8 +39,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
 
     auto iter = safe_byte_iterator(bytes.data(), bytes.size());
 
-    if (std::memcmp(reinterpret_cast<char *>(iter.get_with_at_least(4)),
-                    "\0asm", 4) != 0) {
+    if (std::memcmp(iter.get_with_at_least(4), "\0asm", 4) != 0) {
         error<malformed_error>("magic header not detected");
     }
     iter += 4;
@@ -49,7 +48,9 @@ void Module::initialize(std::span<uint8_t> bytes) {
         error<malformed_error>("unexpected end");
     }
 
-    if (*reinterpret_cast<uint32_t *>(iter.get_with_at_least(4)) != 1) {
+    uint32_t version;
+    std::memcpy(&version, iter.get_with_at_least(4), 4);
+    if (version != 1) {
         error<malformed_error>("unknown binary version");
     }
     iter += sizeof(uint32_t);

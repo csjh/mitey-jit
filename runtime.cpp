@@ -36,7 +36,7 @@ HANDLER(br) {
     // tmp1 = target
     // tmp2 = brinfo
     PRELUDE;
-    auto info = reinterpret_cast<BrInfo &>(tmp2);
+    auto info = std::bit_cast<BrInfo>(tmp2);
     auto new_stack = stack - info.stack_offset;
     std::memmove(new_stack - info.arity, stack - info.arity,
                  info.arity * sizeof(WasmValue));
@@ -65,13 +65,13 @@ HANDLER(br_table) {
     // tmp2 = brinfo
     PRELUDE;
     auto lookup = reinterpret_cast<BrTableTarget *>(tmp1);
-    auto info = reinterpret_cast<BrInfo &>(tmp2);
+    auto info = std::bit_cast<BrInfo>(tmp2);
     --stack;
     auto jump = std::max(static_cast<uint32_t>(info.n_targets), stack->u32);
     auto target = lookup[jump];
     info.stack_offset = target.stack_offset;
     tmp1 /* dest */ = reinterpret_cast<uint64_t>(lookup + target.lookup_offset);
-    tmp2 = reinterpret_cast<uint64_t &>(info);
+    tmp2 = std::bit_cast<uint64_t>(info);
     [[clang::musttail]] return br(PARAMS);
     POSTLUDE;
 }
@@ -490,7 +490,7 @@ HANDLER(ref_is_null) {
 HANDLER(ref_func) {
     // tmp1 = funcref index in misc table
     PRELUDE;
-    auto funcref = &MISC_GET(Funcref, tmp1);
+    auto funcref = MISC_GET(Funcref, tmp1);
     *stack++ = funcref;
     POSTLUDE;
 }
@@ -504,23 +504,17 @@ HANDLER(i64_trunc_sat_f32_s) { TRUNC_SAT(f32, i64); }
 HANDLER(i64_trunc_sat_f32_u) { TRUNC_SAT(f32, u64); }
 HANDLER(i64_trunc_sat_f64_s) { TRUNC_SAT(f64, i64); }
 HANDLER(i64_trunc_sat_f64_u) { TRUNC_SAT(f64, u64); }
+// clang-format on
 HANDLER(memory_init) {
-    // tmp1 = segment index in misc table
+    // tmp1 = segment address
     PRELUDE;
-    auto &segment = MISC_GET(Segment, tmp1);
+    auto &segment = *reinterpret_cast<Segment *>(tmp1);
 
     stack -= 3;
     auto size = stack[2].u32;
     auto src = stack[1].u32;
     auto dest = stack[0].u32;
     memory->copy_into(dest, src, segment, size);
-    POSTLUDE;
-}
-HANDLER(data_drop) {
-    // tmp1 = segment index in misc table
-    PRELUDE;
-    auto &segment = MISC_GET(Segment, tmp1);
-    segment.data = {};
     POSTLUDE;
 }
 HANDLER(memory_copy) {
@@ -545,8 +539,8 @@ HANDLER(table_init) {
     // tmp1 = element index in misc table
     // tmp2 = table index in misc table
     PRELUDE;
-    auto& element = MISC_GET(ElementSegment, tmp1);
-    auto& table = MISC_GET(WasmTable, tmp2);
+    auto &element = MISC_GET(ElementSegment, tmp1);
+    auto &table = MISC_GET(WasmTable, tmp2);
 
     stack -= 3;
     auto size = stack[2].u32;
@@ -558,7 +552,7 @@ HANDLER(table_init) {
 HANDLER(elem_drop) {
     // tmp1 = element index in misc table
     PRELUDE;
-    auto& element = MISC_GET(ElementSegment, tmp1);
+    auto &element = MISC_GET(ElementSegment, tmp1);
     element.size = 0;
     element.elements = nullptr;
     POSTLUDE;
@@ -607,7 +601,6 @@ HANDLER(table_fill) {
     table.memset(ptr, value, size);
     POSTLUDE;
 }
-// clang-format on
 
 #undef STORE
 #undef LOAD
