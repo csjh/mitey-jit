@@ -28,7 +28,8 @@ class Arm64 {
         return u32_to_u8(arm);
     }
 
-    static std::array<uint8_t, sizeof(uint32_t) * 5> call(Signature *addr) {
+    static std::array<uint8_t, sizeof(uint32_t) * 5>
+    call(runtime::Signature *addr) {
         constexpr uint8_t x6 = 6;
         // todo: test pc-relative ldr instead (smaller, maybe more perf?)
         auto put_addr = mov64(reinterpret_cast<uint64_t>(addr), x6);

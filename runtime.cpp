@@ -4,6 +4,7 @@
 #include <cmath>
 
 namespace mitey {
+namespace runtime {
 
 #define HANDLER(name)                                                          \
     void name(WasmMemory *memory, WasmValue *stack, void **misc,               \
@@ -119,6 +120,13 @@ HANDLER(drop) {
     POSTLUDE;
 }
 HANDLER(select) {
+    PRELUDE;
+    stack -= 2;
+    if (!stack[1].i32)
+        stack[-1] = stack[0];
+    POSTLUDE;
+}
+HANDLER(select_t) {
     PRELUDE;
     stack -= 2;
     if (!stack[1].i32)
@@ -711,4 +719,5 @@ void WasmTable::memset(uint32_t dst, WasmValue value, uint32_t length) {
     std::fill(elements + dst, elements + dst + length, value);
 }
 
+}; // namespace runtime
 }; // namespace mitey

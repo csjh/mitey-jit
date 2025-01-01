@@ -189,7 +189,7 @@ class Module {
     std::vector<ElementShell> elements;
     std::vector<FunctionShell> functions;
     uint32_t n_data;
-    std::vector<Segment> data_segments;
+    std::vector<runtime::Segment> data_segments;
 
     // todo: maybe split this into another class
     FunctionShell current_fn;

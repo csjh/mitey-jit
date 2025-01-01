@@ -36,9 +36,9 @@ int main(int argc, char **argv) {
     auto prelude = Arm64::get_prelude();
     auto postlude = Arm64::get_postlude();
     auto shove = Arm64::set_temp1(111);
-    auto push = Arm64::call(ifXXconst);
-    auto mul = Arm64::call(i32mul);
-    auto add = Arm64::call(i32add);
+    auto push = Arm64::call(runtime::ifXXconst);
+    auto mul = Arm64::call(runtime::i32mul);
+    auto add = Arm64::call(runtime::i32add);
 
     code.insert(code.end(), prelude.begin(), prelude.end());
     code.insert(code.end(), add.begin(), add.end());
@@ -60,12 +60,12 @@ int main(int argc, char **argv) {
         return code.size();
     });
 
-    Signature *addMulMul = reinterpret_cast<Signature *>(mem.get());
+    auto addMulMul = reinterpret_cast<runtime::Signature *>(mem.get());
 
     uint32_t i1 = 42, i2 = 59;
     std::cout << "Input: " << i1 << " " << i2 << std::endl;
 
-    WasmValue stack[16] = {i1, i2};
+    runtime::WasmValue stack[16] = {i1, i2};
     addMulMul(nullptr, stack + 2, nullptr, 0, 0);
     auto jit_result = stack[0].u32;
     std::cout << "addMulMul result: " << jit_result << std::endl;

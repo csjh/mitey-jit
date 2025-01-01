@@ -6,6 +6,8 @@
 #include <memory>
 
 namespace mitey {
+namespace runtime {
+
 union WasmValue;
 struct WasmMemory;
 
@@ -182,4 +184,5 @@ FOREACH_INSTRUCTION(HANDLER)
 FOREACH_MULTIBYTE_INSTRUCTION(HANDLER)
 #undef HANDLER
 
+}; // namespace runtime
 }; // namespace mitey
