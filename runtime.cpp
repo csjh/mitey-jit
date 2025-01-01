@@ -14,7 +14,7 @@ namespace runtime {
     do {                                                                       \
     } while (0)
 #define POSTLUDE return dummy(memory, stack, misc)
-#define MISC_GET(type, name) *reinterpret_cast<type *>(misc[name])
+#define MISC_GET(type, idx) *reinterpret_cast<type *>(misc[idx])
 
 __attribute__((noinline)) void dummy(WasmMemory *memory, WasmValue *stack,
                                      void **misc) {
@@ -157,8 +157,8 @@ HANDLER(tableget) {
     // tmp1 = table index in misc table
     PRELUDE;
     auto &table = MISC_GET(WasmTable, tmp1);
-    auto idx = (--stack)->u32;
-    *stack++ = table.get(idx);
+    auto idx = stack[-1].u32;
+    stack[-1] = table.get(idx);
     POSTLUDE;
 }
 HANDLER(tableset) {
@@ -508,9 +508,11 @@ HANDLER(memory_init) {
     // tmp1 = segment index in misc table
     PRELUDE;
     auto &segment = MISC_GET(Segment, tmp1);
-    auto size = (--stack)->u32;
-    auto src = (--stack)->u32;
-    auto dest = (--stack)->u32;
+
+    stack -= 3;
+    auto size = stack[2].u32;
+    auto src = stack[1].u32;
+    auto dest = stack[0].u32;
     memory->copy_into(dest, src, segment, size);
     POSTLUDE;
 }
@@ -523,17 +525,19 @@ HANDLER(data_drop) {
 }
 HANDLER(memory_copy) {
     PRELUDE;
-    auto size = (--stack)->u32;
-    auto src = (--stack)->u32;
-    auto dst = (--stack)->u32;
+    stack -= 3;
+    auto size = stack[2].u32;
+    auto src = stack[1].u32;
+    auto dst = stack[0].u32;
     memory->memcpy(dst, src, size);
     POSTLUDE;
 }
 HANDLER(memory_fill) {
     PRELUDE;
-    auto size = (--stack)->u32;
-    auto value = (--stack)->u32;
-    auto ptr = (--stack)->u32;
+    stack -= 3;
+    auto size = stack[2].u32;
+    auto value = stack[1].u32;
+    auto ptr = stack[0].u32;
     memory->memset(ptr, value, size);
     POSTLUDE;
 }
@@ -544,10 +548,10 @@ HANDLER(table_init) {
     auto& element = MISC_GET(ElementSegment, tmp1);
     auto& table = MISC_GET(WasmTable, tmp2);
 
-    auto size = (--stack)->u32;
-    auto src = (--stack)->u32;
-    auto dest = (--stack)->u32;
-
+    stack -= 3;
+    auto size = stack[2].u32;
+    auto src = stack[1].u32;
+    auto dest = stack[0].u32;
     table.copy_into(dest, src, element, size);
     POSTLUDE;
 }
@@ -565,9 +569,11 @@ HANDLER(table_copy) {
     PRELUDE;
     auto &dst_table = MISC_GET(WasmTable, tmp1);
     auto &src_table = MISC_GET(WasmTable, tmp2);
-    auto size = (--stack)->u32;
-    auto src = (--stack)->u32;
-    auto dst = (--stack)->u32;
+
+    stack -= 3;
+    auto size = stack[2].u32;
+    auto src = stack[1].u32;
+    auto dst = stack[0].u32;
     src_table.memcpy(dst_table, dst, src, size);
     POSTLUDE;
 }
@@ -575,9 +581,11 @@ HANDLER(table_grow) {
     // tmp1 = table index in misc table
     PRELUDE;
     auto &table = MISC_GET(WasmTable, tmp1);
-    auto delta = (--stack)->u32;
-    auto init = *--stack;
-    *stack++ = table.grow(delta, init);
+
+    stack -= 1;
+    auto delta = stack[0].u32;
+    auto init = stack[-1];
+    stack[-1] = table.grow(delta, init);
     POSTLUDE;
 }
 HANDLER(table_size) {
@@ -591,9 +599,11 @@ HANDLER(table_fill) {
     // tmp1 = table index in misc table
     PRELUDE;
     auto &table = MISC_GET(WasmTable, tmp1);
-    auto size = (--stack)->u32;
-    auto value = (--stack);
-    auto ptr = (--stack)->u32;
+
+    stack -= 3;
+    auto size = stack[2].u32;
+    auto value = stack[1];
+    auto ptr = stack[0].u32;
     table.memset(ptr, value, size);
     POSTLUDE;
 }
