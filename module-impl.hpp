@@ -2,6 +2,7 @@
 
 #include "module.hpp"
 #include "runtime.hpp"
+#include <numeric>
 
 namespace mitey {
 
@@ -206,7 +207,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     error<validation_error>("unknown type");
                 }
                 functions.emplace_back(
-                    FunctionShell(nullptr, types[typeidx], {}, specifier));
+                    FunctionShell(nullptr, types[typeidx], {}, {}, specifier));
                 n_fn_imports++;
             } else if (desc == ImExDesc::table) {
                 // table
@@ -262,7 +263,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 error<validation_error>("unknown type");
             }
             functions.emplace_back(
-                FunctionShell(nullptr, types[type_idx], {}, std::nullopt));
+                FunctionShell(nullptr, types[type_idx], {}, {}, std::nullopt));
         }
     });
 
@@ -607,6 +608,14 @@ void Module::initialize(std::span<uint8_t> bytes) {
                             }
                         }
                     }
+                    fn.local_bytes.reserve(fn.locals.size());
+                    uint32_t psum = 0;
+                    for (auto it = fn.locals.rbegin(); it != fn.locals.rend();
+                         ++it) {
+                        psum += valtype_size(*it);
+                        fn.local_bytes.push_back(psum);
+                    }
+
                     auto body_length = function_length - (iter - start);
                     fn.start = code;
                     if (!iter.has_n_left(body_length)) {
@@ -631,7 +640,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 }
 
                 for (auto [call, func_idx] : pending_calls) {
-                    auto tmp1 = Target::set_temp1(functions[func_idx].start);
+                    auto tmp1 = Target::set_temp1(
+                        reinterpret_cast<uint64_t>(functions[func_idx].start));
                     std::memcpy(call, &tmp1, sizeof(tmp1));
                 }
 
@@ -941,7 +951,7 @@ HANDLER(else_) {
     // jump to end of if/else block after if block
     pending_br.push_back(code);
     code += Target::temp1_size;
-    put(else_jump, Target::set_temp1(code));
+    put(else_jump, Target::set_temp1(reinterpret_cast<uint64_t>(code)));
 
     control_stack.back().construct = IfElse();
     stack.unpolymorphize();
@@ -955,13 +965,14 @@ HANDLER(end) {
 
     if (std::holds_alternative<If>(construct)) {
         ensure(sig.params == sig.results, "type mismatch params vs. results");
-        put(std::get<If>(construct).else_jump, Target::set_temp1(code));
+        put(std::get<If>(construct).else_jump,
+            Target::set_temp1(reinterpret_cast<uint64_t>(code)));
     }
 
     // everything except loop jumps to end
     if (!std::holds_alternative<Loop>(construct)) {
         for (auto target : pending_br) {
-            put(target, Target::set_temp1(code));
+            put(target, Target::set_temp1(reinterpret_cast<uint64_t>(code)));
         }
         for (auto [table, target] : pending_br_tables) {
             auto diff = code - table;
@@ -995,7 +1006,8 @@ HANDLER(br) {
         runtime::BrInfo(0, flow.expected.size(),
                         stack.sp() - flow.stack_offset - flow.expected.size());
     if (std::holds_alternative<Loop>(flow.construct)) {
-        put(code, Target::set_temp1(std::get<Loop>(flow.construct).start));
+        put(code, Target::set_temp1(reinterpret_cast<uint64_t>(
+                      std::get<Loop>(flow.construct).start)));
     } else {
         flow.pending_br.push_back(code);
         code += Target::temp1_size;
@@ -1015,7 +1027,8 @@ HANDLER(br_if) {
         runtime::BrInfo(0, flow.expected.size(),
                         stack.sp() - flow.stack_offset - flow.expected.size());
     if (std::holds_alternative<Loop>(flow.construct)) {
-        put(code, Target::set_temp1(std::get<Loop>(flow.construct).start));
+        put(code, Target::set_temp1(reinterpret_cast<uint64_t>(
+                      std::get<Loop>(flow.construct).start)));
     } else {
         flow.pending_br.push_back(code);
         code += Target::temp1_size;
@@ -1029,7 +1042,7 @@ HANDLER(br_table) {
     auto n_targets = safe_read_leb128<uint32_t>(iter);
 
     auto table_addr = code;
-    put(code, Target::set_temp1(table_addr));
+    put(code, Target::set_temp1(reinterpret_cast<uint64_t>(table_addr)));
     auto brinfo_loc = code;
     code += Target::temp2_size;
     put(code, Target::call(runtime::br_table));
@@ -1079,7 +1092,7 @@ HANDLER(return_) {
 
     auto &flow = control_stack.front();
     runtime::BrInfo info(0, flow.expected.size(),
-                         stack.sp() - flow.stack_offset);
+                         stack.sp() - flow.stack_offset - flow.expected.size());
 
     flow.pending_br.push_back(code);
     code += Target::temp1_size;
@@ -1165,11 +1178,7 @@ HANDLER(localget) {
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array<valtype, 0>(), std::array{local_ty});
 
-    put(code,
-        Target::set_temp1(-(
-            local_idx +
-            std::reduce(fn.locals.begin() + local_idx, fn.locals.end(), 0,
-                        [](auto a, auto b) { return a + valtype_size(b); }))));
+    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
     put(code, Target::call(runtime::localget));
     nextop();
 }
@@ -1179,11 +1188,7 @@ HANDLER(localset) {
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array{local_ty}, std::array<valtype, 0>());
 
-    put(code,
-        Target::set_temp1(-(
-            local_idx +
-            std::reduce(fn.locals.begin() + local_idx, fn.locals.end(), 0,
-                        [](auto a, auto b) { return a + valtype_size(b); }))));
+    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
     put(code, Target::call(runtime::localset));
     nextop();
 }
@@ -1193,11 +1198,7 @@ HANDLER(localtee) {
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array{local_ty}, std::array{local_ty});
 
-    put(code,
-        Target::set_temp1(-(
-            local_idx +
-            std::reduce(fn.locals.begin() + local_idx, fn.locals.end(), 0,
-                        [](auto a, auto b) { return a + valtype_size(b); }))));
+    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
     put(code, Target::call(runtime::localtee));
     nextop();
 }
@@ -1666,5 +1667,10 @@ uint8_t *Module::validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
 
     return funcs<Target>[*iter++](*this, iter, fn, stack, control_stack, code);
 }
+
+#undef LOAD
+#undef STORE
+#undef HANDLER
+#undef nextop
 
 } // namespace mitey

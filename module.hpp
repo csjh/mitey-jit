@@ -53,6 +53,7 @@ struct FunctionShell {
     uint8_t *start;
     WasmSignature type;
     std::vector<valtype> locals;
+    std::vector<uint32_t> local_bytes;
     std::optional<ImportSpecifier> import;
     bool is_declared = false;
 };

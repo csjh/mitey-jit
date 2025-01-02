@@ -73,17 +73,12 @@ static inline uint32_t valtype_size(valtype type) {
     case valtype::null:
         return 0;
     case valtype::i32:
-        return sizeof(uint32_t);
     case valtype::i64:
-        return sizeof(uint64_t);
     case valtype::f32:
-        return sizeof(float);
     case valtype::f64:
-        return sizeof(double);
     case valtype::funcref:
-        return sizeof(void *);
     case valtype::externref:
-        return sizeof(void *);
+        return 1;
     }
 }
 
