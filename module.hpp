@@ -171,6 +171,14 @@ using CompilationHandler = uint8_t *(Module &, safe_byte_iterator &,
                                      FunctionShell &, WasmStack &,
                                      std::vector<ControlFlow> &, uint8_t *);
 
+using ExportValue =
+    std::variant<runtime::FunctionInfo, std::shared_ptr<runtime::WasmTable>,
+                 std::shared_ptr<runtime::WasmMemory>,
+                 std::shared_ptr<runtime::WasmGlobal>>;
+using Exports = std::unordered_map<std::string, ExportValue>;
+using ModuleImports = std::unordered_map<std::string, ExportValue>;
+using Imports = std::unordered_map<std::string, ModuleImports>;
+
 class Module {
     template <typename Pager, typename Target> friend class JIT;
 
@@ -223,7 +231,7 @@ class Module {
         return mod;
     }
 
-    // std::shared_ptr<Instance> instantiate(const Imports &imports = {});
+    std::shared_ptr<Instance> instantiate(const Imports &imports = {});
 };
 
 } // namespace mitey

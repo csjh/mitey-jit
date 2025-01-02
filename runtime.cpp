@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "instance.hpp"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -108,8 +109,9 @@ HANDLER(call_indirect) {
         trap("indirect call type mismatch");
     }
 
-    funcref->signature(funcref->memory.get(), stack, funcref->misc.get(), tmp1,
-                       tmp2);
+    auto func = funcref->signature;
+    auto &instance = *funcref->instance.get();
+    func(instance.memory.get(), stack, instance.misc.get(), tmp1, tmp2);
 
     POSTLUDE;
 }

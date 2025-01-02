@@ -6,6 +6,9 @@
 #include <memory>
 
 namespace mitey {
+
+class Instance;
+
 namespace runtime {
 
 union WasmValue;
@@ -87,13 +90,12 @@ struct __attribute__((packed)) FunctionType {
 };
 static_assert(sizeof(FunctionType) == sizeof(uint32_t) + sizeof(uint64_t));
 
-using Signature = void(WasmMemory *memory, WasmValue *stack,
-                       void **globals_and_tables, uint64_t tmp1, uint64_t tmp2);
+using Signature = void(WasmMemory *memory, WasmValue *stack, void **misc,
+                       uint64_t tmp1, uint64_t tmp2);
 
 struct FunctionInfo {
     FunctionType type;
-    std::shared_ptr<WasmMemory> memory;
-    std::shared_ptr<void *> misc;
+    std::shared_ptr<Instance> instance;
     Signature *signature;
 };
 
@@ -222,6 +224,12 @@ struct WasmMemory {
                    uint32_t length);
     void memcpy(uint32_t dst, uint32_t src, uint32_t length);
     void memset(uint32_t dst, uint8_t value, uint32_t length);
+};
+
+struct WasmGlobal {
+    valtype type;
+    mut _mut;
+    WasmValue value;
 };
 
 struct BrTableTarget {
