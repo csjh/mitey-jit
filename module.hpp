@@ -125,11 +125,13 @@ class WasmStack {
     template <typename T> auto find_diverging(const T &expected) const;
 
   public:
+    WasmStack();
+
+    auto sp() { return stack_size; }
+
     auto begin() const { return const_cast<valtype *>(buffer_start + 1024); }
     auto end() const { return buffer; }
     auto size() const { return std::distance(begin(), end()); }
-
-    WasmStack();
 
     template <typename T> bool check(const T &expected) const;
 
