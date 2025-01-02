@@ -34,18 +34,18 @@ int main(int argc, char **argv) {
     printf("Compilation/validation took %fms\n",
            std::chrono::duration<float, std::milli>(end - start).count());
 
-    auto addTwo =
-        reinterpret_cast<runtime::Signature *>(mod->functions[0].start);
+    auto fac = reinterpret_cast<runtime::Signature *>(mod->functions[0].start);
+    auto fac_bytes = mod->functions[0].start;
 
-    runtime::WasmValue s[16] = {10u, 35u};
-    addTwo(nullptr, s + 2, nullptr, 0, 0);
-    auto jitter = s[0].u32;
-    std::cout << "addTwo result: " << jitter << std::endl;
-    std::cout << "stack: ";
-    for (int i = 0; i < 16; i++) {
-        std::cout << s[i].u32 << " ";
-    }
-    std::cout << std::endl;
+    runtime::WasmValue s[65536] = {(double)170.0};
+    start = std::chrono::high_resolution_clock::now();
+    fac(nullptr, s + 1, nullptr, 0, 0);
+    end = std::chrono::high_resolution_clock::now();
+    printf("Execution took %fms\n",
+           std::chrono::duration<float, std::milli>(end - start).count());
+
+    auto score = s[0].f64;
+    printf("Score: %f\n", score);
 
     return 0;
 }

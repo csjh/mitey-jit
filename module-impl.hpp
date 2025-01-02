@@ -940,8 +940,8 @@ HANDLER(if_) {
     nextop();
 }
 HANDLER(else_) {
-    auto &[_, pending_br, pending_br_tables, sig, __, sp, construct] =
-        control_stack.back();
+    auto &[expected, pending_br, pending_br_tables, sig, _, stack_offset,
+           construct] = control_stack.back();
     ensure(std::holds_alternative<If>(construct), "else must close an if");
     ensure(stack == sig.results, "type mismatch");
 
@@ -952,6 +952,7 @@ HANDLER(else_) {
     // jump to end of if/else block after if block
     pending_br.push_back(code);
     code += Target::temp1_size;
+    put(code, Target::call(runtime::jump));
     put(else_jump, Target::set_temp1(reinterpret_cast<uint64_t>(code)));
 
     control_stack.back().construct = IfElse();

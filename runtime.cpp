@@ -39,6 +39,12 @@ HANDLER(move_results) {
     std::memcpy(stack - tmp1, stack - tmp2, tmp2 * sizeof(WasmValue));
     POSTLUDE;
 }
+HANDLER(jump) {
+    // tmp1 = target
+    PRELUDE;
+    [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
+    POSTLUDE;
+}
 
 HANDLER(unreachable) { trap("unreachable"); }
 HANDLER(if_) {
