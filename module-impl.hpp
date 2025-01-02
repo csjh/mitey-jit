@@ -615,6 +615,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                         psum += valtype_size(*it);
                         fn.local_bytes.push_back(psum);
                     }
+                    std::reverse(fn.local_bytes.begin(), fn.local_bytes.end());
 
                     auto body_length = function_length - (iter - start);
                     fn.start = code;
@@ -983,6 +984,11 @@ HANDLER(end) {
     }
 
     if (std::holds_alternative<Function>(construct)) {
+        // move results past locals
+        put(code, Target::set_temp1(fn.locals.size() + fn.type.results.size()));
+        put(code, Target::set_temp2(fn.type.results.size()));
+        put(code, Target::call(runtime::move_results));
+
         put(code, Target::get_postlude());
         return code;
     }
@@ -1000,7 +1006,6 @@ HANDLER(br) {
     auto depth = safe_read_leb128<uint32_t>(iter);
     stack.check_br(control_stack, depth);
     auto &flow = control_stack[control_stack.size() - depth - 1];
-    stack.polymorphize();
 
     auto info =
         runtime::BrInfo(0, flow.expected.size(),
@@ -1014,6 +1019,8 @@ HANDLER(br) {
     }
     put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
     put(code, Target::call(runtime::br));
+
+    stack.polymorphize();
     nextop();
 }
 HANDLER(br_if) {
@@ -1088,7 +1095,6 @@ HANDLER(br_table) {
 }
 HANDLER(return_) {
     stack.check_br(control_stack, control_stack.size() - 1);
-    stack.polymorphize();
 
     auto &flow = control_stack.front();
     runtime::BrInfo info(0, flow.expected.size(),
@@ -1097,6 +1103,8 @@ HANDLER(return_) {
     flow.pending_br.push_back(code);
     code += Target::temp1_size;
     put(code, Target::call(runtime::br));
+
+    stack.polymorphize();
     nextop();
 }
 HANDLER(call) {
@@ -1175,31 +1183,34 @@ HANDLER(select_t) {
 HANDLER(localget) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
+
+    put(code, Target::set_temp1(stack.sp() + fn.local_bytes[local_idx]));
+    put(code, Target::call(runtime::localget));
+
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array<valtype, 0>(), std::array{local_ty});
-
-    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
-    put(code, Target::call(runtime::localget));
     nextop();
 }
 HANDLER(localset) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
+
+    put(code, Target::set_temp1(stack.sp() + fn.local_bytes[local_idx]));
+    put(code, Target::call(runtime::localset));
+
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array{local_ty}, std::array<valtype, 0>());
-
-    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
-    put(code, Target::call(runtime::localset));
     nextop();
 }
 HANDLER(localtee) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
+
+    put(code, Target::set_temp1(stack.sp() + fn.local_bytes[local_idx]));
+    put(code, Target::call(runtime::localtee));
+
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array{local_ty}, std::array{local_ty});
-
-    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
-    put(code, Target::call(runtime::localtee));
     nextop();
 }
 HANDLER(tableget) {
@@ -1655,13 +1666,12 @@ uint8_t *Module::validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
                                       FunctionShell &fn) {
     auto stack = WasmStack();
 
+    auto control_stack = std::vector<ControlFlow>(
+        {ControlFlow(fn.type.results, {}, {}, fn.type, false, 0, Function())});
+
     auto locals_bytes =
         std::reduce(fn.locals.begin() + fn.type.params.size(), fn.locals.end(),
                     0, [](auto a, auto b) { return a + valtype_size(b); });
-
-    auto control_stack = std::vector<ControlFlow>(
-        {ControlFlow(fn.type.results, {}, {}, fn.type, false,
-                     stack.sp() - locals_bytes, Function())});
 
     put(code, Target::get_prelude());
     put(code, Target::set_temp1(locals_bytes * sizeof(runtime::WasmValue)));

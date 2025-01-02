@@ -31,6 +31,13 @@ HANDLER(clear_locals) {
     stack = (WasmValue *)((uint8_t *)stack + tmp1);
     POSTLUDE;
 }
+HANDLER(move_results) {
+    // tmp1 = offset from start of fn frame
+    // tmp2 = # of results
+    PRELUDE;
+    std::memcpy(stack - tmp1, stack - tmp2, tmp2 * sizeof(WasmValue));
+    POSTLUDE;
+}
 
 HANDLER(unreachable) { trap("unreachable"); }
 HANDLER(if_) {
@@ -144,21 +151,21 @@ HANDLER(select_t) {
 HANDLER(localget) {
     // tmp1 = local index/stack offset to local
     PRELUDE;
-    auto &local = stack[tmp1];
+    auto &local = stack[-(int64_t)tmp1];
     *stack++ = local;
     POSTLUDE;
 }
 HANDLER(localset) {
     // tmp1 = local index/stack offset to local
     PRELUDE;
-    auto &local = stack[tmp1];
+    auto &local = stack[-(int64_t)tmp1];
     local = *--stack;
     POSTLUDE;
 }
 HANDLER(localtee) {
     // tmp1 = local index/stack offset to local
     PRELUDE;
-    stack[tmp1] = stack[-1];
+    stack[-(int64_t)tmp1] = stack[-1];
     POSTLUDE;
 }
 HANDLER(tableget) {

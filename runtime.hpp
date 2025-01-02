@@ -253,6 +253,7 @@ static_assert(sizeof(CallIndirectInfo) == 2 * sizeof(uint64_t));
 
 Signature ifXXconst;
 Signature clear_locals;
+Signature move_results;
 #define HANDLER(name, str, byte) Signature name;
 FOREACH_INSTRUCTION(HANDLER)
 FOREACH_MULTIBYTE_INSTRUCTION(HANDLER)

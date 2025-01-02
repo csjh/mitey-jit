@@ -34,50 +34,18 @@ int main(int argc, char **argv) {
     printf("Compilation/validation took %fms\n",
            std::chrono::duration<float, std::milli>(end - start).count());
 
-    return 0;
+    auto addTwo =
+        reinterpret_cast<runtime::Signature *>(mod->functions[0].start);
 
-    std::vector<uint8_t> code;
-    auto prelude = Arm64::get_prelude();
-    auto postlude = Arm64::get_postlude();
-    auto shove = Arm64::set_temp1(111);
-    auto push = Arm64::call(runtime::ifXXconst);
-    auto mul = Arm64::call(runtime::i32mul);
-    auto add = Arm64::call(runtime::i32add);
-
-    code.insert(code.end(), prelude.begin(), prelude.end());
-    code.insert(code.end(), add.begin(), add.end());
-    code.insert(code.end(), shove.begin(), shove.end());
-    code.insert(code.end(), push.begin(), push.end());
-    code.insert(code.end(), mul.begin(), mul.end());
-    code.insert(code.end(), shove.begin(), shove.end());
-    code.insert(code.end(), push.begin(), push.end());
-    code.insert(code.end(), mul.begin(), mul.end());
-    code.insert(code.end(), shove.begin(), shove.end());
-    code.insert(code.end(), push.begin(), push.end());
-    code.insert(code.end(), add.begin(), add.end());
-    code.insert(code.end(), postlude.begin(), postlude.end());
-
-    auto mem = MacExecutable::allocate(code.size());
-
-    MacExecutable::write(mem, [&] {
-        memcpy(mem.get(), code.data(), code.size());
-        return code.size();
-    });
-
-    auto addMulMul = reinterpret_cast<runtime::Signature *>(mem.get());
-
-    uint32_t i1 = 42, i2 = 59;
-    std::cout << "Input: " << i1 << " " << i2 << std::endl;
-
-    runtime::WasmValue stack[16] = {i1, i2};
-    addMulMul(nullptr, stack + 2, nullptr, 0, 0);
-    auto jit_result = stack[0].u32;
-    std::cout << "addMulMul result: " << jit_result << std::endl;
-
-    auto std_result = (((i1 + i2) * 111) * 111) + 111;
-
-    std::cout << "C result: " << std_result << std::endl;
-    std::cout << "Results match: " << (jit_result == std_result) << std::endl;
+    runtime::WasmValue s[16] = {10u, 35u};
+    addTwo(nullptr, s + 2, nullptr, 0, 0);
+    auto jitter = s[0].u32;
+    std::cout << "addTwo result: " << jitter << std::endl;
+    std::cout << "stack: ";
+    for (int i = 0; i < 16; i++) {
+        std::cout << s[i].u32 << " ";
+    }
+    std::cout << std::endl;
 
     return 0;
 }

@@ -133,7 +133,7 @@ class WasmStack {
   public:
     WasmStack();
 
-    auto sp() { return stack_size; }
+    int64_t sp() { return stack_size; }
 
     auto begin() const { return const_cast<valtype *>(buffer_start + 1024); }
     auto end() const { return buffer; }
