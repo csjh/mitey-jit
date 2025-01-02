@@ -77,15 +77,10 @@ HANDLER(br_table) {
 }
 HANDLER(call) {
     // tmp1 = function start
-    // tmp2 = number of bytes locals take up
     PRELUDE;
-    if (tmp2 & 0b111)
-        __builtin_unreachable();
-    // todo: either zero non-parameter locals here, or lazily zero them just
-    // before the first loop (or usage) in the function (assuming they aren't
-    // given an initial value first)
-    stack += tmp2 / 8;
-    [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
+    // todo: increment by # of locals in prelude
+    reinterpret_cast<Signature *>(tmp1)(PARAMS);
+    // todo: assumption that `stack` register is correct
     POSTLUDE;
 }
 HANDLER(call_indirect) {

@@ -12,12 +12,77 @@ union WasmValue;
 struct WasmMemory;
 
 struct __attribute__((packed)) FunctionType {
-    uint32_t params : 24;
-    uint8_t results;
-    uint64_t hash;
+    uint16_t params;
+    uint16_t results;
+    bool has_i32 : 1;
+    bool has_i64 : 1;
+    bool has_f32 : 1;
+    bool has_f64 : 1;
+    bool has_funcref : 1;
+    bool has_externref : 1;
+    uint64_t hash : 64 - 6;
 
     bool operator==(const FunctionType &other) const {
-        return params == other.params && results == other.results;
+        return std::memcmp(this, &other, sizeof(FunctionType)) == 0;
+    }
+
+    FunctionType(const WasmSignature &sig)
+        : params(sig.params.size()), results(sig.results.size()), hash(0) {
+        for (valtype param : sig.params) {
+            switch (param) {
+            case valtype::i32:
+                has_i32 = true;
+                break;
+            case valtype::i64:
+                has_i64 = true;
+                break;
+            case valtype::f32:
+                has_f32 = true;
+                break;
+            case valtype::f64:
+                has_f64 = true;
+                break;
+            case valtype::funcref:
+                has_funcref = true;
+                break;
+            case valtype::externref:
+                has_externref = true;
+                break;
+            case valtype::null:
+            case valtype::any:
+                error<std::runtime_error>("invalid result type");
+            }
+            hash *= 16777619;
+            hash ^= static_cast<uint64_t>(param);
+        }
+        hash *= 31;
+        for (valtype result : sig.results) {
+            switch (result) {
+            case valtype::i32:
+                has_i32 = true;
+                break;
+            case valtype::i64:
+                has_i64 = true;
+                break;
+            case valtype::f32:
+                has_f32 = true;
+                break;
+            case valtype::f64:
+                has_f64 = true;
+                break;
+            case valtype::funcref:
+                has_funcref = true;
+                break;
+            case valtype::externref:
+                has_externref = true;
+                break;
+            case valtype::null:
+            case valtype::any:
+                error<std::runtime_error>("invalid result type");
+            }
+            hash *= 31;
+            hash ^= static_cast<uint64_t>(result);
+        }
     }
 };
 static_assert(sizeof(FunctionType) == sizeof(uint32_t) + sizeof(uint64_t));

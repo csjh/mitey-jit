@@ -1016,7 +1016,16 @@ HANDLER(call_indirect) {
     ensure(table_idx < mod.tables.size(), "unknown table");
     ensure(mod.tables[table_idx].type == valtype::funcref, "type mismatch");
 
-    stack.apply(mod.types[type_idx]);
+    auto &type = mod.types[type_idx];
+    stack.apply(type);
+
+    auto info =
+        runtime::CallIndirectInfo(table_idx, runtime::FunctionType(type));
+    auto [temp1, temp2] = std::bit_cast<std::array<uint64_t, 2>>(info);
+
+    put(code, Target::set_temp1(temp1));
+    put(code, Target::set_temp2(temp2));
+    put(code, Target::call(runtime::call_indirect));
     nextop();
 }
 HANDLER(drop) {
@@ -1079,6 +1088,9 @@ HANDLER(tableget) {
     ensure(table_idx < mod.tables.size(), "unknown table");
     auto table_ty = mod.tables[table_idx].type;
     stack.apply(std::array{valtype::i32}, std::array{table_ty});
+
+    put(code, Target::set_temp1(table_idx));
+    put(code, Target::call(runtime::tableget));
     nextop();
 }
 HANDLER(tableset) {
@@ -1086,6 +1098,9 @@ HANDLER(tableset) {
     ensure(table_idx < mod.tables.size(), "unknown table");
     auto table_ty = mod.tables[table_idx].type;
     stack.apply(std::array{valtype::i32, table_ty}, std::array<valtype, 0>());
+
+    put(code, Target::set_temp1(table_idx));
+    put(code, Target::call(runtime::tableset));
     nextop();
 }
 HANDLER(globalget) {
@@ -1093,6 +1108,9 @@ HANDLER(globalget) {
     ensure(global_idx < mod.globals.size(), "unknown global");
     auto global_ty = mod.globals[global_idx].type;
     stack.apply(std::array<valtype, 0>(), std::array{global_ty});
+
+    put(code, Target::set_temp1(mod.tables.size() + global_idx));
+    put(code, Target::call(runtime::globalget));
     nextop();
 }
 HANDLER(globalset) {
@@ -1102,6 +1120,9 @@ HANDLER(globalset) {
            "global is immutable");
     auto global_ty = mod.globals[global_idx].type;
     stack.apply(std::array{global_ty}, std::array<valtype, 0>());
+
+    put(code, Target::set_temp1(mod.tables.size() + global_idx));
+    put(code, Target::call(runtime::globalset));
     nextop();
 }
 HANDLER(memorysize) {
@@ -1318,6 +1339,10 @@ HANDLER(ref_func) {
     ensure(mod.functions[func_idx].is_declared,
            "undeclared function reference");
     stack.apply(std::array<valtype, 0>(), std::array{valtype::funcref});
+
+    put(code,
+        Target::set_temp1(mod.tables.size() + mod.globals.size() + func_idx));
+    put(code, Target::call(runtime::ref_func));
     nextop();
 }
 HANDLER(ref_eq) {
@@ -1394,11 +1419,20 @@ HANDLER(table_init) {
 
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
+
+    put(code, Target::set_temp1(mod.tables.size() + mod.globals.size() +
+                                mod.functions.size() + seg_idx));
+    put(code, Target::set_temp2(table_idx));
+    put(code, Target::call(runtime::table_init));
     nextop();
 }
 HANDLER(elem_drop) {
     auto seg_idx = safe_read_leb128<uint32_t>(iter);
     ensure(seg_idx < mod.elements.size(), "unknown elem segment");
+
+    put(code, Target::set_temp1(mod.tables.size() + mod.globals.size() +
+                                mod.functions.size() + seg_idx));
+    put(code, Target::call(runtime::elem_drop));
     nextop();
 }
 HANDLER(table_copy) {
@@ -1411,6 +1445,10 @@ HANDLER(table_copy) {
 
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
+
+    put(code, Target::set_temp1(dst_table_idx));
+    put(code, Target::set_temp2(src_table_idx));
+    put(code, Target::call(runtime::table_copy));
     nextop();
 }
 HANDLER(table_grow) {
@@ -1419,6 +1457,9 @@ HANDLER(table_grow) {
 
     stack.apply(std::array{mod.tables[table_idx].type, valtype::i32},
                 std::array{valtype::i32});
+
+    put(code, Target::set_temp1(table_idx));
+    put(code, Target::call(runtime::table_grow));
     nextop();
 }
 HANDLER(table_size) {
@@ -1426,6 +1467,9 @@ HANDLER(table_size) {
     ensure(table_idx < mod.tables.size(), "unknown table");
 
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
+
+    put(code, Target::set_temp1(table_idx));
+    put(code, Target::call(runtime::table_size));
     nextop();
 }
 HANDLER(table_fill) {
@@ -1435,6 +1479,9 @@ HANDLER(table_fill) {
     stack.apply(
         std::array{valtype::i32, mod.tables[table_idx].type, valtype::i32},
         std::array<valtype, 0>());
+
+    put(code, Target::set_temp1(table_idx));
+    put(code, Target::call(runtime::table_fill));
     nextop();
 }
 

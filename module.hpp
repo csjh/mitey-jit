@@ -191,10 +191,6 @@ class Module {
     uint32_t n_data;
     std::vector<runtime::Segment> data_segments;
 
-    // todo: maybe split this into another class
-    FunctionShell current_fn;
-    std::vector<std::vector<valtype>> control_stack;
-
     template <typename Pager, typename Target>
     uint8_t *validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
                                   FunctionShell &fn);
