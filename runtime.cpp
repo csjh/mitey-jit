@@ -19,6 +19,7 @@ namespace runtime {
 
 __attribute__((noinline)) void dummy(WasmMemory *memory, WasmValue *stack,
                                      void **misc) {
+    // assumption: compiler doesn't move memory/stack/misc from arg registers
     asm volatile("" ::"r"(memory), "r"(stack), "r"(misc));
     return;
 }
