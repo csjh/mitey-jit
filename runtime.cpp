@@ -14,7 +14,7 @@ namespace runtime {
     do {                                                                       \
     } while (0)
 #define POSTLUDE return dummy(memory, stack, misc)
-#define MISC_GET(type, idx) *reinterpret_cast<type *>(misc[idx])
+#define MISC_GET(type, idx) (*reinterpret_cast<type *>(misc[idx]))
 
 __attribute__((noinline)) void dummy(WasmMemory *memory, WasmValue *stack,
                                      void **misc) {
@@ -78,9 +78,13 @@ HANDLER(br_table) {
 HANDLER(call) {
     // tmp1 = function start
     PRELUDE;
-    // todo: increment by # of locals in prelude
     reinterpret_cast<Signature *>(tmp1)(PARAMS);
-    // todo: assumption that `stack` register is correct
+    POSTLUDE;
+}
+HANDLER(call_extern) {
+    // tmp1 = function offset in misc
+    PRELUDE;
+    MISC_GET(Signature *, tmp1)(PARAMS);
     POSTLUDE;
 }
 HANDLER(call_indirect) {
@@ -117,15 +121,13 @@ HANDLER(drop) {
 HANDLER(select) {
     PRELUDE;
     stack -= 2;
-    if (!stack[1].i32)
-        stack[-1] = stack[0];
+    stack[-1] = stack[-!!stack[1].u32];
     POSTLUDE;
 }
 HANDLER(select_t) {
     PRELUDE;
     stack -= 2;
-    if (!stack[1].i32)
-        stack[-1] = stack[0];
+    stack[-1] = stack[-!!stack[1].u32];
     POSTLUDE;
 }
 HANDLER(localget) {
