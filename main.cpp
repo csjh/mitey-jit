@@ -28,7 +28,11 @@ int main(int argc, char **argv) {
     fread(bytes.data(), 1, length, file);
     fclose(file);
 
+    auto start = std::chrono::high_resolution_clock::now();
     auto mod = Module::compile<MacExecutable, Arm64>(bytes);
+    auto end = std::chrono::high_resolution_clock::now();
+    printf("Compilation/validation took %fms\n",
+           std::chrono::duration<float, std::milli>(end - start).count());
 
     return 0;
 
