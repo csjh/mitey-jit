@@ -784,7 +784,7 @@ void WasmStack::apply(std::array<valtype, pc> params,
     push(results);
 }
 
-#define LOAD(type, stacktype)                                                  \
+#define LOAD(type, stacktype, name)                                            \
     {                                                                          \
         auto a = safe_read_leb128<uint32_t>(iter);                             \
         ensure(mod.memory.exists, "unknown memory");                           \
@@ -794,12 +794,14 @@ void WasmStack::apply(std::array<valtype, pc> params,
         auto align = 1ull << a;                                                \
         ensure(align <= sizeof(type),                                          \
                "alignment must not be larger than natural");                   \
-        /* auto offset = */ safe_read_leb128<uint32_t>(iter);                  \
+        auto offset = safe_read_leb128<uint32_t>(iter);                        \
         stack.apply(std::array{valtype::i32}, std::array{stacktype});          \
+        put(code, Target::set_temp1(offset));                                  \
+        put(code, Target::call(runtime::name));                                \
         nextop();                                                              \
     }
 
-#define STORE(type, stacktype)                                                 \
+#define STORE(type, stacktype, name)                                           \
     {                                                                          \
         auto a = safe_read_leb128<uint32_t>(iter);                             \
         if ((1 << 6) & a) {                                                    \
@@ -812,9 +814,11 @@ void WasmStack::apply(std::array<valtype, pc> params,
         auto align = 1ull << a;                                                \
         ensure(align <= sizeof(type),                                          \
                "alignment must not be larger than natural");                   \
-        /* auto offset = */ safe_read_leb128<uint32_t>(iter);                  \
+        auto offset = safe_read_leb128<uint32_t>(iter);                        \
         stack.apply(std::array{valtype::i32, stacktype},                       \
                     std::array<valtype, 0>());                                 \
+        put(code, Target::set_temp1(offset));                                  \
+        put(code, Target::call(runtime::name));                                \
         nextop();                                                              \
     }
 
@@ -885,7 +889,7 @@ template <typename T> void put(uint8_t *&code, const T &value) {
 HANDLER(unreachable) {
     stack.polymorphize();
 
-    put(code, Target::call(&runtime::unreachable));
+    put(code, Target::call(runtime::unreachable));
     nextop();
 }
 HANDLER(nop) { nextop(); }
@@ -1024,17 +1028,11 @@ HANDLER(br_table) {
     stack.pop(valtype::i32);
     auto n_targets = safe_read_leb128<uint32_t>(iter);
 
-    auto table_addr_loc = code;
-    code += Target::temp1_size;
+    auto table_addr = code;
+    put(code, Target::set_temp1(table_addr));
     auto brinfo_loc = code;
     code += Target::temp2_size;
     put(code, Target::call(runtime::br_table));
-
-    auto table_addr = code;
-    put(table_addr_loc, Target::set_temp1(table_addr));
-
-    runtime::BrInfo info;
-    info.n_targets = n_targets;
 
     auto targets = (uint32_t *)alloca(sizeof(uint32_t) * (n_targets + 1));
     for (uint32_t i = 0; i <= n_targets; ++i) {
@@ -1044,7 +1042,10 @@ HANDLER(br_table) {
     }
     auto base = control_stack.size() - 1;
     auto &default_target = control_stack[base - targets[n_targets]].expected;
-    info.arity = default_target.size();
+
+    auto info = runtime::BrInfo(n_targets, default_target.size());
+    put(brinfo_loc, Target::set_temp2(std::bit_cast<uint64_t>(info)));
+
     for (uint32_t i = 0; i <= n_targets; ++i) {
         auto &target = control_stack[base - targets[i]].expected;
         if (stack.can_be_anything()) {
@@ -1054,22 +1055,21 @@ HANDLER(br_table) {
             stack.check_br(control_stack, targets[i]);
 
             auto &flow = control_stack[control_stack.size() - targets[i] - 1];
+            auto offset = stack.sp() - flow.stack_offset - info.arity;
             if (std::holds_alternative<Loop>(flow.construct)) {
                 put(code, runtime::BrTableTarget(
                               std::get<Loop>(flow.construct).start - table_addr,
-                              stack.sp() - flow.stack_offset - info.arity));
+                              offset));
             } else {
                 flow.pending_br_tables.push_back(
                     PendingBrTable(table_addr, code));
                 code += sizeof(uint32_t);
-                put(code, static_cast<uint32_t>(stack.sp() - flow.stack_offset -
-                                                info.arity));
+                put(code, static_cast<uint32_t>(offset));
             }
 
             ensure(default_target == target, "type mismatch");
         }
     }
-    put(brinfo_loc, Target::set_temp2(std::bit_cast<uint64_t>(info)));
     stack.polymorphize();
     nextop();
 }
@@ -1300,29 +1300,29 @@ HANDLER(f64const) {
     nextop();
 }
 // clang-format off
-HANDLER(i32load) {     LOAD(uint32_t,  valtype::i32); }
-HANDLER(i64load) {     LOAD(uint64_t,  valtype::i64); }
-HANDLER(f32load) {     LOAD(float,     valtype::f32); }
-HANDLER(f64load) {     LOAD(double,    valtype::f64); }
-HANDLER(i32load8_s) {  LOAD(int8_t,    valtype::i32); }
-HANDLER(i32load8_u) {  LOAD(uint8_t,   valtype::i32); }
-HANDLER(i32load16_s) { LOAD(int16_t,   valtype::i32); }
-HANDLER(i32load16_u) { LOAD(uint16_t,  valtype::i32); }
-HANDLER(i64load8_s) {  LOAD(int8_t,    valtype::i64); }
-HANDLER(i64load8_u) {  LOAD(uint8_t,   valtype::i64); }
-HANDLER(i64load16_s) { LOAD(int16_t,   valtype::i64); }
-HANDLER(i64load16_u) { LOAD(uint16_t,  valtype::i64); }
-HANDLER(i64load32_s) { LOAD(int32_t,   valtype::i64); }
-HANDLER(i64load32_u) { LOAD(uint32_t,  valtype::i64); }
-HANDLER(i32store) {    STORE(uint32_t, valtype::i32); }
-HANDLER(i64store) {    STORE(uint64_t, valtype::i64); }
-HANDLER(f32store) {    STORE(float,    valtype::f32); }
-HANDLER(f64store) {    STORE(double,   valtype::f64); }
-HANDLER(i32store8) {   STORE(uint8_t,  valtype::i32); }
-HANDLER(i32store16) {  STORE(uint16_t, valtype::i32); }
-HANDLER(i64store8) {   STORE(uint8_t,  valtype::i64); }
-HANDLER(i64store16) {  STORE(uint16_t, valtype::i64); }
-HANDLER(i64store32) {  STORE(uint32_t, valtype::i64); }
+HANDLER(i32load) {     LOAD(uint32_t,  valtype::i32, i32load); }
+HANDLER(i64load) {     LOAD(uint64_t,  valtype::i64, i64load); }
+HANDLER(f32load) {     LOAD(float,     valtype::f32, f32load); }
+HANDLER(f64load) {     LOAD(double,    valtype::f64, f64load); }
+HANDLER(i32load8_s) {  LOAD(int8_t,    valtype::i32, i32load8_s); }
+HANDLER(i32load8_u) {  LOAD(uint8_t,   valtype::i32, i32load8_u); }
+HANDLER(i32load16_s) { LOAD(int16_t,   valtype::i32, i32load16_s); }
+HANDLER(i32load16_u) { LOAD(uint16_t,  valtype::i32, i32load16_u); }
+HANDLER(i64load8_s) {  LOAD(int8_t,    valtype::i64, i64load8_s); }
+HANDLER(i64load8_u) {  LOAD(uint8_t,   valtype::i64, i64load8_u); }
+HANDLER(i64load16_s) { LOAD(int16_t,   valtype::i64, i64load16_s); }
+HANDLER(i64load16_u) { LOAD(uint16_t,  valtype::i64, i64load16_u); }
+HANDLER(i64load32_s) { LOAD(int32_t,   valtype::i64, i64load32_s); }
+HANDLER(i64load32_u) { LOAD(uint32_t,  valtype::i64, i64load32_u); }
+HANDLER(i32store) {    STORE(uint32_t, valtype::i32, i32store); }
+HANDLER(i64store) {    STORE(uint64_t, valtype::i64, i64store); }
+HANDLER(f32store) {    STORE(float,    valtype::f32, f32store); }
+HANDLER(f64store) {    STORE(double,   valtype::f64, f64store); }
+HANDLER(i32store8) {   STORE(uint8_t,  valtype::i32, i32store8); }
+HANDLER(i32store16) {  STORE(uint16_t, valtype::i32, i32store16); }
+HANDLER(i64store8) {   STORE(uint8_t,  valtype::i64, i64store8); }
+HANDLER(i64store16) {  STORE(uint16_t, valtype::i64, i64store16); }
+HANDLER(i64store32) {  STORE(uint32_t, valtype::i64, i64store32); }
 HANDLER(i32eqz) {      stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); put(code, Target::call(runtime::i32eqz)); nextop(); }
 HANDLER(i64eqz) {      stack.apply(std::array{valtype::i64              }, std::array{valtype::i32}); put(code, Target::call(runtime::i64eqz)); nextop(); }
 HANDLER(i32eq) {       stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32eq)); nextop(); }
