@@ -1664,6 +1664,8 @@ uint8_t *Module::validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
                      stack.sp() - locals_bytes, Function())});
 
     put(code, Target::get_prelude());
+    put(code, Target::set_temp1(locals_bytes * sizeof(runtime::WasmValue)));
+    put(code, Target::call(runtime::clear_locals));
 
     return funcs<Target>[*iter++](*this, iter, fn, stack, control_stack, code);
 }

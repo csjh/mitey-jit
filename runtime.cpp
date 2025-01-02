@@ -23,6 +23,15 @@ __attribute__((noinline)) void dummy(WasmMemory *memory, WasmValue *stack,
     return;
 }
 
+// non-instruction handlers
+HANDLER(clear_locals) {
+    // tmp1 = non-parameter local bytes
+    PRELUDE;
+    std::memset(stack, 0, tmp1);
+    stack = (WasmValue *)((uint8_t *)stack + tmp1);
+    POSTLUDE;
+}
+
 HANDLER(unreachable) { trap("unreachable"); }
 HANDLER(if_) {
     // tmp1 = else branch
