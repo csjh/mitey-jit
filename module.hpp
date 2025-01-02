@@ -89,25 +89,30 @@ struct ElementShell {
 
 struct Function {};
 
-struct Block {
-    uint8_t *block_start;
-};
+struct Block {};
 
-struct Loop {};
+struct Loop {
+    uint8_t *start;
+};
 
 struct If {
-    uint8_t *if_start;
+    uint8_t *else_jump;
 };
 
-struct IfElse {
-    uint8_t *if_start;
-    uint8_t *else_start;
+struct IfElse {};
+
+struct PendingBrTable {
+    uint8_t *table;
+    uint8_t *target;
 };
 
 struct ControlFlow {
     std::vector<valtype> &expected;
+    std::vector<uint8_t *> pending_br;
+    std::vector<PendingBrTable> pending_br_tables;
     WasmSignature &sig;
     bool polymorphized;
+    int32_t stack_offset;
     std::variant<Function, Block, Loop, If, IfElse> construct;
 };
 
@@ -192,6 +197,8 @@ class Module {
     std::vector<FunctionShell> functions;
     uint32_t n_data;
     std::vector<runtime::Segment> data_segments;
+
+    std::vector<std::pair<uint8_t *, uint32_t>> pending_calls;
 
     template <typename Pager, typename Target>
     uint8_t *validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
