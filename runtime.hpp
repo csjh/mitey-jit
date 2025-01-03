@@ -90,7 +90,7 @@ struct __attribute__((packed)) FunctionType {
 };
 static_assert(sizeof(FunctionType) == sizeof(uint32_t) + sizeof(uint64_t));
 
-using Signature = void(WasmMemory *memory, WasmValue *stack, void **misc,
+using Signature = void(WasmMemory *memory, void **misc, WasmValue *stack,
                        uint64_t tmp1, uint64_t tmp2);
 
 struct FunctionInfo {

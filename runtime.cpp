@@ -8,19 +8,24 @@ namespace mitey {
 namespace runtime {
 
 #define HANDLER(name)                                                          \
-    void name(WasmMemory *memory, WasmValue *stack, void **misc,               \
+    void name(WasmMemory *memory, void **misc, WasmValue *stack,               \
               uint64_t tmp1, uint64_t tmp2)
-#define PARAMS memory, stack, misc, tmp1, tmp2
+#define PARAMS memory, misc, stack, tmp1, tmp2
 #define PRELUDE                                                                \
     do {                                                                       \
     } while (0)
-#define POSTLUDE return dummy(memory, stack, misc)
+#define POSTLUDE return dummy(memory, misc, stack)
 #define MISC_GET(type, idx) (*reinterpret_cast<type *>(misc[idx]))
 
-__attribute__((noinline)) void dummy(WasmMemory *memory, WasmValue *stack,
-                                     void **misc) {
+__attribute__((noinline)) void dummy(WasmMemory *memory, void **misc,
+                                     WasmValue *stack) {
     // assumption: compiler doesn't move memory/stack/misc from arg registers
-    asm volatile("" ::"r"(memory), "r"(stack), "r"(misc));
+    asm volatile("" ::"r"(memory), "r"(misc), "r"(stack));
+    return;
+}
+
+__attribute__((noinline)) void call_dummy(WasmMemory *memory, void **misc) {
+    asm volatile("" ::"r"(memory), "r"(misc));
     return;
 }
 
@@ -45,7 +50,6 @@ HANDLER(jump) {
     // tmp1 = target
     PRELUDE;
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
-    POSTLUDE;
 }
 
 HANDLER(unreachable) { trap("unreachable"); }
@@ -68,7 +72,6 @@ HANDLER(br) {
     stack -= info.stack_offset;
     stack += info.arity;
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
-    POSTLUDE;
 }
 // todo:
 // HANDLER(br_0);
@@ -99,19 +102,18 @@ HANDLER(br_table) {
     tmp1 /* dest */ = reinterpret_cast<uint64_t>(lookup + target.lookup_offset);
     tmp2 = std::bit_cast<uint64_t>(info);
     [[clang::musttail]] return br(PARAMS);
-    POSTLUDE;
 }
 HANDLER(call) {
     // tmp1 = function start
     PRELUDE;
     reinterpret_cast<Signature *>(tmp1)(PARAMS);
-    POSTLUDE;
+    return call_dummy(memory, misc);
 }
 HANDLER(call_extern) {
     // tmp1 = function offset in misc
     PRELUDE;
     MISC_GET(Signature *, tmp1)(PARAMS);
-    POSTLUDE;
+    return call_dummy(memory, misc);
 }
 HANDLER(call_indirect) {
     PRELUDE;
@@ -137,9 +139,8 @@ HANDLER(call_indirect) {
     auto func = funcref->signature;
     auto &instance = *funcref->instance.get();
     func(instance.memory.get(), instance.misc.get(), stack, tmp1, tmp2);
-    stack += funcref->type.params;
 
-    POSTLUDE;
+    return call_dummy(memory, misc);
 }
 HANDLER(drop) {
     PRELUDE;
