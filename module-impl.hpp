@@ -920,7 +920,7 @@ HANDLER(loop) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(ControlFlow(signature.params, {}, {}, signature,
                                            stack.polymorphism(), stack.sp(),
-                                           Loop()));
+                                           Loop(code)));
     stack.unpolymorphize();
     nextop();
 }
