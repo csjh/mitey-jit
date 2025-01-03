@@ -4,6 +4,10 @@
 #include "runtime.hpp"
 #include <numeric>
 
+#ifdef WASM_DEBUG
+#include <iostream>
+#endif
+
 namespace mitey {
 
 std::tuple<uint32_t, uint32_t> get_memory_limits(safe_byte_iterator &iter);
