@@ -33,10 +33,12 @@ HANDLER(clear_locals) {
     POSTLUDE;
 }
 HANDLER(move_results) {
-    // tmp1 = offset from start of fn frame
+    // tmp1 = # of locals
     // tmp2 = # of results
     PRELUDE;
-    std::memcpy(stack - tmp1, stack - tmp2, tmp2 * sizeof(WasmValue));
+    // memmove because results > locals is possible
+    std::memmove(stack - tmp1 - tmp2, stack - tmp2, tmp2 * sizeof(WasmValue));
+    stack -= tmp1;
     POSTLUDE;
 }
 HANDLER(jump) {
@@ -61,10 +63,10 @@ HANDLER(br) {
     // tmp2 = brinfo
     PRELUDE;
     auto info = std::bit_cast<BrInfo>(tmp2);
-    auto new_stack = stack - info.stack_offset;
-    std::memmove(new_stack - info.arity, stack - info.arity,
+    std::memmove(stack - info.stack_offset, stack - info.arity,
                  info.arity * sizeof(WasmValue));
-    stack = new_stack;
+    stack -= info.stack_offset;
+    stack += info.arity;
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
     POSTLUDE;
 }
@@ -134,7 +136,8 @@ HANDLER(call_indirect) {
 
     auto func = funcref->signature;
     auto &instance = *funcref->instance.get();
-    func(instance.memory.get(), stack, instance.misc.get(), tmp1, tmp2);
+    func(instance.memory.get(), instance.misc.get(), stack, tmp1, tmp2);
+    stack += funcref->type.params;
 
     POSTLUDE;
 }

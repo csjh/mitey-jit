@@ -233,15 +233,15 @@ struct WasmGlobal {
 };
 
 struct BrTableTarget {
-    uint32_t lookup_offset;
-    uint32_t stack_offset;
+    int32_t lookup_offset;
+    int32_t stack_offset;
 };
 static_assert(sizeof(BrTableTarget) == sizeof(uint64_t));
 
 struct BrInfo {
     uint16_t n_targets; // for br_table
     uint16_t arity;
-    uint32_t stack_offset; // offset from stack base to copy arity to
+    int32_t stack_offset; // offset from stack base to copy arity to
 };
 static_assert(sizeof(BrInfo) == sizeof(uint64_t));
 
