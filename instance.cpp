@@ -1,5 +1,7 @@
 #include "instance.hpp"
 #include "interfacing.hpp"
+#include "runtime.hpp"
+#include "spec.hpp"
 
 namespace mitey {
 
@@ -16,6 +18,13 @@ Instance::Instance(std::shared_ptr<Module> module)
       elements(module->elements.size()), tables(module->tables.size()) {}
 
 void Instance::initialize(const Imports &imports) {
+    auto prev = runtime::trap_buf;
+    runtime::trap_buf = (std::jmp_buf *)alloca(sizeof(std::jmp_buf));
+    auto result = static_cast<runtime::TrapKind>(setjmp(*runtime::trap_buf));
+    if (result != runtime::TrapKind::success) {
+        error<uninstantiable_error>(runtime::trap_kind_to_string(result));
+    }
+
     void **misc_ptr = misc.get();
     // only used for imported functions
     // good opportunity for tiering up though
@@ -188,9 +197,6 @@ void Instance::initialize(const Imports &imports) {
             auto offset = interpret_const(iter).u32;
             auto reftype_or_elemkind = flags & 0b10 ? *iter++ : 256;
             auto n_elements = safe_read_leb128<uint32_t>(iter);
-            if (offset + n_elements > table->size()) {
-                error<uninstantiable_error>("out of bounds table access");
-            }
 
             if (flags & 0b100) {
                 // flags = 4 or 6
@@ -202,10 +208,6 @@ void Instance::initialize(const Imports &imports) {
 
                 for (uint32_t j = 0; j < n_elements; j++) {
                     auto ref = interpret_const(iter);
-                    if (offset + j >= table->size()) {
-                        error<uninstantiable_error>(
-                            "out of bounds table access");
-                    }
                     table->set(offset + j, ref);
                 }
             } else {
@@ -218,10 +220,6 @@ void Instance::initialize(const Imports &imports) {
                 for (uint32_t j = 0; j < n_elements; j++) {
                     auto elem_idx = safe_read_leb128<uint32_t>(iter);
                     auto funcref = &functions[elem_idx];
-                    if (offset + j >= table->size()) {
-                        error<uninstantiable_error>(
-                            "out of bounds table access");
-                    }
                     table->set(offset + j, funcref);
                 }
             }
@@ -236,11 +234,8 @@ void Instance::initialize(const Imports &imports) {
         if (!data.initializer)
             continue;
         auto offset = interpret_const_inplace(data.initializer).u32;
-        try {
-            memory->copy_into(offset, 0, data, data.size);
-        } catch (const trap_error &e) {
-            error<uninstantiable_error>(e.what());
-        }
+
+        memory->copy_into(offset, 0, data, data.size);
     }
 
     for (const auto &[name, export_] : module->exports) {
@@ -265,12 +260,10 @@ void Instance::initialize(const Imports &imports) {
         if (fn.type.params || fn.type.results) {
             error<validation_error>("start function");
         }
-        try {
-            externalize<void()>(fn)();
-        } catch (const trap_error &e) {
-            error<uninstantiable_error>(e.what());
-        }
+        externalize<void()>(fn)();
     }
+
+    runtime::trap_buf = prev;
 }
 
 runtime::WasmValue Instance::interpret_const(uint8_t *&iter) {

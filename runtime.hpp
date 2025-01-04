@@ -1,6 +1,7 @@
 #pragma once
 
 #include "spec.hpp"
+#include <csetjmp>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -10,6 +11,50 @@ namespace mitey {
 class Instance;
 
 namespace runtime {
+
+enum class TrapKind {
+    success = 0,
+    unreachable,
+    undefined_element,
+    uninitialized_element,
+    indirect_call_type_mismatch,
+    invalid_conversion_to_integer,
+    integer_overflow,
+    integer_divide_by_zero,
+    out_of_bounds_memory_access,
+    out_of_bounds_table_access,
+};
+
+static inline const char *trap_kind_to_string(TrapKind kind) {
+    switch (kind) {
+    case TrapKind::success:
+        return "success";
+    case TrapKind::unreachable:
+        return "unreachable";
+    case TrapKind::undefined_element:
+        return "undefined element";
+    case TrapKind::uninitialized_element:
+        return "uninitialized element";
+    case TrapKind::indirect_call_type_mismatch:
+        return "indirect call type mismatch";
+    case TrapKind::invalid_conversion_to_integer:
+        return "invalid conversion to integer";
+    case TrapKind::integer_overflow:
+        return "integer overflow";
+    case TrapKind::integer_divide_by_zero:
+        return "integer divide by zero";
+    case TrapKind::out_of_bounds_memory_access:
+        return "out of bounds memory access";
+    case TrapKind::out_of_bounds_table_access:
+        return "out of bounds table access";
+    }
+}
+
+extern std::jmp_buf *trap_buf;
+[[noreturn]] static void __attribute__((preserve_most, noinline))
+trap(TrapKind kind) {
+    std::longjmp(*trap_buf, static_cast<int>(kind));
+}
 
 union WasmValue;
 struct WasmMemory;
@@ -211,7 +256,7 @@ struct WasmMemory {
 
     template <typename StackT, typename MemT> WasmValue load(uint32_t addr) {
         if (addr + sizeof(MemT) > current * PAGE_SIZE) {
-            trap("out of bounds memory access");
+            trap(TrapKind::out_of_bounds_memory_access);
         }
         MemT val;
         std::memcpy(&val, memory + addr, sizeof(val));
@@ -221,7 +266,7 @@ struct WasmMemory {
     template <typename StackT, typename MemT>
     void store(uint32_t addr, StackT value) {
         if (addr + sizeof(MemT) > current * PAGE_SIZE) {
-            trap("out of bounds memory access");
+            trap(TrapKind::out_of_bounds_memory_access);
         }
         MemT val = value;
         std::memcpy(memory + addr, &val, sizeof(val));

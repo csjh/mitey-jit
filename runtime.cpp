@@ -7,6 +7,8 @@
 namespace mitey {
 namespace runtime {
 
+std::jmp_buf *trap_buf;
+
 #define HANDLER(name)                                                          \
     void name(WasmMemory *memory, void **misc, WasmValue *stack,               \
               uint64_t tmp1, uint64_t tmp2)
@@ -52,7 +54,7 @@ HANDLER(jump) {
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
 }
 
-HANDLER(unreachable) { trap("unreachable"); }
+HANDLER(unreachable) { trap(TrapKind::unreachable); }
 HANDLER(if_) {
     // tmp1 = else branch
     PRELUDE;
@@ -126,14 +128,14 @@ HANDLER(call_indirect) {
     auto elem_idx = stack->u32;
 
     if (elem_idx >= table.size()) {
-        trap("undefined element");
+        trap(TrapKind::undefined_element);
     }
     auto funcref = table.get(elem_idx).funcref;
     if (!funcref) {
-        trap("uninitialized element");
+        trap(TrapKind::uninitialized_element);
     }
     if (funcref->type != info.type) {
-        trap("indirect call type mismatch");
+        trap(TrapKind::indirect_call_type_mismatch);
     }
 
     auto func = funcref->signature;
@@ -244,13 +246,13 @@ using f64 = double;
         PRELUDE;                                                               \
         if (!std::isfinite(stack[-1].type)) {                                  \
             if (std::isnan(stack[-1].type)) {                                  \
-                trap("invalid conversion to integer");                         \
+                trap(TrapKind::invalid_conversion_to_integer);                 \
             } else {                                                           \
-                trap("integer overflow");                                      \
+                trap(TrapKind::integer_overflow);                              \
             }                                                                  \
         }                                                                      \
         if (stack[-1].type <= lower || upper <= stack[-1].type) {              \
-            trap("integer overflow");                                          \
+            trap(TrapKind::integer_overflow);                                  \
         }                                                                      \
         stack[-1] = op(stack[-1].type);                                        \
         POSTLUDE;                                                              \
@@ -278,12 +280,12 @@ using f64 = double;
         PRELUDE;                                                               \
         stack--;                                                               \
         if (stack[0].type == 0) {                                              \
-            trap("integer divide by zero");                                    \
+            trap(TrapKind::integer_divide_by_zero);                            \
         }                                                                      \
         if (std::is_signed_v<type> &&                                          \
             stack[0].type == static_cast<type>(-1) &&                          \
             stack[-1].type == std::numeric_limits<type>::min()) {              \
-            trap("integer overflow");                                          \
+            trap(TrapKind::integer_overflow);                                  \
         }                                                                      \
         stack[-1] = stack[-1].type / stack[0].type;                            \
         POSTLUDE;                                                              \
@@ -293,7 +295,7 @@ using f64 = double;
         PRELUDE;                                                               \
         stack--;                                                               \
         if (stack[0].type == 0) {                                              \
-            trap("integer divide by zero");                                    \
+            trap(TrapKind::integer_divide_by_zero);                            \
         }                                                                      \
         if (std::is_signed_v<type> &&                                          \
             stack[0].type == static_cast<type>(-1) &&                          \
@@ -666,7 +668,7 @@ void WasmMemory::copy_into(uint32_t dest, uint32_t src, const Segment &segment,
                            uint32_t length) {
     if (static_cast<uint64_t>(dest) + length > current * PAGE_SIZE ||
         src + length > segment.size) {
-        trap("out of bounds memory access");
+        trap(TrapKind::out_of_bounds_memory_access);
     }
     std::memcpy(memory + dest, segment.data.get() + src, length);
 }
@@ -674,14 +676,14 @@ void WasmMemory::copy_into(uint32_t dest, uint32_t src, const Segment &segment,
 void WasmMemory::memcpy(uint32_t dst, uint32_t src, uint32_t length) {
     if (static_cast<uint64_t>(dst) + length > current * PAGE_SIZE ||
         static_cast<uint64_t>(src) + length > current * PAGE_SIZE) {
-        trap("out of bounds memory access");
+        trap(TrapKind::out_of_bounds_memory_access);
     }
     std::memmove(memory + dst, memory + src, length);
 }
 
 void WasmMemory::memset(uint32_t dst, uint8_t value, uint32_t length) {
     if (static_cast<uint64_t>(dst) + length > current * PAGE_SIZE) {
-        trap("out of bounds memory access");
+        trap(TrapKind::out_of_bounds_memory_access);
     }
     std::memset(memory + dst, value, length);
 }
@@ -709,14 +711,14 @@ uint32_t WasmTable::grow(uint32_t delta, WasmValue value) {
 
 WasmValue WasmTable::get(uint32_t idx) {
     if (idx >= current) {
-        trap("out of bounds table access");
+        trap(TrapKind::out_of_bounds_table_access);
     }
     return elements[idx];
 }
 
 void WasmTable::set(uint32_t idx, WasmValue value) {
     if (idx >= current) {
-        trap("out of bounds table access");
+        trap(TrapKind::out_of_bounds_table_access);
     }
     elements[idx] = value;
 }
@@ -725,7 +727,7 @@ void WasmTable::copy_into(uint32_t dst, uint32_t src,
                           const ElementSegment &segment, uint32_t length) {
     if (static_cast<uint64_t>(dst) + length > current ||
         src + length > segment.size) {
-        trap("out of bounds table access");
+        trap(TrapKind::out_of_bounds_table_access);
     }
     std::memcpy(elements + dst, segment.elements.get() + src,
                 length * sizeof(WasmValue));
@@ -735,7 +737,7 @@ void WasmTable::memcpy(WasmTable &dst_table, uint32_t dst, uint32_t src,
                        uint32_t length) {
     if (static_cast<uint64_t>(dst) + length > dst_table.current ||
         static_cast<uint64_t>(src) + length > this->current) {
-        trap("out of bounds table access");
+        trap(TrapKind::out_of_bounds_table_access);
     }
     std::memmove(dst_table.elements + dst, elements + src,
                  length * sizeof(WasmValue));
@@ -743,7 +745,7 @@ void WasmTable::memcpy(WasmTable &dst_table, uint32_t dst, uint32_t src,
 
 void WasmTable::memset(uint32_t dst, WasmValue value, uint32_t length) {
     if (static_cast<uint64_t>(dst) + length > current) {
-        trap("out of bounds table access");
+        trap(TrapKind::out_of_bounds_table_access);
     }
     std::fill(elements + dst, elements + dst + length, value);
 }

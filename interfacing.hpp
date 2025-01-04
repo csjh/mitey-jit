@@ -49,9 +49,19 @@ externalize(const runtime::FunctionInfo &fn) {
         auto stack = Instance::initial_stack.get();
         std::copy(args.begin(), args.end(), stack);
 
+        auto prev = runtime::trap_buf;
+        runtime::trap_buf = (std::jmp_buf *)alloca(sizeof(std::jmp_buf));
+        auto result =
+            static_cast<runtime::TrapKind>(setjmp(*runtime::trap_buf));
+        if (result != runtime::TrapKind::success) {
+            error<trap_error>(runtime::trap_kind_to_string(result));
+        }
+
         uint64_t a, b;
         fn.signature(fn.instance->memory.get(), fn.instance->misc.get(),
                      stack + args.size(), a, b);
+
+        runtime::trap_buf = prev;
 
         return std::vector<runtime::WasmValue>(stack, stack + fn.type.results);
     };

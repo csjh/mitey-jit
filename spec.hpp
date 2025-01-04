@@ -92,10 +92,6 @@ static inline uint32_t valtype_size(valtype type) {
     }
 }
 
-[[noreturn]] static inline void trap(const char *message) {
-    error<trap_error>(message);
-}
-
 static inline bool is_reftype(uint32_t byte) {
     return byte == static_cast<uint8_t>(valtype::funcref) ||
            byte == static_cast<uint8_t>(valtype::externref);
