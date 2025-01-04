@@ -454,15 +454,10 @@ int main(int argv, char **argc) {
 
     auto runtime_error = [&]<typename T>(const auto &m) {
         try {
-            std::cout << "running wrapped action from line " << m.line << std::endl;
             execute_action(m.action);
-            std::cout << "finished wrapped action from line " << m.line << std::endl;
 
-            std::cerr << "Expected " << typeid(T).name() << " for test"
-                      << std::endl;
             failures++;
         } catch (const T &e) {
-            std::cout << "errored wrapped action from line " << m.line << std::endl;
             std::string what = e.what();
             if (!what.starts_with(m.text) && !m.text.starts_with(what)) {
                 std::cerr << "Expected error message: " << m.text
@@ -472,13 +467,11 @@ int main(int argv, char **argc) {
                 passes++;
             }
         } catch (std::runtime_error &e) {
-            std::cout << "runtime errored wrapped action from line " << m.line << std::endl;
             std::cerr << "Expected " << typeid(T).name()
                       << " with message: " << m.text << " but got: " << e.what()
                       << std::endl;
             soft_passes++;
         } catch (...) {
-            std::cout << "unknown errored wrapped action from line " << m.line << std::endl;
             std::cerr << "Expected " << typeid(T).name() << " for test"
                       << std::endl;
             failures++;
