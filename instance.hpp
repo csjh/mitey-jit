@@ -9,7 +9,8 @@ class Instance {
     friend class Module;
     friend runtime::Signature runtime::call_indirect;
 
-    static constexpr uint32_t STACK_SIZE = 5 * 1024 * 1024; // 5mb
+    static constexpr uint32_t STACK_SIZE =
+        (5 * 1024 * 1024) / sizeof(runtime::WasmValue); // 5mb
     static constexpr uint32_t MAX_DEPTH = 1000;
 
     Instance(const Instance &) = delete;
@@ -19,12 +20,12 @@ class Instance {
 
     std::shared_ptr<Module> module;
     std::weak_ptr<Instance> self;
-    std::unique_ptr<void *> misc;
+    std::unique_ptr<void *[]> misc;
 
     // WebAssembly.Memory
     std::shared_ptr<runtime::WasmMemory> memory;
     // internal stack
-    std::unique_ptr<runtime::WasmValue> initial_stack;
+    std::unique_ptr<runtime::WasmValue[]> initial_stack;
     // functions
     std::vector<runtime::FunctionInfo> functions;
     // value of globals
@@ -36,13 +37,16 @@ class Instance {
     // exports from export section
     Exports exports;
 
+    runtime::WasmValue interpret_const_inplace(uint8_t *iter) {
+        return interpret_const(iter);
+    }
+    runtime::WasmValue interpret_const(uint8_t *&iter);
+
     Instance(std::shared_ptr<Module> module);
 
     void initialize(const Imports &imports);
 
   public:
-    ~Instance();
-
     const Exports &get_exports() { return exports; }
 };
 

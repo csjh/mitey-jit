@@ -29,6 +29,8 @@ struct __attribute__((packed)) FunctionType {
         return std::memcmp(this, &other, sizeof(FunctionType)) == 0;
     }
 
+    FunctionType() = default;
+
     FunctionType(const WasmSignature &sig)
         : params(sig.params.size()), results(sig.results.size()), hash(0) {
         for (valtype param : sig.params) {
@@ -143,9 +145,10 @@ struct WasmTable {
     uint32_t current;
     uint32_t maximum;
     WasmValue *elements;
+    valtype type;
 
-    WasmTable(uint32_t initial, uint32_t maximum)
-        : current(initial), maximum(maximum),
+    WasmTable(valtype type, uint32_t initial, uint32_t maximum)
+        : type(type), current(initial), maximum(maximum),
           elements(
               static_cast<WasmValue *>(calloc(initial, sizeof(WasmValue)))) {}
 

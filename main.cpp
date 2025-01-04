@@ -1,5 +1,5 @@
 #include "backend/arm64.hpp"
-#include "module.hpp"
+#include "instance.hpp"
 #include "pager/mac.hpp"
 #include "runtime.hpp"
 #include <iostream>

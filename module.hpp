@@ -50,7 +50,7 @@ static inline bool is_imexdesc(uint8_t byte) {
 using ImportSpecifier = std::pair<std::string, std::string>;
 
 struct FunctionShell {
-    uint8_t *start;
+    runtime::Signature *start;
     WasmSignature type;
     std::vector<valtype> locals;
     std::vector<uint32_t> local_bytes;
@@ -181,7 +181,7 @@ using ModuleImports = std::unordered_map<std::string, ExportValue>;
 using Imports = std::unordered_map<std::string, ModuleImports>;
 
 class Module {
-    template <typename Pager, typename Target> friend class JIT;
+    friend class Instance;
 
 #define V(name, _, byte)                                                       \
     template <typename Target> friend CompilationHandler validate_##name;
