@@ -50,7 +50,8 @@ externalize(const runtime::FunctionInfo &fn) {
         std::copy(args.begin(), args.end(), stack);
 
         auto prev = runtime::trap_buf;
-        runtime::trap_buf = (std::jmp_buf *)alloca(sizeof(std::jmp_buf));
+        std::jmp_buf buf;
+        runtime::trap_buf = &buf;
         auto result =
             static_cast<runtime::TrapKind>(setjmp(*runtime::trap_buf));
         if (result != runtime::TrapKind::success) {

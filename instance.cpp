@@ -19,7 +19,8 @@ Instance::Instance(std::shared_ptr<Module> module)
 
 void Instance::initialize(const Imports &imports) {
     auto prev = runtime::trap_buf;
-    runtime::trap_buf = (std::jmp_buf *)alloca(sizeof(std::jmp_buf));
+    std::jmp_buf buf;
+    runtime::trap_buf = &buf;
     auto result = static_cast<runtime::TrapKind>(setjmp(*runtime::trap_buf));
     if (result != runtime::TrapKind::success) {
         error<uninstantiable_error>(runtime::trap_kind_to_string(result));
