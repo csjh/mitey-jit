@@ -1,5 +1,6 @@
 #pragma once
 
+#include "type-templates.hpp"
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -54,6 +55,15 @@ enum class valtype : uint8_t {
     funcref = 0x70,
     externref = 0x6f,
 };
+
+template <typename T> static constexpr auto Valtype = valtype::null;
+template <> static constexpr auto Valtype<int32_t> = valtype::i32;
+template <> static constexpr auto Valtype<uint32_t> = valtype::i32;
+template <> static constexpr auto Valtype<int64_t> = valtype::i64;
+template <> static constexpr auto Valtype<uint64_t> = valtype::i64;
+template <> static constexpr auto Valtype<float> = valtype::f32;
+template <> static constexpr auto Valtype<double> = valtype::f64;
+template <typename T> static constexpr auto Valtype<T *> = valtype::externref;
 
 #ifdef WASM_DEBUG
 static std::string valtype_names[] = {
@@ -117,6 +127,31 @@ static inline bool is_valtype(valtype type) {
 struct WasmSignature {
     std::vector<valtype> params;
     std::vector<valtype> results;
+
+    template <typename Func> static WasmSignature from_type() {
+        using Traits = function_traits<Func>;
+        using Args = typename Traits::args;
+        using ReturnType = typename Traits::return_type;
+
+        WasmSignature sig;
+
+        sig.params.reserve(Traits::parameter_arity);
+        fold_vector<Args>(sig.params,
+                          std::make_index_sequence<Traits::parameter_arity>{});
+
+        sig.results.reserve(Traits::result_arity);
+        fold_vector<ReturnType>(
+            sig.results, std::make_index_sequence<Traits::result_arity>{});
+
+        return sig;
+    }
+
+  private:
+    template <typename Args, size_t... Is>
+    static void fold_vector(std::vector<valtype> &vec,
+                            std::index_sequence<Is...>) {
+        (vec.push_back(Valtype<std::tuple_element_t<Is, Args>>), ...);
+    }
 };
 
 enum class mut {

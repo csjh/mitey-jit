@@ -15,15 +15,15 @@ union WasmValue;
 struct WasmMemory;
 
 struct __attribute__((packed)) FunctionType {
-    uint16_t params;
-    uint16_t results;
-    bool has_i32 : 1;
-    bool has_i64 : 1;
-    bool has_f32 : 1;
-    bool has_f64 : 1;
-    bool has_funcref : 1;
-    bool has_externref : 1;
-    uint64_t hash : 64 - 6;
+    uint16_t params = 0;
+    uint16_t results = 0;
+    bool has_i32 : 1 = 0;
+    bool has_i64 : 1 = 0;
+    bool has_f32 : 1 = 0;
+    bool has_f64 : 1 = 0;
+    bool has_funcref : 1 = 0;
+    bool has_externref : 1 = 0;
+    uint64_t hash : 64 - 6 = 0;
 
     bool operator==(const FunctionType &other) const {
         return std::memcmp(this, &other, sizeof(FunctionType)) == 0;
@@ -88,6 +88,10 @@ struct __attribute__((packed)) FunctionType {
             hash *= 31;
             hash ^= static_cast<uint64_t>(result);
         }
+    }
+
+    template <typename Func> static FunctionType from_type() {
+        return FunctionType(WasmSignature::from_type<Func>());
     }
 };
 static_assert(sizeof(FunctionType) == sizeof(uint32_t) + sizeof(uint64_t));

@@ -1,3 +1,5 @@
+#pragma once
+
 #include "module.hpp"
 #include "runtime.hpp"
 #include <cstdint>
@@ -9,9 +11,13 @@ class Instance {
     friend class Module;
     friend runtime::Signature runtime::call_indirect;
 
-    static constexpr uint32_t STACK_SIZE =
-        (5 * 1024 * 1024) / sizeof(runtime::WasmValue); // 5mb
-    static constexpr uint32_t MAX_DEPTH = 1000;
+    template <typename FunctionType>
+    friend std::function<FunctionType>
+    externalize(const runtime::FunctionInfo &fn);
+
+    friend inline std::function<std::vector<runtime::WasmValue>(
+        const std::vector<runtime::WasmValue> &)>
+    externalize(const runtime::FunctionInfo &fn);
 
     Instance(const Instance &) = delete;
     Instance &operator=(const Instance &) = delete;
@@ -24,8 +30,6 @@ class Instance {
 
     // WebAssembly.Memory
     std::shared_ptr<runtime::WasmMemory> memory;
-    // internal stack
-    std::unique_ptr<runtime::WasmValue[]> initial_stack;
     // functions
     std::vector<runtime::FunctionInfo> functions;
     // value of globals
@@ -47,6 +51,9 @@ class Instance {
     void initialize(const Imports &imports);
 
   public:
+    static constexpr uint32_t STACK_SIZE = 5 * 1024 * 1024; // 5mb
+    static std::unique_ptr<runtime::WasmValue[]> initial_stack;
+
     const Exports &get_exports() { return exports; }
 };
 

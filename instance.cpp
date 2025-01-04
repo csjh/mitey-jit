@@ -1,6 +1,10 @@
 #include "instance.hpp"
+#include "interfacing.hpp"
 
 namespace mitey {
+
+auto Instance::initial_stack = std::make_unique<runtime::WasmValue[]>(
+    STACK_SIZE / sizeof(runtime::WasmValue));
 
 Instance::Instance(std::shared_ptr<Module> module)
     : module(module), memory(nullptr),
@@ -8,7 +12,6 @@ Instance::Instance(std::shared_ptr<Module> module)
           module->functions.size() + module->tables.size() +
           module->globals.size() + module->functions.size() +
           module->elements.size())),
-      initial_stack(std::make_unique<runtime::WasmValue[]>(STACK_SIZE)),
       functions(module->functions.size()), globals(module->globals.size()),
       elements(module->elements.size()), tables(module->tables.size()) {}
 
@@ -38,7 +41,7 @@ void Instance::initialize(const Imports &imports) {
         auto &import = import_module.at(field_name);
         if (static_cast<mitey::ImExDesc>(import.index()) !=
             module->imports.at(module_name).at(field_name)) {
-            error<link_error>("incompatible import type");
+            error<link_error>("incompatible import type: descriptor incorrect");
         }
         return import;
     };
@@ -51,7 +54,8 @@ void Instance::initialize(const Imports &imports) {
 
             if (imported_memory->size() < module->memory.min ||
                 imported_memory->max() > module->memory.max) {
-                error<link_error>("incompatible import type");
+                error<link_error>(
+                    "incompatible import type: memory size doesn't fit");
             }
 
             memory = imported_memory;
@@ -68,7 +72,8 @@ void Instance::initialize(const Imports &imports) {
                 std::get<runtime::FunctionInfo>(get_import(*fn.import));
 
             if (imported_function.type != runtime::FunctionType(fn.type)) {
-                error<link_error>("incompatible import type");
+                error<link_error>(
+                    "incompatible import type: function type doesn't match");
             }
 
             functions[i] = imported_function;
@@ -88,7 +93,8 @@ void Instance::initialize(const Imports &imports) {
 
             if (imported_global->type != global.type ||
                 imported_global->_mut != global.mutability) {
-                error<link_error>("incompatible import type");
+                error<link_error>("incompatible import type: global mutability "
+                                  "doesn't match");
             }
 
             globals[i] = imported_global;
@@ -109,7 +115,8 @@ void Instance::initialize(const Imports &imports) {
             if (imported_table->size() < table.min ||
                 imported_table->max() > table.max ||
                 imported_table->type != table.type) {
-                error<link_error>("incompatible import type");
+                error<link_error>(
+                    "incompatible import type: table size doesn't fit");
             }
 
             tables[i] = imported_table;
@@ -259,8 +266,7 @@ void Instance::initialize(const Imports &imports) {
             error<validation_error>("start function");
         }
         try {
-            uint64_t a, b;
-            fn.signature(memory.get(), misc.get(), initial_stack.get(), a, b);
+            externalize<void()>(fn)();
         } catch (const trap_error &e) {
             error<uninstantiable_error>(e.what());
         }

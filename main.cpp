@@ -1,7 +1,6 @@
 #include "backend/arm64.hpp"
-#include "instance.hpp"
+#include "interfacing.hpp"
 #include "pager/mac.hpp"
-#include "runtime.hpp"
 #include <iostream>
 
 using namespace mitey;
@@ -34,18 +33,24 @@ int main(int argc, char **argv) {
     printf("Compilation/validation took %fms\n",
            std::chrono::duration<float, std::milli>(end - start).count());
 
-    auto fac = reinterpret_cast<runtime::Signature *>(mod->functions[0].start);
-    auto fac_bytes = mod->functions[0].start;
+    auto instance = mod->instantiate();
+    auto &exports = instance->get_exports();
 
-    runtime::WasmValue s[65536] = {(double)170.0};
-    start = std::chrono::high_resolution_clock::now();
-    fac(nullptr, s + 1, nullptr, 0, 0);
-    end = std::chrono::high_resolution_clock::now();
-    printf("Execution took %fms\n",
-           std::chrono::duration<float, std::milli>(end - start).count());
+    auto i = 1;
+    for (auto f : {
+             "fac-rec",
+             "fac-rec-named",
+             "fac-iter",
+             "fac-iter-named",
+             "fac-opt",
+             "fac-ssa",
+         }) {
+        auto fn = externalize<uint64_t(uint64_t)>(
+            std::get<runtime::FunctionInfo>(exports.at(f)));
 
-    auto score = s[0].f64;
-    printf("Score: %f\n", score);
+        std::cout << fn(i) << std::endl;
+        i *= 2;
+    }
 
     return 0;
 }
