@@ -43,7 +43,7 @@ inline std::function<
 externalize(const runtime::FunctionInfo &fn) {
     return [=](const std::vector<runtime::WasmValue> &args) {
         if (args.size() != fn.type.params) {
-            trap("invalid number of arguments");
+            error<trap_error>("invalid number of arguments");
         }
 
         auto stack = Instance::initial_stack.get();
