@@ -112,7 +112,7 @@ HANDLER(call) {
 HANDLER(call_extern) {
     // tmp1 = function offset in misc
     PRELUDE;
-    MISC_GET(Signature *, tmp1)(PARAMS);
+    MISC_GET(Signature, tmp1)(PARAMS);
     return call_dummy(memory, misc);
 }
 HANDLER(call_indirect) {
@@ -200,15 +200,15 @@ HANDLER(tableset) {
 HANDLER(globalget) {
     // tmp1 = global index in misc table
     PRELUDE;
-    auto global = MISC_GET(WasmValue *, tmp1);
-    *stack++ = *global;
+    auto &global = MISC_GET(WasmValue, tmp1);
+    *stack++ = global;
     POSTLUDE;
 }
 HANDLER(globalset) {
     // tmp1 = global index in misc table
     PRELUDE;
-    auto global = MISC_GET(WasmValue *, tmp1);
-    *global = *--stack;
+    auto &global = MISC_GET(WasmValue, tmp1);
+    global = *--stack;
     POSTLUDE;
 }
 HANDLER(memorysize) {

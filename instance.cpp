@@ -22,7 +22,7 @@ void Instance::initialize(const Imports &imports) {
     auto misc_functions = reinterpret_cast<runtime::Signature **>(misc_ptr);
     auto misc_tables = reinterpret_cast<runtime::WasmTable **>(
         misc_ptr += module->functions.size());
-    auto misc_globals = reinterpret_cast<runtime::WasmGlobal **>(
+    auto misc_globals = reinterpret_cast<runtime::WasmValue **>(
         misc_ptr += module->tables.size());
     auto misc_funcrefs = reinterpret_cast<runtime::Funcref **>(
         misc_ptr += module->globals.size());
@@ -103,7 +103,7 @@ void Instance::initialize(const Imports &imports) {
                 global.type, global.mutability,
                 interpret_const_inplace(global.initializer));
         }
-        misc_globals[i] = globals[i].get();
+        misc_globals[i] = &(globals[i].get()->value);
     }
 
     for (uint32_t i = 0; i < tables.size(); i++) {

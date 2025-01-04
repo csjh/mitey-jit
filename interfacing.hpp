@@ -50,8 +50,8 @@ externalize(const runtime::FunctionInfo &fn) {
         std::copy(args.begin(), args.end(), stack);
 
         uint64_t a, b;
-        fn.signature(fn.instance->memory.get(), fn.instance->misc.get(), stack,
-                     a, b);
+        fn.signature(fn.instance->memory.get(), fn.instance->misc.get(),
+                     stack + args.size(), a, b);
 
         return std::vector<runtime::WasmValue>(stack, stack + fn.type.results);
     };
