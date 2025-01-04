@@ -1,3 +1,5 @@
 *.o
 main
 *.dSYM
+test/core/wast-json
+test/executor
