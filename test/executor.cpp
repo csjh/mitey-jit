@@ -456,6 +456,8 @@ int main(int argv, char **argc) {
         try {
             execute_action(m.action);
 
+            std::cerr << "Expected " << typeid(T).name() << " for test"
+                      << std::endl;
             failures++;
         } catch (const T &e) {
             std::string what = e.what();
