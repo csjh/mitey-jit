@@ -2,6 +2,7 @@
 
 #include "module.hpp"
 #include "runtime.hpp"
+#include "spec.hpp"
 #include <numeric>
 
 #ifdef WASM_DEBUG
@@ -1652,7 +1653,7 @@ consteval std::array<CompilationHandler *, 256> make_fc_funcs() {
     fc_funcs.fill(validate_missing<Target>);
 
 #define V(name, _, byte) fc_funcs[byte] = &validate_##name<Target>;
-    FOREACH_INSTRUCTION(V)
+    FOREACH_MULTIBYTE_INSTRUCTION(V)
 #undef V
 
     return fc_funcs;
