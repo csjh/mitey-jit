@@ -1614,10 +1614,10 @@ HANDLER(elem_drop) {
     nextop();
 }
 HANDLER(table_copy) {
-    auto src_table_idx = safe_read_leb128<uint32_t>(iter);
-    ensure(src_table_idx < mod.tables.size(), "unknown table");
     auto dst_table_idx = safe_read_leb128<uint32_t>(iter);
     ensure(dst_table_idx < mod.tables.size(), "unknown table");
+    auto src_table_idx = safe_read_leb128<uint32_t>(iter);
+    ensure(src_table_idx < mod.tables.size(), "unknown table");
     ensure(mod.tables[src_table_idx].type == mod.tables[dst_table_idx].type,
            "type mismatch");
 
