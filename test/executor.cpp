@@ -360,7 +360,14 @@ from_file(const std::string &filename, const mitey::runtime::Imports &imports) {
     wasm_file.close();
 
     auto module = mitey::Module::compile<mitey::Mac, mitey::Arm64>(bytes);
-    return module->instantiate(imports);
+    auto instance = module->instantiate(imports);
+
+    // force all created instances to stick around
+    // for export usage
+    static std::vector<std::shared_ptr<Instance>> keepalive;
+    keepalive.push_back(instance);
+
+    return instance;
 }
 
 namespace fs = std::filesystem;
@@ -503,10 +510,6 @@ int main(int argv, char **argc) {
         }
     };
 
-    // force all created instances to stick around
-    // for export usage
-    std::vector<std::shared_ptr<Instance>> keepalive;
-
     for (auto &t : wast.commands) {
         nlohmann::json j = t;
         std::cerr << "Running test: " << j << std::endl;
@@ -517,7 +520,6 @@ int main(int argv, char **argc) {
                 from_file(resolve_relative(filename, m.filename), imports);
             instances[m.name] = instance;
             instances["default"] = instance;
-            keepalive.push_back(instance);
             passes++;
         } else if (std::holds_alternative<test_return>(t)) {
             auto &m = std::get<test_return>(t);
@@ -601,7 +603,6 @@ int main(int argv, char **argc) {
             runtime_error.template operator()<trap_error>(m);
         } else if (std::holds_alternative<test_register>(t)) {
             auto &m = std::get<test_register>(t);
-            keepalive.push_back(instances[m.name]);
             imports[m.as] = instances[m.name]->get_exports();
         } else {
             std::cerr << "Unhandled std::variant type" << std::endl;

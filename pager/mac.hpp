@@ -19,7 +19,7 @@ static uint8_t *guard_page = nullptr;
 static void sigbus_handler(int, siginfo_t *si, void *) {
     // check if we own the bus fault
     if (guard_page <= si->si_addr && si->si_addr < guard_page + guard_size) {
-        runtime::trap(runtime::TrapKind::call_stack_overflow);
+        runtime::trap(runtime::TrapKind::call_stack_exhausted);
     }
 
     // handle non-owned bus fault

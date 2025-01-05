@@ -1,9 +1,16 @@
 #include "backend/arm64.hpp"
 #include "interfacing.hpp"
+#include "module.hpp"
 #include "pager/mac.hpp"
 #include <iostream>
 
 using namespace mitey;
+
+uint64_t clock_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -28,29 +35,17 @@ int main(int argc, char **argv) {
     fclose(file);
 
     auto start = std::chrono::high_resolution_clock::now();
-    auto mod = Module::compile<MacExecutable, Arm64>(bytes);
+    auto mod = Module::compile<Mac, Arm64>(bytes);
     auto end = std::chrono::high_resolution_clock::now();
     printf("Compilation/validation took %fms\n",
            std::chrono::duration<float, std::milli>(end - start).count());
 
-    auto instance = mod->instantiate();
-    auto &exports = instance->get_exports();
+    auto clock_fn = mitey::internalize<clock_ms>();
+    runtime::Imports imports{{"env", {{"clock_ms", clock_fn}}}};
+    auto instance = mod->instantiate(imports);
 
-    auto i = 1;
-    for (auto f : {
-             "fac-rec",
-             "fac-rec-named",
-             "fac-iter",
-             "fac-iter-named",
-             "fac-opt",
-             "fac-ssa",
-         }) {
-        auto fn = externalize<uint64_t(uint64_t)>(
-            std::get<runtime::FunctionInfo>(exports.at(f)));
+    float score = externalize<float()>(
+        std::get<runtime::FunctionInfo>(instance->get_exports().at("run")))();
 
-        std::cout << fn(i) << std::endl;
-        i *= 2;
-    }
-
-    return 0;
+    std::cout << "Score: " << score << std::endl;
 }
