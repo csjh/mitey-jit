@@ -10,7 +10,7 @@ auto Instance::initial_stack = Allocation(nullptr, [](auto) {});
 
 Instance::Instance(std::shared_ptr<Module> module)
     : module(module), misc(std::make_unique<void *[]>(
-          module->functions.size() + module->tables.size() +
+                          module->functions.size() + module->tables.size() +
                           module->globals.size() + module->elements.size() +
                           module->data_segments.size())),
       memory(nullptr), functions(module->functions.size()),
@@ -200,6 +200,10 @@ void Instance::initialize(const runtime::Imports &imports) {
             auto reftype_or_elemkind = flags & 0b10 ? *iter++ : 256;
             auto n_elements = safe_read_leb128<uint32_t>(iter);
 
+            if (offset + n_elements > table->size()) {
+                error<uninstantiable_error>("out of bounds table access");
+            }
+
             if (flags & 0b100) {
                 // flags = 4 or 6
                 // characteristics: active, elem type + exprs
@@ -266,7 +270,9 @@ void Instance::initialize(const runtime::Imports &imports) {
         if (fn.type.params || fn.type.results) {
             error<validation_error>("start function");
         }
-        externalize<void()>(fn)();
+        auto stack =
+            reinterpret_cast<runtime::WasmValue *>(initial_stack.get());
+        fn.signature(fn.memory, fn.misc, stack, 0, 0);
     }
 
     runtime::trap_buf = prev;
