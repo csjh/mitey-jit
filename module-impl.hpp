@@ -957,6 +957,9 @@ HANDLER(else_) {
     stack.pop(sig.results);
     stack.push(sig.params);
 
+    // necessary in case of polymorphic stack
+    stack.set_sp(stack_offset + sig.params.size());
+
     auto [else_jump] = std::get<If>(construct);
     // jump to end of if/else block after if block
     pending_br.push_back(code);
@@ -1007,6 +1010,10 @@ HANDLER(end) {
     stack.pop(valtype::null);
 
     stack.set_polymorphism(polymorphism);
+
+    // necessary in case of polymorphic stack
+    stack.set_sp(sp + sig.params.size());
+
     stack.push(sig.results);
 
     control_stack.pop_back();
@@ -1535,8 +1542,12 @@ HANDLER(memory_init) {
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(
-                  reinterpret_cast<uint64_t>(&mod.data_segments[seg_idx])));
+    // todo: in theory this could be optimized to directly give address
+    // since data segments are shared and known at this point,
+    // but data section comes after code section so stuff would have to move
+    put(code, Target::set_temp1(mod.functions.size() + mod.tables.size() +
+                                mod.globals.size() + mod.functions.size() +
+                                mod.elements.size() + seg_idx));
     put(code, Target::call(runtime::memory_init));
     nextop();
 }
@@ -1667,7 +1678,7 @@ consteval std::array<CompilationHandler *, 256> make_fc_funcs() {
 HANDLER(multibyte) {
     constexpr auto fc_funcs = make_fc_funcs<Target>();
 
-    [[clang::musttail]] return fc_funcs[safe_read_leb128<uint8_t>(iter)](
+    [[clang::musttail]] return fc_funcs[safe_read_leb128<uint8_t, 32>(iter)](
         mod, iter, fn, stack, control_stack, code);
 }
 

@@ -9,10 +9,11 @@ namespace mitey {
 auto Instance::initial_stack = Allocation(nullptr, [](auto) {});
 
 Instance::Instance(std::shared_ptr<Module> module)
-    : module(module), misc(std::make_unique<void *[]>(
-                          module->functions.size() + module->tables.size() +
-                          module->globals.size() + module->functions.size() +
-                          module->elements.size())),
+    : module(module),
+      misc(std::make_unique<void *[]>(
+          module->functions.size() + module->tables.size() +
+          module->globals.size() + module->functions.size() +
+          module->elements.size() + module->data_segments.size())),
       memory(nullptr), functions(module->functions.size()),
       globals(module->globals.size()), elements(module->elements.size()),
       tables(module->tables.size()) {}
@@ -38,6 +39,8 @@ void Instance::initialize(const runtime::Imports &imports) {
         misc_ptr += module->globals.size());
     auto misc_elements = reinterpret_cast<runtime::ElementSegment **>(
         misc_ptr += module->functions.size());
+    auto misc_segments = reinterpret_cast<runtime::Segment **>(
+        misc_ptr += module->elements.size());
 
     auto get_import = [&](const ImportSpecifier &specifier) {
         auto [module_name, field_name] = specifier;
@@ -232,12 +235,16 @@ void Instance::initialize(const runtime::Imports &imports) {
     }
 
     for (uint32_t i = 0; i < module->data_segments.size(); i++) {
-        const auto &data = module->data_segments[i];
-        if (!data.initializer)
-            continue;
-        auto offset = interpret_const_inplace(data.initializer).u32;
+        auto &data = module->data_segments[i];
+        if (data.initializer) {
+            auto offset = interpret_const_inplace(data.initializer).u32;
 
-        memory->copy_into(offset, 0, data, data.size);
+            memory->copy_into(offset, 0, data, data.size);
+
+            misc_segments[i] = &runtime::Segment::empty;
+        } else {
+            misc_segments[i] = &data;
+        }
     }
 
     for (const auto &[name, export_] : module->exports) {

@@ -164,6 +164,7 @@ class WasmStack {
 
     void apply(const WasmSignature &signature);
     void enter_flow(const std::vector<valtype> &expected);
+    void set_sp(uint64_t sp) { stack_size = sp; }
     void check_br(std::vector<ControlFlow> &control_stack, uint32_t depth);
 };
 

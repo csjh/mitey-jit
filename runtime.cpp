@@ -7,6 +7,8 @@
 namespace mitey {
 namespace runtime {
 
+Segment Segment::empty(0, 0, nullptr, nullptr);
+
 std::jmp_buf *trap_buf;
 
 #define HANDLER(name)                                                          \
@@ -537,9 +539,9 @@ HANDLER(i64_trunc_sat_f64_s) { TRUNC_SAT(f64, i64); }
 HANDLER(i64_trunc_sat_f64_u) { TRUNC_SAT(f64, u64); }
 // clang-format on
 HANDLER(memory_init) {
-    // tmp1 = segment address
+    // tmp1 = segment index in misc table
     PRELUDE;
-    auto &segment = *reinterpret_cast<Segment *>(tmp1);
+    auto &segment = MISC_GET(Segment, tmp1);
 
     stack -= 3;
     auto size = stack[2].u32;
