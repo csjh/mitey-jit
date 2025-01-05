@@ -22,26 +22,22 @@ std::function<FunctionType> externalize(const runtime::FunctionInfo &fn) {
         push_tuple_to_wasm(std::make_tuple(args...), stack,
                            std::make_index_sequence<Traits::parameter_arity>{});
 
-        auto prev = runtime::trap_buf;
+        auto prev_depth = runtime::call_stack_depth;
+        auto prev_buf = runtime::trap_buf;
         std::jmp_buf buf;
         runtime::trap_buf = &buf;
         auto result =
             static_cast<runtime::TrapKind>(setjmp(*runtime::trap_buf));
         if (result != runtime::TrapKind::success) {
+            runtime::trap_buf = prev_buf;
+            runtime::call_stack_depth = prev_depth;
             error<trap_error>(runtime::trap_kind_to_string(result));
         }
 
-        if (fn.instance) {
-            fn.signature(fn.instance->memory.get(), fn.instance->misc.get(),
-                         stack + Traits::parameter_arity, 0, 0);
-        } else {
-            // todo: fn.instance could be moved out of the function
-            // but then defn is duped
-            fn.signature(nullptr, nullptr, stack + Traits::parameter_arity, 0,
-                         0);
-        }
+        fn.signature(fn.memory, fn.misc, stack + Traits::parameter_arity, 0, 0);
 
-        runtime::trap_buf = prev;
+        runtime::trap_buf = prev_buf;
+        runtime::call_stack_depth = prev_depth;
 
         constexpr auto arity = Traits::result_arity;
         if constexpr (arity == 0) {
@@ -68,54 +64,57 @@ externalize(const runtime::FunctionInfo &fn) {
             Instance::initial_stack.get());
         std::copy(args.begin(), args.end(), stack);
 
-        auto prev = runtime::trap_buf;
+        auto prev_depth = runtime::call_stack_depth;
+        auto prev_buf = runtime::trap_buf;
         std::jmp_buf buf;
         runtime::trap_buf = &buf;
         auto result =
             static_cast<runtime::TrapKind>(setjmp(*runtime::trap_buf));
         if (result != runtime::TrapKind::success) {
+            runtime::trap_buf = prev_buf;
+            runtime::call_stack_depth = prev_depth;
             error<trap_error>(runtime::trap_kind_to_string(result));
         }
 
-        fn.signature(fn.instance->memory.get(), fn.instance->misc.get(),
-                     stack + args.size(), 0, 0);
+        fn.signature(fn.memory, fn.misc, stack + args.size(), 0, 0);
 
-        runtime::trap_buf = prev;
+        runtime::trap_buf = prev_buf;
+        runtime::call_stack_depth = prev_depth;
 
         return std::vector<runtime::WasmValue>(stack, stack + fn.type.results);
     };
 }
 
-template <typename F, typename Callable>
-void call_with_stack(Callable &&func, runtime::WasmValue *stack) {
-    using Fn = function_traits<F>;
-    using Args = typename Fn::args;
-
-    // Convert input arguments to tuple
-    auto args = [&]<size_t... I>(std::index_sequence<I...>) {
-        return Args{(stack[I])...};
-    }(std::make_index_sequence<Fn::parameter_arity>{});
-
-    constexpr auto arity = Fn::result_arity;
-    if constexpr (arity == 0) {
-        std::apply(func, args);
-    } else if constexpr (arity == 1) {
-        *stack = std::apply(func, args);
-    } else {
-        auto ret = std::apply(func, args);
-        push_tuple_to_wasm(ret, stack, std::make_index_sequence<arity>{});
-    }
-}
-
 template <auto func> runtime::Signature *wasm_functionify() {
-    return
-        [](runtime::WasmMemory *, void **, runtime::WasmValue *stack, uint64_t,
-           uint64_t) { call_with_stack<decltype(func)>(func, stack); };
+    return [](runtime::WasmMemory *memory, void **misc,
+              runtime::WasmValue *stack, uint64_t, uint64_t) {
+        using Fn = function_traits<decltype(func)>;
+        using Args = typename Fn::args;
+
+        // Convert input arguments to tuple
+        auto args = [&]<size_t... I>(std::index_sequence<I...>) {
+            return Args{(stack[I])...};
+        }(std::make_index_sequence<Fn::parameter_arity>{});
+
+        constexpr auto arity = Fn::result_arity;
+        if constexpr (arity == 0) {
+            std::apply(func, args);
+        } else if constexpr (arity == 1) {
+            *stack = std::apply(func, args);
+        } else {
+            auto ret = std::apply(func, args);
+            push_tuple_to_wasm(ret, stack, std::make_index_sequence<arity>{});
+        }
+        stack += arity;
+
+        return runtime::dummy(memory, misc, stack);
+    };
 }
 
 template <auto func> runtime::FunctionInfo internalize() {
     return runtime::FunctionInfo(WasmSignature::from_type<decltype(func)>(),
-                                 nullptr, wasm_functionify<func>());
+                                 nullptr, nullptr, wasm_functionify<func>(),
+                                 nullptr);
 }
 
 } // namespace mitey
