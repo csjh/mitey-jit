@@ -10,6 +10,7 @@ namespace runtime {
 Segment Segment::empty(0, 0, nullptr, nullptr);
 
 std::jmp_buf *trap_buf;
+uint32_t call_stack_depth = 10000;
 
 #define HANDLER(name)                                                          \
     void name(WasmMemory *memory, void **misc, WasmValue *stack,               \
@@ -113,13 +114,26 @@ HANDLER(br_table) {
 HANDLER(call) {
     // tmp1 = function start
     PRELUDE;
+    call_stack_depth--;
+    if (call_stack_depth == 0)
+        trap(TrapKind::call_stack_exhausted);
+
     reinterpret_cast<Signature *>(tmp1)(PARAMS);
+
+    call_stack_depth++;
     return call_dummy(memory, misc);
 }
 HANDLER(call_extern) {
     // tmp1 = function offset in misc
     PRELUDE;
-    MISC_GET(Signature, tmp1)(PARAMS);
+    call_stack_depth--;
+    if (call_stack_depth == 0)
+        trap(TrapKind::call_stack_exhausted);
+
+    auto &func = MISC_GET(FunctionInfo, tmp1);
+    func.signature(func.memory, func.misc, stack, tmp1, tmp2);
+
+    call_stack_depth++;
     return call_dummy(memory, misc);
 }
 HANDLER(call_indirect) {
@@ -143,10 +157,14 @@ HANDLER(call_indirect) {
         trap(TrapKind::indirect_call_type_mismatch);
     }
 
-    auto func = funcref->signature;
-    auto &instance = *funcref->instance.get();
-    func(instance.memory.get(), instance.misc.get(), stack, tmp1, tmp2);
+    call_stack_depth--;
+    if (call_stack_depth == 0)
+        trap(TrapKind::call_stack_exhausted);
 
+    auto func = funcref->signature;
+    func(funcref->memory, funcref->misc, stack, tmp1, tmp2);
+
+    call_stack_depth++;
     return call_dummy(memory, misc);
 }
 HANDLER(drop) {
@@ -523,7 +541,8 @@ HANDLER(ref_is_null) {
 HANDLER(ref_func) {
     // tmp1 = funcref index in misc table
     PRELUDE;
-    auto funcref = MISC_GET(Funcref, tmp1);
+    // & because we want the address of the funcref
+    auto funcref = &MISC_GET(Funcref, tmp1);
     *stack++ = funcref;
     POSTLUDE;
 }

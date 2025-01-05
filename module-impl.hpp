@@ -1505,8 +1505,7 @@ HANDLER(ref_func) {
            "undeclared function reference");
     stack.apply(std::array<valtype, 0>(), std::array{valtype::funcref});
 
-    put(code, Target::set_temp1(mod.functions.size() + mod.tables.size() +
-                                mod.globals.size() + func_idx));
+    put(code, Target::set_temp1(func_idx));
     put(code, Target::call(runtime::ref_func));
     nextop();
 }
@@ -1545,9 +1544,9 @@ HANDLER(memory_init) {
     // todo: in theory this could be optimized to directly give address
     // since data segments are shared and known at this point,
     // but data section comes after code section so stuff would have to move
-    put(code, Target::set_temp1(mod.functions.size() + mod.tables.size() +
-                                mod.globals.size() + mod.functions.size() +
-                                mod.elements.size() + seg_idx));
+    put(code,
+        Target::set_temp1(mod.functions.size() + mod.tables.size() +
+                          mod.globals.size() + mod.elements.size() + seg_idx));
     put(code, Target::call(runtime::memory_init));
     nextop();
 }
@@ -1557,7 +1556,10 @@ HANDLER(data_drop) {
         error<malformed_error>("data count section required");
     }
     ensure(seg_idx < mod.n_data, "unknown data segment");
-    // data segments are shared, so this is a noop
+    put(code,
+        Target::set_temp1(mod.functions.size() + mod.tables.size() +
+                          mod.globals.size() + mod.elements.size() + seg_idx));
+    put(code, Target::call(runtime::data_drop));
     nextop();
 }
 HANDLER(memory_copy) {
@@ -1596,9 +1598,8 @@ HANDLER(table_init) {
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
 
-    put(code,
-        Target::set_temp1(mod.functions.size() + mod.tables.size() +
-                          mod.globals.size() + mod.functions.size() + seg_idx));
+    put(code, Target::set_temp1(mod.functions.size() + mod.tables.size() +
+                                mod.globals.size() + seg_idx));
     put(code, Target::set_temp2(mod.functions.size() + table_idx));
     put(code, Target::call(runtime::table_init));
     nextop();
@@ -1607,9 +1608,8 @@ HANDLER(elem_drop) {
     auto seg_idx = safe_read_leb128<uint32_t>(iter);
     ensure(seg_idx < mod.elements.size(), "unknown elem segment");
 
-    put(code,
-        Target::set_temp1(mod.functions.size() + mod.tables.size() +
-                          mod.globals.size() + mod.functions.size() + seg_idx));
+    put(code, Target::set_temp1(mod.functions.size() + mod.tables.size() +
+                                mod.globals.size() + seg_idx));
     put(code, Target::call(runtime::elem_drop));
     nextop();
 }

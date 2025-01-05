@@ -24,7 +24,7 @@ enum class TrapKind {
     integer_divide_by_zero,
     out_of_bounds_memory_access,
     out_of_bounds_table_access,
-    call_stack_overflow,
+    call_stack_exhausted,
 };
 
 static inline const char *trap_kind_to_string(TrapKind kind) {
@@ -49,10 +49,12 @@ static inline const char *trap_kind_to_string(TrapKind kind) {
         return "out of bounds memory access";
     case TrapKind::out_of_bounds_table_access:
         return "out of bounds table access";
-    case TrapKind::call_stack_overflow:
-        return "call stack overflow";
+    case TrapKind::call_stack_exhausted:
+        return "call stack exhausted";
     }
 }
+
+extern uint32_t call_stack_depth;
 
 extern std::jmp_buf *trap_buf;
 [[noreturn]] static inline void __attribute__((preserve_most, noinline))
@@ -150,8 +152,12 @@ using Signature = void(WasmMemory *memory, void **misc, WasmValue *stack,
 
 struct FunctionInfo {
     FunctionType type;
-    std::shared_ptr<Instance> instance;
+    WasmMemory *memory;
+    void **misc;
     Signature *signature;
+    // this creates a circular dependency
+    // todo: fix this
+    std::shared_ptr<Instance> instance;
 };
 
 using Funcref = FunctionInfo *;
@@ -323,6 +329,7 @@ Signature clear_locals;
 Signature move_results;
 Signature jump;
 Signature call_extern;
+__attribute__((noinline)) void dummy(WasmMemory *, void **, WasmValue *);
 #define HANDLER(name, str, byte) Signature name;
 FOREACH_INSTRUCTION(HANDLER)
 FOREACH_MULTIBYTE_INSTRUCTION(HANDLER)
