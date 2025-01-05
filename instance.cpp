@@ -9,13 +9,13 @@ namespace mitey {
 auto Instance::initial_stack = Allocation(nullptr, [](auto) {});
 
 Instance::Instance(std::shared_ptr<Module> module)
-    : module(module), memory(nullptr),
-      misc(std::make_unique<void *[]>(
-          module->functions.size() + module->tables.size() +
-          module->globals.size() + module->functions.size() +
-          module->elements.size())),
-      functions(module->functions.size()), globals(module->globals.size()),
-      elements(module->elements.size()), tables(module->tables.size()) {}
+    : module(module), misc(std::make_unique<void *[]>(
+                          module->functions.size() + module->tables.size() +
+                          module->globals.size() + module->functions.size() +
+                          module->elements.size())),
+      memory(nullptr), functions(module->functions.size()),
+      globals(module->globals.size()), elements(module->elements.size()),
+      tables(module->tables.size()) {}
 
 void Instance::initialize(const runtime::Imports &imports) {
     auto prev = runtime::trap_buf;
@@ -34,7 +34,7 @@ void Instance::initialize(const runtime::Imports &imports) {
         misc_ptr += module->functions.size());
     auto misc_globals = reinterpret_cast<runtime::WasmValue **>(
         misc_ptr += module->tables.size());
-    auto misc_funcrefs = reinterpret_cast<runtime::Funcref **>(
+    auto misc_funcrefs = reinterpret_cast<runtime::Funcref *>(
         misc_ptr += module->globals.size());
     auto misc_elements = reinterpret_cast<runtime::ElementSegment **>(
         misc_ptr += module->functions.size());
@@ -91,6 +91,7 @@ void Instance::initialize(const runtime::Imports &imports) {
             functions[i] = runtime::FunctionInfo(runtime::FunctionType(fn.type),
                                                  self.lock(), fn.start);
         }
+        misc_funcrefs[i] = &functions[i];
         misc_functions[i] = functions[i].signature;
     }
 

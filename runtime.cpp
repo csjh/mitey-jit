@@ -31,6 +31,9 @@ __attribute__((noinline)) void call_dummy(WasmMemory *memory, void **misc) {
     return;
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-parameter"
+
 // non-instruction handlers
 HANDLER(clear_locals) {
     // tmp1 = non-parameter local bytes
@@ -749,6 +752,8 @@ void WasmTable::memset(uint32_t dst, WasmValue value, uint32_t length) {
     }
     std::fill(elements + dst, elements + dst + length, value);
 }
+
+#pragma clang diagnostic pop
 
 }; // namespace runtime
 }; // namespace mitey

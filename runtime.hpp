@@ -55,7 +55,7 @@ static inline const char *trap_kind_to_string(TrapKind kind) {
 }
 
 extern std::jmp_buf *trap_buf;
-[[noreturn]] static void __attribute__((preserve_most, noinline))
+[[noreturn]] static inline void __attribute__((preserve_most, noinline))
 trap(TrapKind kind) {
     std::longjmp(*trap_buf, static_cast<int>(kind));
 }
@@ -201,9 +201,10 @@ struct WasmTable {
     valtype type;
 
     WasmTable(valtype type, uint32_t initial, uint32_t maximum)
-        : type(type), current(initial), maximum(maximum),
+        : current(initial), maximum(maximum),
           elements(
-              static_cast<WasmValue *>(calloc(initial, sizeof(WasmValue)))) {}
+              static_cast<WasmValue *>(calloc(initial, sizeof(WasmValue)))),
+          type(type) {}
 
     WasmTable() = delete;
     WasmTable(const WasmTable &) = delete;

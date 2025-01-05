@@ -882,6 +882,9 @@ FOREACH_INSTRUCTION(V)
     } while (0)
 #endif
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-parameter"
+
 HANDLER(missing) { error<malformed_error>("invalid instruction"); }
 
 template <typename Target>
@@ -1691,5 +1694,7 @@ uint8_t *Module::validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
 #undef STORE
 #undef HANDLER
 #undef nextop
+
+#pragma clang diagnostic pop
 
 } // namespace mitey

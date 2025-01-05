@@ -31,15 +31,14 @@ std::function<FunctionType> externalize(const runtime::FunctionInfo &fn) {
             error<trap_error>(runtime::trap_kind_to_string(result));
         }
 
-        uint64_t a, b;
         if (fn.instance) {
             fn.signature(fn.instance->memory.get(), fn.instance->misc.get(),
-                         stack + Traits::parameter_arity, a, b);
+                         stack + Traits::parameter_arity, 0, 0);
         } else {
             // todo: fn.instance could be moved out of the function
             // but then defn is duped
-            fn.signature(nullptr, nullptr, stack + Traits::parameter_arity, a,
-                         b);
+            fn.signature(nullptr, nullptr, stack + Traits::parameter_arity, 0,
+                         0);
         }
 
         runtime::trap_buf = prev;
@@ -78,9 +77,8 @@ externalize(const runtime::FunctionInfo &fn) {
             error<trap_error>(runtime::trap_kind_to_string(result));
         }
 
-        uint64_t a, b;
         fn.signature(fn.instance->memory.get(), fn.instance->misc.get(),
-                     stack + args.size(), a, b);
+                     stack + args.size(), 0, 0);
 
         runtime::trap_buf = prev;
 
@@ -92,7 +90,6 @@ template <typename F, typename Callable>
 void call_with_stack(Callable &&func, runtime::WasmValue *stack) {
     using Fn = function_traits<F>;
     using Args = typename Fn::args;
-    using ReturnType = typename Fn::return_type;
 
     // Convert input arguments to tuple
     auto args = [&]<size_t... I>(std::index_sequence<I...>) {
@@ -111,9 +108,9 @@ void call_with_stack(Callable &&func, runtime::WasmValue *stack) {
 }
 
 template <auto func> runtime::Signature *wasm_functionify() {
-    return [](runtime::WasmMemory *memory, void **misc,
-              runtime::WasmValue *stack, uint64_t tmp1,
-              uint64_t tmp2) { call_with_stack<decltype(func)>(func, stack); };
+    return
+        [](runtime::WasmMemory *, void **, runtime::WasmValue *stack, uint64_t,
+           uint64_t) { call_with_stack<decltype(func)>(func, stack); };
 }
 
 template <auto func> runtime::FunctionInfo internalize() {

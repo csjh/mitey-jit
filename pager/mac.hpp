@@ -16,7 +16,7 @@ static constexpr size_t guard_size = stack_size;
 static constexpr size_t total_size = stack_size + guard_size;
 static uint8_t *guard_page = nullptr;
 
-static void sigbus_handler(int sig, siginfo_t *si, void *unused) {
+static void sigbus_handler(int, siginfo_t *si, void *) {
     // check if we own the bus fault
     if (guard_page <= si->si_addr && si->si_addr < guard_page + guard_size) {
         runtime::trap(runtime::TrapKind::call_stack_overflow);
