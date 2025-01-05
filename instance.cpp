@@ -1,12 +1,12 @@
 #include "instance.hpp"
+#include "./module.hpp"
 #include "interfacing.hpp"
 #include "runtime.hpp"
 #include "spec.hpp"
 
 namespace mitey {
 
-auto Instance::initial_stack = std::make_unique<runtime::WasmValue[]>(
-    STACK_SIZE / sizeof(runtime::WasmValue));
+auto Instance::initial_stack = Allocation(nullptr, [](auto) {});
 
 Instance::Instance(std::shared_ptr<Module> module)
     : module(module), memory(nullptr),
@@ -17,7 +17,7 @@ Instance::Instance(std::shared_ptr<Module> module)
       functions(module->functions.size()), globals(module->globals.size()),
       elements(module->elements.size()), tables(module->tables.size()) {}
 
-void Instance::initialize(const Imports &imports) {
+void Instance::initialize(const runtime::Imports &imports) {
     auto prev = runtime::trap_buf;
     std::jmp_buf buf;
     runtime::trap_buf = &buf;
@@ -39,7 +39,7 @@ void Instance::initialize(const Imports &imports) {
     auto misc_elements = reinterpret_cast<runtime::ElementSegment **>(
         misc_ptr += module->functions.size());
 
-    auto get_import = [&](const ImportSpecifier &specifier) -> ExportValue {
+    auto get_import = [&](const ImportSpecifier &specifier) {
         auto [module_name, field_name] = specifier;
         if (!imports.contains(module_name)) {
             error<link_error>("unknown import");

@@ -1,11 +1,14 @@
 #pragma once
 
-#include "module.hpp"
-#include "runtime.hpp"
+#include "./pager/shared.hpp"
+#include "./runtime.hpp"
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 namespace mitey {
+
+class Module;
 
 class Instance {
     friend class Module;
@@ -39,7 +42,7 @@ class Instance {
     // tables
     std::vector<std::shared_ptr<runtime::WasmTable>> tables;
     // exports from export section
-    Exports exports;
+    runtime::Exports exports;
 
     runtime::WasmValue interpret_const_inplace(uint8_t *iter) {
         return interpret_const(iter);
@@ -48,13 +51,13 @@ class Instance {
 
     Instance(std::shared_ptr<Module> module);
 
-    void initialize(const Imports &imports);
+    void initialize(const runtime::Imports &imports);
 
   public:
     static constexpr uint32_t STACK_SIZE = 5 * 1024 * 1024; // 5mb
-    static std::unique_ptr<runtime::WasmValue[]> initial_stack;
+    static Allocation initial_stack;
 
-    const Exports &get_exports() { return exports; }
+    const runtime::Exports &get_exports() { return exports; }
 };
 
 } // namespace mitey

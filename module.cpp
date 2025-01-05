@@ -229,7 +229,7 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
     }
 }
 
-std::shared_ptr<Instance> Module::instantiate(const Imports &imports) {
+std::shared_ptr<Instance> Module::instantiate(const runtime::Imports &imports) {
     auto instance = std::shared_ptr<Instance>(new Instance(this->self.lock()));
     instance->self = instance;
     instance->initialize(imports);

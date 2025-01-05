@@ -1,6 +1,7 @@
 #pragma once
 
-#include "pager/executable.hpp"
+#include "./instance.hpp"
+#include "pager/shared.hpp"
 #include "runtime.hpp"
 #include "spec.hpp"
 #include <memory>
@@ -172,14 +173,6 @@ using CompilationHandler = uint8_t *(Module &, safe_byte_iterator &,
                                      FunctionShell &, WasmStack &,
                                      std::vector<ControlFlow> &, uint8_t *);
 
-using ExportValue =
-    std::variant<runtime::FunctionInfo, std::shared_ptr<runtime::WasmTable>,
-                 std::shared_ptr<runtime::WasmMemory>,
-                 std::shared_ptr<runtime::WasmGlobal>>;
-using Exports = std::unordered_map<std::string, ExportValue>;
-using ModuleImports = std::unordered_map<std::string, ExportValue>;
-using Imports = std::unordered_map<std::string, ModuleImports>;
-
 class Module {
     friend class Instance;
 
@@ -229,10 +222,16 @@ class Module {
         auto mod = std::shared_ptr<Module>(new Module());
         mod->self = mod;
         mod->initialize<Pager, Target>(bytes);
+        // this is jank but not really sure where to put it
+        // Pager and Target should probably be determined by ifdefs
+        // instead of actually being passed in
+        if (!Instance::initial_stack)
+            Instance::initial_stack =
+                Pager::allocate(Instance::STACK_SIZE, AllocationKind::Stack);
         return mod;
     }
 
-    std::shared_ptr<Instance> instantiate(const Imports &imports = {});
+    std::shared_ptr<Instance> instantiate(const runtime::Imports &imports = {});
 };
 
 } // namespace mitey

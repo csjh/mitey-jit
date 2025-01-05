@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <unordered_map>
 
 namespace mitey {
 
@@ -23,6 +24,7 @@ enum class TrapKind {
     integer_divide_by_zero,
     out_of_bounds_memory_access,
     out_of_bounds_table_access,
+    call_stack_overflow,
 };
 
 static inline const char *trap_kind_to_string(TrapKind kind) {
@@ -47,6 +49,8 @@ static inline const char *trap_kind_to_string(TrapKind kind) {
         return "out of bounds memory access";
     case TrapKind::out_of_bounds_table_access:
         return "out of bounds table access";
+    case TrapKind::call_stack_overflow:
+        return "call stack overflow";
     }
 }
 
@@ -283,6 +287,14 @@ struct WasmGlobal {
     mut _mut;
     WasmValue value;
 };
+
+using ExportValue =
+    std::variant<runtime::FunctionInfo, std::shared_ptr<runtime::WasmTable>,
+                 std::shared_ptr<runtime::WasmMemory>,
+                 std::shared_ptr<runtime::WasmGlobal>>;
+using Exports = std::unordered_map<std::string, ExportValue>;
+using ModuleImports = std::unordered_map<std::string, ExportValue>;
+using Imports = std::unordered_map<std::string, ModuleImports>;
 
 struct BrTableTarget {
     int32_t lookup_offset;

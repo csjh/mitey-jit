@@ -342,8 +342,8 @@ struct wastjson {
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(wastjson, source_filename, commands)
 
-std::shared_ptr<mitey::Instance> from_file(const std::string &filename,
-                                           const mitey::Imports &imports) {
+std::shared_ptr<mitey::Instance>
+from_file(const std::string &filename, const mitey::runtime::Imports &imports) {
     std::ifstream wasm_file{filename, std::ios::binary};
     if (!wasm_file) {
         throw std::system_error(errno, std::system_category(), filename);
@@ -359,8 +359,7 @@ std::shared_ptr<mitey::Instance> from_file(const std::string &filename,
     wasm_file.read(reinterpret_cast<char *>(bytes.data()), length);
     wasm_file.close();
 
-    auto module =
-        mitey::Module::compile<mitey::MacExecutable, mitey::Arm64>(bytes);
+    auto module = mitey::Module::compile<mitey::Mac, mitey::Arm64>(bytes);
     return module->instantiate(imports);
 }
 
@@ -412,7 +411,7 @@ int main(int argv, char **argc) {
     auto wast = j.template get<wastjson>();
 
     std::unordered_map<std::string, std::shared_ptr<mitey::Instance>> instances;
-    mitey::Exports spectest{
+    mitey::runtime::Exports spectest{
         {"global_i32",
          std::make_shared<WasmGlobal>(valtype::i32, mut::const_, 666u)},
         {"global_i64",

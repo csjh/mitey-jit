@@ -581,7 +581,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                                            sizeof(Target::set_temp1(0)) +
                                            sizeof(Target::set_temp2(0)));
 
-            executable = Pager::allocate(ludes + other);
+            executable =
+                Pager::allocate(ludes + other, AllocationKind::Executable);
 
             auto code = executable.get();
             Pager::write(executable, [&] {

@@ -16,7 +16,8 @@ std::function<FunctionType> externalize(const runtime::FunctionInfo &fn) {
     using ReturnType = typename Traits::return_type;
 
     return [=](auto... args) {
-        auto stack = Instance::initial_stack.get();
+        auto stack = reinterpret_cast<runtime::WasmValue *>(
+            Instance::initial_stack.get());
 
         push_tuple_to_wasm(std::make_tuple(args...), stack,
                            std::make_index_sequence<Traits::parameter_arity>{});
@@ -46,7 +47,8 @@ externalize(const runtime::FunctionInfo &fn) {
             error<trap_error>("invalid number of arguments");
         }
 
-        auto stack = Instance::initial_stack.get();
+        auto stack = reinterpret_cast<runtime::WasmValue *>(
+            Instance::initial_stack.get());
         std::copy(args.begin(), args.end(), stack);
 
         auto prev = runtime::trap_buf;
