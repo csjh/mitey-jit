@@ -569,6 +569,13 @@ HANDLER(memory_init) {
     memory->copy_into(dest, src, segment, size);
     POSTLUDE;
 }
+HANDLER(data_drop) {
+    // tmp1 = segment index in misc table
+    PRELUDE;
+    // should there be some way for MISC_GET to do this?
+    misc[tmp1] = &Segment::empty;
+    POSTLUDE;
+}
 HANDLER(memory_copy) {
     PRELUDE;
     stack -= 3;
