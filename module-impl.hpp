@@ -1123,7 +1123,7 @@ HANDLER(call) {
 
     if (func.import) {
         put(code, Target::set_temp1(fn_idx));
-        put(code, Target::call(runtime::call));
+        put(code, Target::call(runtime::call_extern));
     } else {
         mod.pending_calls.push_back({code, fn_idx});
         code += Target::temp1_size;

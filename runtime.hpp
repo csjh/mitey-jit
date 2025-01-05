@@ -319,6 +319,7 @@ Signature ifXXconst;
 Signature clear_locals;
 Signature move_results;
 Signature jump;
+Signature call_extern;
 #define HANDLER(name, str, byte) Signature name;
 FOREACH_INSTRUCTION(HANDLER)
 FOREACH_MULTIBYTE_INSTRUCTION(HANDLER)
