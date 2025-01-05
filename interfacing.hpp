@@ -22,9 +22,27 @@ std::function<FunctionType> externalize(const runtime::FunctionInfo &fn) {
         push_tuple_to_wasm(std::make_tuple(args...), stack,
                            std::make_index_sequence<Traits::parameter_arity>{});
 
+        auto prev = runtime::trap_buf;
+        std::jmp_buf buf;
+        runtime::trap_buf = &buf;
+        auto result =
+            static_cast<runtime::TrapKind>(setjmp(*runtime::trap_buf));
+        if (result != runtime::TrapKind::success) {
+            error<trap_error>(runtime::trap_kind_to_string(result));
+        }
+
         uint64_t a, b;
-        fn.signature(fn.instance->memory.get(), fn.instance->misc.get(),
-                     stack + Traits::parameter_arity, a, b);
+        if (fn.instance) {
+            fn.signature(fn.instance->memory.get(), fn.instance->misc.get(),
+                         stack + Traits::parameter_arity, a, b);
+        } else {
+            // todo: fn.instance could be moved out of the function
+            // but then defn is duped
+            fn.signature(nullptr, nullptr, stack + Traits::parameter_arity, a,
+                         b);
+        }
+
+        runtime::trap_buf = prev;
 
         constexpr auto arity = Traits::result_arity;
         if constexpr (arity == 0) {
