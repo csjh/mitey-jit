@@ -98,10 +98,10 @@ HANDLER(br_table) {
     auto lookup = reinterpret_cast<BrTableTarget *>(tmp1);
     auto info = std::bit_cast<BrInfo>(tmp2);
     --stack;
-    auto jump = std::max(static_cast<uint32_t>(info.n_targets), stack->u32);
+    auto jump = std::min(static_cast<uint32_t>(info.n_targets), stack->u32);
     auto target = lookup[jump];
     info.stack_offset = target.stack_offset;
-    tmp1 /* dest */ = reinterpret_cast<uint64_t>(lookup + target.lookup_offset);
+    tmp1 /* dest */ = reinterpret_cast<uint64_t>(lookup) + target.lookup_offset;
     tmp2 = std::bit_cast<uint64_t>(info);
     [[clang::musttail]] return br(PARAMS);
 }

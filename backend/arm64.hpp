@@ -41,6 +41,7 @@ class Arm64 {
 
         return u32_to_u8(instructions);
     }
+    static constexpr size_t call_size = sizeof(call(nullptr));
 
     static constexpr std::array<uint8_t, sizeof(uint32_t) * 4>
     set_temp1(uint64_t value) {

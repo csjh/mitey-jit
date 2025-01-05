@@ -1052,7 +1052,8 @@ HANDLER(br_table) {
     stack.pop(valtype::i32);
     auto n_targets = safe_read_leb128<uint32_t>(iter);
 
-    auto table_addr = code;
+    auto table_addr =
+        code + Target::temp1_size + Target::temp2_size + Target::call_size;
     put(code, Target::set_temp1(reinterpret_cast<uint64_t>(table_addr)));
     auto brinfo_loc = code;
     code += Target::temp2_size;

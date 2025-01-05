@@ -254,7 +254,7 @@ struct WasmMemory {
     uint32_t max() { return maximum; }
     uint32_t grow(uint32_t delta);
 
-    template <typename StackT, typename MemT> WasmValue load(uint32_t addr) {
+    template <typename StackT, typename MemT> WasmValue load(uint64_t addr) {
         if (addr + sizeof(MemT) > current * PAGE_SIZE) {
             trap(TrapKind::out_of_bounds_memory_access);
         }
@@ -264,7 +264,7 @@ struct WasmMemory {
     }
 
     template <typename StackT, typename MemT>
-    void store(uint32_t addr, StackT value) {
+    void store(uint64_t addr, StackT value) {
         if (addr + sizeof(MemT) > current * PAGE_SIZE) {
             trap(TrapKind::out_of_bounds_memory_access);
         }
