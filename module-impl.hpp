@@ -999,8 +999,15 @@ HANDLER(end) {
     if (std::holds_alternative<Function>(construct)) {
         // move results past locals
         put(code, Target::set_temp1(fn.locals.size()));
-        put(code, Target::set_temp2(fn.type.results.size()));
-        put(code, Target::call(runtime::move_results));
+        auto n_results = sig.results.size();
+        if (n_results == 0) {
+            put(code, Target::call(runtime::move_0_results));
+        } else if (n_results == 1) {
+            put(code, Target::call(runtime::move_1_results));
+        } else {
+            put(code, Target::set_temp2(n_results));
+            put(code, Target::call(runtime::move_n_results));
+        }
 
         put(code, Target::get_postlude());
         return code;
@@ -1033,8 +1040,27 @@ HANDLER(br) {
         flow.pending_br.push_back(code);
         code += Target::temp1_size;
     }
-    put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
-    put(code, Target::call(runtime::br));
+
+#define BR(arity_, stack_offset_)                                              \
+    if (info.arity == arity_ && info.stack_offset == stack_offset_) {          \
+        put(code, Target::call(runtime::br_##arity_##_##stack_offset_));       \
+        break;                                                                 \
+    }
+    do {
+        BR(0, 0);
+        BR(0, 1);
+        BR(0, 2);
+        BR(0, 3);
+        BR(0, 4);
+        BR(0, 5);
+        BR(1, 1);
+        BR(1, 2);
+        BR(1, 3);
+
+        put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
+        put(code, Target::call(runtime::br_n_n));
+    } while (0);
+#undef BR
 
     stack.polymorphize();
     nextop();
@@ -1055,12 +1081,33 @@ HANDLER(br_if) {
         flow.pending_br.push_back(code);
         code += Target::temp1_size;
     }
-    put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
-    put(code, Target::call(runtime::br_if));
+
+#define BR_IF(arity_, stack_offset_)                                           \
+    if (info.arity == arity_ && info.stack_offset == stack_offset_) {          \
+        put(code, Target::call(runtime::br_if_##arity_##_##stack_offset_));       \
+        break;                                                                 \
+    }
+    do {
+        BR_IF(0, 0);
+        BR_IF(0, 1);
+        BR_IF(0, 2);
+        BR_IF(0, 3);
+        BR_IF(0, 4);
+        BR_IF(0, 5);
+        BR_IF(1, 1);
+        BR_IF(1, 2);
+        BR_IF(1, 3);
+
+        put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
+        put(code, Target::call(runtime::br_if_n_n));
+    } while (0);
+#undef BR
+
     nextop();
 }
 HANDLER(br_table) {
     stack.pop(valtype::i32);
+    // todo: maybe a different function for low n could be good?
     auto n_targets = safe_read_leb128<uint32_t>(iter);
 
     auto table_addr =
@@ -1068,7 +1115,6 @@ HANDLER(br_table) {
     put(code, Target::set_temp1(reinterpret_cast<uint64_t>(table_addr)));
     auto brinfo_loc = code;
     code += Target::temp2_size;
-    put(code, Target::call(runtime::br_table));
 
     auto targets = (uint32_t *)alloca(sizeof(uint32_t) * (n_targets + 1));
     for (uint32_t i = 0; i <= n_targets; ++i) {
@@ -1080,6 +1126,13 @@ HANDLER(br_table) {
     auto &default_target = control_stack[base - targets[n_targets]].expected;
 
     auto info = runtime::BrInfo(n_targets, default_target.size());
+    if (info.arity == 0) {
+        put(code, Target::call(runtime::br_table_0));
+    } else if (info.arity == 1) {
+        put(code, Target::call(runtime::br_table_1));
+    } else {
+        put(code, Target::call(runtime::br_table_n));
+    }
     put(brinfo_loc, Target::set_temp2(std::bit_cast<uint64_t>(info)));
 
     for (uint32_t i = 0; i <= n_targets; ++i) {
@@ -1118,8 +1171,27 @@ HANDLER(return_) {
 
     flow.pending_br.push_back(code);
     code += Target::temp1_size;
-    put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
-    put(code, Target::call(runtime::br));
+
+#define BR(arity_, stack_offset_)                                              \
+    if (info.arity == arity_ && info.stack_offset == stack_offset_) {          \
+        put(code, Target::call(runtime::br_##arity_##_##stack_offset_));       \
+        break;                                                                 \
+    }
+    do {
+        BR(0, 0);
+        BR(0, 1);
+        BR(0, 2);
+        BR(0, 3);
+        BR(0, 4);
+        BR(0, 5);
+        BR(1, 1);
+        BR(1, 2);
+        BR(1, 3);
+
+        put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
+        put(code, Target::call(runtime::br_n_n));
+    } while (0);
+#undef BR
 
     stack.polymorphize();
     nextop();

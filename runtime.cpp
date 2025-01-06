@@ -45,15 +45,21 @@ HANDLER(clear_locals) {
     stack = (WasmValue *)((uint8_t *)stack + tmp1);
     POSTLUDE;
 }
-HANDLER(move_results) {
+template <ssize_t N = -1> HANDLER(base_move_results) {
     // tmp1 = # of locals
     // tmp2 = # of results
     PRELUDE;
+    auto n_results = N == -1 ? tmp2 : N;
     // memmove because results > locals is possible
-    std::memmove(stack - tmp1 - tmp2, stack - tmp2, tmp2 * sizeof(WasmValue));
+    std::memmove(stack - tmp1 - n_results, stack - n_results,
+                 n_results * sizeof(WasmValue));
     stack -= tmp1;
     POSTLUDE;
 }
+HANDLER(move_0_results) { base_move_results<0>(PARAMS); }
+HANDLER(move_1_results) { base_move_results<1>(PARAMS); }
+HANDLER(move_n_results) { base_move_results<>(PARAMS); }
+
 HANDLER(jump) {
     // tmp1 = target
     PRELUDE;
@@ -70,34 +76,54 @@ HANDLER(if_) {
     }
     POSTLUDE;
 }
-HANDLER(br) {
+template <ssize_t Arity = -1, ssize_t StackOffset = -1> HANDLER(base_br) {
     // tmp1 = target
     // tmp2 = brinfo
     PRELUDE;
     auto info = std::bit_cast<BrInfo>(tmp2);
-    std::memmove(stack - info.stack_offset, stack - info.arity,
-                 info.arity * sizeof(WasmValue));
-    stack -= info.stack_offset;
-    stack += info.arity;
+    auto arity = Arity == -1 ? info.arity : Arity;
+    auto stack_offset = StackOffset == -1 ? info.stack_offset : StackOffset;
+
+    std::memmove(stack - stack_offset, stack - arity,
+                 arity * sizeof(WasmValue));
+    stack -= stack_offset;
+    stack += arity;
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
 }
-// todo:
-// HANDLER(br_0);
-// HANDLER(br_4);
-// HANDLER(br_8);
-// and if/table equivalents
+// generated based on the most common in figma/duckdb binaries
+HANDLER(br_0_0) { base_br<0, 0>(PARAMS); }
+HANDLER(br_0_1) { base_br<0, 1>(PARAMS); }
+HANDLER(br_0_2) { base_br<0, 2>(PARAMS); }
+HANDLER(br_0_3) { base_br<0, 3>(PARAMS); }
+HANDLER(br_0_4) { base_br<0, 4>(PARAMS); }
+HANDLER(br_0_5) { base_br<0, 5>(PARAMS); }
+HANDLER(br_1_1) { base_br<1, 1>(PARAMS); }
+HANDLER(br_1_2) { base_br<1, 2>(PARAMS); }
+HANDLER(br_1_3) { base_br<1, 3>(PARAMS); }
+HANDLER(br_n_n) { base_br<>(PARAMS); }
 
-HANDLER(br_if) {
+template <ssize_t Arity = -1, ssize_t StackOffset = -1> HANDLER(base_br_if) {
     // tmp1 = target
     // tmp2 = brinfo
     PRELUDE;
     --stack;
     if (stack->u32) {
-        [[clang::musttail]] return br(PARAMS);
+        [[clang::musttail]] return base_br<Arity, StackOffset>(PARAMS);
     }
     POSTLUDE;
 }
-HANDLER(br_table) {
+HANDLER(br_if_0_0) { base_br_if<0, 0>(PARAMS); }
+HANDLER(br_if_0_1) { base_br_if<0, 1>(PARAMS); }
+HANDLER(br_if_0_2) { base_br_if<0, 2>(PARAMS); }
+HANDLER(br_if_0_3) { base_br_if<0, 3>(PARAMS); }
+HANDLER(br_if_0_4) { base_br_if<0, 4>(PARAMS); }
+HANDLER(br_if_0_5) { base_br_if<0, 5>(PARAMS); }
+HANDLER(br_if_1_1) { base_br_if<1, 1>(PARAMS); }
+HANDLER(br_if_1_2) { base_br_if<1, 2>(PARAMS); }
+HANDLER(br_if_1_3) { base_br_if<1, 3>(PARAMS); }
+HANDLER(br_if_n_n) { base_br_if<>(PARAMS); }
+
+template <ssize_t Arity = -1> HANDLER(br_table) {
     // tmp1 = lookup table addr
     // tmp2 = brinfo
     PRELUDE;
@@ -109,8 +135,12 @@ HANDLER(br_table) {
     info.stack_offset = target.stack_offset;
     tmp1 /* dest */ = reinterpret_cast<uint64_t>(lookup) + target.lookup_offset;
     tmp2 = std::bit_cast<uint64_t>(info);
-    [[clang::musttail]] return br(PARAMS);
+    [[clang::musttail]] return base_br<Arity>(PARAMS);
 }
+HANDLER(br_table_0) { br_table<0>(PARAMS); }
+HANDLER(br_table_1) { br_table<1>(PARAMS); }
+HANDLER(br_table_n) { br_table<>(PARAMS); }
+
 HANDLER(call) {
     // tmp1 = function start
     PRELUDE;
