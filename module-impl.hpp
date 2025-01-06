@@ -998,14 +998,14 @@ HANDLER(end) {
 
     if (std::holds_alternative<Function>(construct)) {
         // move results past locals
-        put(code, Target::set_temp1(fn.locals.bytesize()));
-        auto n_results = sig.results.bytesize();
-        if (n_results == 0) {
+        put(code, Target::set_temp1(-fn.locals.bytesize()));
+        auto byte_results = sig.results.bytesize();
+        if (byte_results == 0) {
             put(code, Target::call(runtime::move_0_results));
-        } else if (n_results == 1) {
-            put(code, Target::call(runtime::move_1_results));
+        } else if (byte_results == 8) {
+            put(code, Target::call(runtime::move_8_results));
         } else {
-            put(code, Target::set_temp2(n_results));
+            put(code, Target::set_temp2(-byte_results));
             put(code, Target::call(runtime::move_n_results));
         }
 
@@ -1032,7 +1032,7 @@ HANDLER(br) {
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
     auto info = runtime::BrInfo(0, flow.expected.bytesize(),
-                                stack.sp() - flow.stack_offset);
+                                flow.stack_offset - stack.sp());
     if (std::holds_alternative<Loop>(flow.construct)) {
         put(code, Target::set_temp1(reinterpret_cast<uint64_t>(
                       std::get<Loop>(flow.construct).start)));
@@ -1048,14 +1048,14 @@ HANDLER(br) {
     }
     do {
         BR(0, 0);
-        BR(0, 1);
-        BR(0, 2);
-        BR(0, 3);
-        BR(0, 4);
-        BR(0, 5);
-        BR(1, 1);
-        BR(1, 2);
-        BR(1, 3);
+        BR(0, 8);
+        BR(0, 16);
+        BR(0, 24);
+        BR(0, 32);
+        BR(0, 40);
+        BR(8, 8);
+        BR(8, 16);
+        BR(8, 24);
 
         put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
         put(code, Target::call(runtime::br_n_n));
@@ -1073,7 +1073,7 @@ HANDLER(br_if) {
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
     auto info = runtime::BrInfo(0, flow.expected.bytesize(),
-                                stack.sp() - flow.stack_offset);
+                                flow.stack_offset - stack.sp());
     if (std::holds_alternative<Loop>(flow.construct)) {
         put(code, Target::set_temp1(reinterpret_cast<uint64_t>(
                       std::get<Loop>(flow.construct).start)));
@@ -1089,14 +1089,14 @@ HANDLER(br_if) {
     }
     do {
         BR_IF(0, 0);
-        BR_IF(0, 1);
-        BR_IF(0, 2);
-        BR_IF(0, 3);
-        BR_IF(0, 4);
-        BR_IF(0, 5);
-        BR_IF(1, 1);
-        BR_IF(1, 2);
-        BR_IF(1, 3);
+        BR_IF(0, 8);
+        BR_IF(0, 16);
+        BR_IF(0, 24);
+        BR_IF(0, 32);
+        BR_IF(0, 40);
+        BR_IF(8, 8);
+        BR_IF(8, 16);
+        BR_IF(8, 24);
 
         put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
         put(code, Target::call(runtime::br_if_n_n));
@@ -1128,8 +1128,8 @@ HANDLER(br_table) {
     auto info = runtime::BrInfo(n_targets, default_target.bytesize());
     if (info.arity == 0) {
         put(code, Target::call(runtime::br_table_0));
-    } else if (info.arity == 1) {
-        put(code, Target::call(runtime::br_table_1));
+    } else if (info.arity == 8) {
+        put(code, Target::call(runtime::br_table_8));
     } else {
         put(code, Target::call(runtime::br_table_n));
     }
@@ -1144,7 +1144,7 @@ HANDLER(br_table) {
             stack.check_br(control_stack, targets[i]);
 
             auto &flow = control_stack[control_stack.size() - targets[i] - 1];
-            auto offset = stack.sp() - flow.stack_offset;
+            auto offset = flow.stack_offset - stack.sp();
             if (std::holds_alternative<Loop>(flow.construct)) {
                 put(code, runtime::BrTableTarget(
                               std::get<Loop>(flow.construct).start - table_addr,
@@ -1167,7 +1167,7 @@ HANDLER(return_) {
 
     auto &flow = control_stack.front();
     auto info = runtime::BrInfo(0, flow.expected.bytesize(),
-                                stack.sp() - flow.stack_offset);
+                                flow.stack_offset - stack.sp());
 
     flow.pending_br.push_back(code);
     code += Target::temp1_size;
@@ -1179,14 +1179,14 @@ HANDLER(return_) {
     }
     do {
         BR(0, 0);
-        BR(0, 1);
-        BR(0, 2);
-        BR(0, 3);
-        BR(0, 4);
-        BR(0, 5);
-        BR(1, 1);
-        BR(1, 2);
-        BR(1, 3);
+        BR(0, 8);
+        BR(0, 16);
+        BR(0, 24);
+        BR(0, 32);
+        BR(0, 40);
+        BR(8, 8);
+        BR(8, 16);
+        BR(8, 24);
 
         put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
         put(code, Target::call(runtime::br_n_n));
@@ -1273,7 +1273,7 @@ HANDLER(localget) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
 
-    put(code, Target::set_temp1(stack.sp() + fn.local_bytes[local_idx]));
+    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
     put(code, Target::call(runtime::localget));
 
     auto local_ty = fn.locals[local_idx];
@@ -1284,7 +1284,7 @@ HANDLER(localset) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
 
-    put(code, Target::set_temp1(stack.sp() + fn.local_bytes[local_idx]));
+    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
     put(code, Target::call(runtime::localset));
 
     auto local_ty = fn.locals[local_idx];
@@ -1295,7 +1295,7 @@ HANDLER(localtee) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
 
-    put(code, Target::set_temp1(stack.sp() + fn.local_bytes[local_idx]));
+    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
     put(code, Target::call(runtime::localtee));
 
     auto local_ty = fn.locals[local_idx];

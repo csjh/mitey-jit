@@ -21,7 +21,9 @@ uint32_t call_stack_depth = 10000;
     } while (0)
 #define POSTLUDE return dummy(memory, misc, stack)
 #define MISC_GET(type, idx) (*reinterpret_cast<type *>(misc[idx]))
-#define byteadd(ptr, n) (decltype(ptr))((uint8_t *)(ptr) + (n))
+#define byteadd(ptr, n)                                                        \
+    reinterpret_cast<decltype(ptr)>(reinterpret_cast<uint64_t>(ptr) +          \
+                                    static_cast<uint64_t>(n))
 
 __attribute__((noinline)) void dummy(WasmMemory *memory, void **misc,
                                      WasmValue *stack) {
@@ -50,15 +52,16 @@ template <ssize_t N = -1> HANDLER(base_move_results) {
     // tmp1 = # of locals
     // tmp2 = # of results
     PRELUDE;
-    auto n_results = N == -1 ? tmp2 : N;
+    auto n_locals = static_cast<int64_t>(tmp1);
+    auto n_results = static_cast<int64_t>(N == -1 ? tmp2 : -N);
     // memmove because results > locals is possible
-    std::memmove(byteadd(stack, -(tmp1 + n_results)),
-                 byteadd(stack, -n_results), n_results);
-    stack = byteadd(stack, -tmp1);
+    std::memmove(byteadd(stack, n_locals + n_results),
+                 byteadd(stack, n_results), -n_results);
+    stack = byteadd(stack, n_locals);
     POSTLUDE;
 }
 HANDLER(move_0_results) { base_move_results<0>(PARAMS); }
-HANDLER(move_1_results) { base_move_results<1>(PARAMS); }
+HANDLER(move_8_results) { base_move_results<8>(PARAMS); }
 HANDLER(move_n_results) { base_move_results<>(PARAMS); }
 
 HANDLER(jump) {
@@ -83,22 +86,22 @@ template <ssize_t Arity = -1, ssize_t StackOffset = -1> HANDLER(base_br) {
     PRELUDE;
     auto info = std::bit_cast<BrInfo>(tmp2);
     auto arity = Arity == -1 ? info.arity : Arity;
-    auto stack_offset = StackOffset == -1 ? info.stack_offset : StackOffset;
+    auto stack_offset = StackOffset == -1 ? info.stack_offset : -StackOffset;
 
-    std::memmove(byteadd(stack, -stack_offset), byteadd(stack, -arity), arity);
-    stack = byteadd(stack, -stack_offset + arity);
+    std::memmove(byteadd(stack, stack_offset), byteadd(stack, -arity), arity);
+    stack = byteadd(stack, stack_offset + arity);
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
 }
 // generated based on the most common in figma/duckdb binaries
 HANDLER(br_0_0) { base_br<0, 0>(PARAMS); }
-HANDLER(br_0_1) { base_br<0, 1>(PARAMS); }
-HANDLER(br_0_2) { base_br<0, 2>(PARAMS); }
-HANDLER(br_0_3) { base_br<0, 3>(PARAMS); }
-HANDLER(br_0_4) { base_br<0, 4>(PARAMS); }
-HANDLER(br_0_5) { base_br<0, 5>(PARAMS); }
-HANDLER(br_1_1) { base_br<1, 1>(PARAMS); }
-HANDLER(br_1_2) { base_br<1, 2>(PARAMS); }
-HANDLER(br_1_3) { base_br<1, 3>(PARAMS); }
+HANDLER(br_0_8) { base_br<0, 8>(PARAMS); }
+HANDLER(br_0_16) { base_br<0, 16>(PARAMS); }
+HANDLER(br_0_24) { base_br<0, 24>(PARAMS); }
+HANDLER(br_0_32) { base_br<0, 32>(PARAMS); }
+HANDLER(br_0_40) { base_br<0, 40>(PARAMS); }
+HANDLER(br_8_8) { base_br<8, 8>(PARAMS); }
+HANDLER(br_8_16) { base_br<8, 16>(PARAMS); }
+HANDLER(br_8_24) { base_br<8, 24>(PARAMS); }
 HANDLER(br_n_n) { base_br<>(PARAMS); }
 
 template <ssize_t Arity = -1, ssize_t StackOffset = -1> HANDLER(base_br_if) {
@@ -112,14 +115,14 @@ template <ssize_t Arity = -1, ssize_t StackOffset = -1> HANDLER(base_br_if) {
     POSTLUDE;
 }
 HANDLER(br_if_0_0) { base_br_if<0, 0>(PARAMS); }
-HANDLER(br_if_0_1) { base_br_if<0, 1>(PARAMS); }
-HANDLER(br_if_0_2) { base_br_if<0, 2>(PARAMS); }
-HANDLER(br_if_0_3) { base_br_if<0, 3>(PARAMS); }
-HANDLER(br_if_0_4) { base_br_if<0, 4>(PARAMS); }
-HANDLER(br_if_0_5) { base_br_if<0, 5>(PARAMS); }
-HANDLER(br_if_1_1) { base_br_if<1, 1>(PARAMS); }
-HANDLER(br_if_1_2) { base_br_if<1, 2>(PARAMS); }
-HANDLER(br_if_1_3) { base_br_if<1, 3>(PARAMS); }
+HANDLER(br_if_0_8) { base_br_if<0, 8>(PARAMS); }
+HANDLER(br_if_0_16) { base_br_if<0, 16>(PARAMS); }
+HANDLER(br_if_0_24) { base_br_if<0, 24>(PARAMS); }
+HANDLER(br_if_0_32) { base_br_if<0, 32>(PARAMS); }
+HANDLER(br_if_0_40) { base_br_if<0, 40>(PARAMS); }
+HANDLER(br_if_8_8) { base_br_if<8, 8>(PARAMS); }
+HANDLER(br_if_8_16) { base_br_if<8, 16>(PARAMS); }
+HANDLER(br_if_8_24) { base_br_if<8, 24>(PARAMS); }
 HANDLER(br_if_n_n) { base_br_if<>(PARAMS); }
 
 template <ssize_t Arity = -1> HANDLER(br_table) {
@@ -137,7 +140,7 @@ template <ssize_t Arity = -1> HANDLER(br_table) {
     [[clang::musttail]] return base_br<Arity>(PARAMS);
 }
 HANDLER(br_table_0) { br_table<0>(PARAMS); }
-HANDLER(br_table_1) { br_table<1>(PARAMS); }
+HANDLER(br_table_8) { br_table<8>(PARAMS); }
 HANDLER(br_table_n) { br_table<>(PARAMS); }
 
 HANDLER(call) {
@@ -216,21 +219,21 @@ HANDLER(select_t) {
 HANDLER(localget) {
     // tmp1 = local index/stack offset to local
     PRELUDE;
-    auto &local = *byteadd(stack, -tmp1);
+    auto &local = *byteadd(stack, tmp1);
     *stack++ = local;
     POSTLUDE;
 }
 HANDLER(localset) {
     // tmp1 = local index/stack offset to local
     PRELUDE;
-    auto &local = *byteadd(stack, -tmp1);
+    auto &local = *byteadd(stack, tmp1);
     local = *--stack;
     POSTLUDE;
 }
 HANDLER(localtee) {
     // tmp1 = local index/stack offset to local
     PRELUDE;
-    *byteadd(stack, -tmp1) = stack[-1];
+    *byteadd(stack, tmp1) = stack[-1];
     POSTLUDE;
 }
 HANDLER(tableget) {
