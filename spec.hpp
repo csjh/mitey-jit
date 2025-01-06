@@ -254,7 +254,7 @@ static inline T safe_read_sleb128(Iter &iter) {
         byte = *iter++;
         result |= (byte & 0x7f) << shift;
         shift += 7;
-    } while (byte & 0x80);
+    } while (byte & 0x80 && shift < BITS);
     if (shift < 64 && (byte & 0x40)) {
         result |= static_cast<int64_t>(-1) << shift;
     }
@@ -265,8 +265,7 @@ static inline T safe_read_sleb128(Iter &iter) {
     if (result < static_cast<int64_t>(-(1ULL << (BITS - 1)))) {
         error<malformed_error>("integer too large");
     }
-    if (static_cast<uint64_t>(iter - start) >
-        static_cast<uint64_t>(1 + BITS / 7)) {
+    if (shift >= BITS && (byte & 0x80)) {
         error<malformed_error>("integer representation too long");
     }
     if (((iter[-1] != 0 && iter[-1] != 127) + (iter - start - 1) * 7) >= BITS) {
@@ -277,8 +276,6 @@ static inline T safe_read_sleb128(Iter &iter) {
 
 template <typename T, uint8_t BITS = sizeof(T) * 8, typename Iter>
 static inline T safe_read_leb128(Iter &iter) {
-    auto start = iter;
-
     uint64_t result = 0;
     uint64_t shift = 0;
     uint64_t byte;
@@ -286,10 +283,9 @@ static inline T safe_read_leb128(Iter &iter) {
         byte = *iter++;
         result |= (byte & 0x7f) << shift;
         shift += 7;
-    } while (byte & 0x80);
+    } while (byte & 0x80 && shift < BITS);
 
-    if (static_cast<uint64_t>(iter - start) >
-        static_cast<uint64_t>(1 + BITS / 7)) {
+    if (shift >= BITS && (byte & 0x80)) {
         error<malformed_error>("integer representation too long");
     }
     if (sizeof(T) != 8 && result > (1ULL << BITS) - 1) {
