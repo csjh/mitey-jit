@@ -21,6 +21,7 @@ uint32_t call_stack_depth = 10000;
     } while (0)
 #define POSTLUDE return dummy(memory, misc, stack)
 #define MISC_GET(type, idx) (*reinterpret_cast<type *>(misc[idx]))
+#define byteadd(ptr, n) (decltype(ptr))((uint8_t *)(ptr) + (n))
 
 __attribute__((noinline)) void dummy(WasmMemory *memory, void **misc,
                                      WasmValue *stack) {
@@ -42,7 +43,7 @@ HANDLER(clear_locals) {
     // tmp1 = non-parameter local bytes
     PRELUDE;
     std::memset(stack, 0, tmp1);
-    stack = (WasmValue *)((uint8_t *)stack + tmp1);
+    stack = byteadd(stack, tmp1);
     POSTLUDE;
 }
 template <ssize_t N = -1> HANDLER(base_move_results) {
@@ -51,9 +52,9 @@ template <ssize_t N = -1> HANDLER(base_move_results) {
     PRELUDE;
     auto n_results = N == -1 ? tmp2 : N;
     // memmove because results > locals is possible
-    std::memmove(stack - tmp1 - n_results, stack - n_results,
-                 n_results * sizeof(WasmValue));
-    stack -= tmp1;
+    std::memmove(byteadd(stack, -(tmp1 + n_results)),
+                 byteadd(stack, -n_results), n_results);
+    stack = byteadd(stack, -tmp1);
     POSTLUDE;
 }
 HANDLER(move_0_results) { base_move_results<0>(PARAMS); }
@@ -84,10 +85,8 @@ template <ssize_t Arity = -1, ssize_t StackOffset = -1> HANDLER(base_br) {
     auto arity = Arity == -1 ? info.arity : Arity;
     auto stack_offset = StackOffset == -1 ? info.stack_offset : StackOffset;
 
-    std::memmove(stack - stack_offset, stack - arity,
-                 arity * sizeof(WasmValue));
-    stack -= stack_offset;
-    stack += arity;
+    std::memmove(byteadd(stack, -stack_offset), byteadd(stack, -arity), arity);
+    stack = byteadd(stack, -stack_offset + arity);
     [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
 }
 // generated based on the most common in figma/duckdb binaries
@@ -217,21 +216,21 @@ HANDLER(select_t) {
 HANDLER(localget) {
     // tmp1 = local index/stack offset to local
     PRELUDE;
-    auto &local = stack[-(int64_t)tmp1];
+    auto &local = *byteadd(stack, -tmp1);
     *stack++ = local;
     POSTLUDE;
 }
 HANDLER(localset) {
     // tmp1 = local index/stack offset to local
     PRELUDE;
-    auto &local = stack[-(int64_t)tmp1];
+    auto &local = *byteadd(stack, -tmp1);
     local = *--stack;
     POSTLUDE;
 }
 HANDLER(localtee) {
     // tmp1 = local index/stack offset to local
     PRELUDE;
-    stack[-(int64_t)tmp1] = stack[-1];
+    *byteadd(stack, -tmp1) = stack[-1];
     POSTLUDE;
 }
 HANDLER(tableget) {

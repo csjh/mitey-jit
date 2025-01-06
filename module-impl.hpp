@@ -919,7 +919,7 @@ HANDLER(block) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(
         ControlFlow(signature.results, {}, {}, signature, stack.polymorphism(),
-                    stack.sp() - signature.params.size(), Block()));
+                    stack.sp() - signature.params.bytesize(), Block()));
     stack.unpolymorphize();
     nextop();
 }
@@ -929,7 +929,7 @@ HANDLER(loop) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(
         ControlFlow(signature.params, {}, {}, signature, stack.polymorphism(),
-                    stack.sp() - signature.params.size(), Loop(code)));
+                    stack.sp() - signature.params.bytesize(), Loop(code)));
     stack.unpolymorphize();
     nextop();
 }
@@ -944,7 +944,7 @@ HANDLER(if_) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(
         ControlFlow(signature.results, {}, {}, signature, stack.polymorphism(),
-                    stack.sp() - signature.params.size(), if_));
+                    stack.sp() - signature.params.bytesize(), if_));
     stack.unpolymorphize();
     nextop();
 }
@@ -958,7 +958,7 @@ HANDLER(else_) {
     stack.push(sig.params);
 
     // necessary in case of polymorphic stack
-    stack.set_sp(stack_offset + sig.params.size());
+    stack.set_sp(stack_offset + sig.params.bytesize());
 
     auto [else_jump] = std::get<If>(construct);
     // jump to end of if/else block after if block
@@ -998,8 +998,8 @@ HANDLER(end) {
 
     if (std::holds_alternative<Function>(construct)) {
         // move results past locals
-        put(code, Target::set_temp1(fn.locals.size()));
-        auto n_results = sig.results.size();
+        put(code, Target::set_temp1(fn.locals.bytesize()));
+        auto n_results = sig.results.bytesize();
         if (n_results == 0) {
             put(code, Target::call(runtime::move_0_results));
         } else if (n_results == 1) {
@@ -1019,7 +1019,7 @@ HANDLER(end) {
     stack.set_polymorphism(polymorphism);
 
     // necessary in case of polymorphic stack
-    stack.set_sp(sp + sig.params.size());
+    stack.set_sp(sp + sig.params.bytesize());
 
     stack.push(sig.results);
 
@@ -1031,7 +1031,7 @@ HANDLER(br) {
     stack.check_br(control_stack, depth);
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
-    auto info = runtime::BrInfo(0, flow.expected.size(),
+    auto info = runtime::BrInfo(0, flow.expected.bytesize(),
                                 stack.sp() - flow.stack_offset);
     if (std::holds_alternative<Loop>(flow.construct)) {
         put(code, Target::set_temp1(reinterpret_cast<uint64_t>(
@@ -1072,7 +1072,7 @@ HANDLER(br_if) {
     stack.check_br(control_stack, depth);
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
-    auto info = runtime::BrInfo(0, flow.expected.size(),
+    auto info = runtime::BrInfo(0, flow.expected.bytesize(),
                                 stack.sp() - flow.stack_offset);
     if (std::holds_alternative<Loop>(flow.construct)) {
         put(code, Target::set_temp1(reinterpret_cast<uint64_t>(
@@ -1084,7 +1084,7 @@ HANDLER(br_if) {
 
 #define BR_IF(arity_, stack_offset_)                                           \
     if (info.arity == arity_ && info.stack_offset == stack_offset_) {          \
-        put(code, Target::call(runtime::br_if_##arity_##_##stack_offset_));       \
+        put(code, Target::call(runtime::br_if_##arity_##_##stack_offset_));    \
         break;                                                                 \
     }
     do {
@@ -1125,7 +1125,7 @@ HANDLER(br_table) {
     auto base = control_stack.size() - 1;
     auto &default_target = control_stack[base - targets[n_targets]].expected;
 
-    auto info = runtime::BrInfo(n_targets, default_target.size());
+    auto info = runtime::BrInfo(n_targets, default_target.bytesize());
     if (info.arity == 0) {
         put(code, Target::call(runtime::br_table_0));
     } else if (info.arity == 1) {
@@ -1166,7 +1166,7 @@ HANDLER(return_) {
     stack.check_br(control_stack, control_stack.size() - 1);
 
     auto &flow = control_stack.front();
-    auto info = runtime::BrInfo(0, flow.expected.size(),
+    auto info = runtime::BrInfo(0, flow.expected.bytesize(),
                                 stack.sp() - flow.stack_offset);
 
     flow.pending_br.push_back(code);
@@ -1762,12 +1762,10 @@ uint8_t *Module::validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
     auto control_stack = std::vector<ControlFlow>(
         {ControlFlow(fn.type.results, {}, {}, fn.type, false, 0, Function())});
 
-    auto locals_bytes =
-        std::reduce(fn.locals.begin() + fn.type.params.size(), fn.locals.end(),
-                    0, [](auto a, auto b) { return a + valtype_size(b); });
+    auto locals_bytes = fn.locals.bytesize() - fn.type.params.bytesize();
 
     put(code, Target::get_prelude());
-    put(code, Target::set_temp1(locals_bytes * sizeof(runtime::WasmValue)));
+    put(code, Target::set_temp1(locals_bytes));
     put(code, Target::call(runtime::clear_locals));
 
     return funcs<Target>[*iter++](*this, iter, fn, stack, control_stack, code);

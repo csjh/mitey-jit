@@ -281,7 +281,7 @@ void WasmStack::apply(const WasmSignature &signature) {
     push(signature.results);
 }
 
-void WasmStack::enter_flow(const std::vector<valtype> &expected) {
+void WasmStack::enter_flow(const valtype_vector &expected) {
     pop(expected);
     push(valtype::null);
     push(expected);

@@ -313,7 +313,7 @@ static_assert(sizeof(BrTableTarget) == sizeof(uint64_t));
 
 struct BrInfo {
     uint16_t n_targets; // for br_table
-    uint16_t arity;
+    int16_t arity;
     int32_t stack_offset; // offset from stack base to copy arity to
 };
 static_assert(sizeof(BrInfo) == sizeof(uint64_t));

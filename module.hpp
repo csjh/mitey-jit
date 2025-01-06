@@ -53,7 +53,7 @@ using ImportSpecifier = std::pair<std::string, std::string>;
 struct FunctionShell {
     runtime::Signature *start;
     WasmSignature type;
-    std::vector<valtype> locals;
+    valtype_vector locals;
     std::vector<uint32_t> local_bytes;
     std::optional<ImportSpecifier> import;
     bool is_declared = false;
@@ -109,7 +109,7 @@ struct PendingBrTable {
 };
 
 struct ControlFlow {
-    std::vector<valtype> &expected;
+    valtype_vector &expected;
     std::vector<uint8_t *> pending_br;
     std::vector<PendingBrTable> pending_br_tables;
     WasmSignature &sig;
@@ -163,7 +163,7 @@ class WasmStack {
     void apply(std::array<valtype, pc> params, std::array<valtype, rc> results);
 
     void apply(const WasmSignature &signature);
-    void enter_flow(const std::vector<valtype> &expected);
+    void enter_flow(const valtype_vector &expected);
     void set_sp(uint64_t sp) { stack_size = sp; }
     void check_br(std::vector<ControlFlow> &control_stack, uint32_t depth);
 };
