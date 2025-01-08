@@ -56,23 +56,22 @@ void Instance::initialize(const runtime::Imports &imports) {
         return import;
     };
 
-    if (module->memory.exists) {
-        if (module->memory.import) {
-            auto imported_memory =
-                std::get<std::shared_ptr<runtime::WasmMemory>>(
-                    get_import(*module->memory.import));
+    if (!module->memory.exists) {
+        memory = std::make_shared<runtime::WasmMemory>(0, 0);
+    } else if (module->memory.import) {
+        auto imported_memory = std::get<std::shared_ptr<runtime::WasmMemory>>(
+            get_import(*module->memory.import));
 
-            if (imported_memory->size() < module->memory.min ||
-                imported_memory->max() > module->memory.max) {
-                error<link_error>(
-                    "incompatible import type: memory size doesn't fit");
-            }
-
-            memory = imported_memory;
-        } else {
-            memory = std::make_shared<runtime::WasmMemory>(module->memory.min,
-                                                           module->memory.max);
+        if (imported_memory->size() < module->memory.min ||
+            imported_memory->max() > module->memory.max) {
+            error<link_error>(
+                "incompatible import type: memory size doesn't fit");
         }
+
+        memory = imported_memory;
+    } else {
+        memory = std::make_shared<runtime::WasmMemory>(module->memory.min,
+                                                       module->memory.max);
     }
 
     for (uint32_t i = 0; i < functions.size(); i++) {
