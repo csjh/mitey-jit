@@ -68,14 +68,27 @@ class Arm64 {
 
     static constexpr std::array<uint32_t, 4> mov64(uint64_t value,
                                                    uint8_t reg) {
-        return {mov16((value >> 0) & 0xffff, 0, reg),
-                mov16((value >> 16) & 0xffff, 1, reg),
-                mov16((value >> 32) & 0xffff, 2, reg),
-                mov16((value >> 48) & 0xffff, 3, reg)};
+        constexpr uint32_t nop = 0xd503201f;
+
+        // default to mov <reg>, #0x0 as first instruction
+        auto instructions =
+            std::array<uint32_t, 4>{0xd2800000 | reg, nop, nop, nop};
+        auto keep = false;
+        for (size_t i = 0, j = 0; i < 4; i++) {
+            auto literal = value & 0xffff;
+            value >>= 16;
+            if (literal == 0)
+                continue;
+            instructions[j++] = mov16(keep, literal, i, reg);
+            keep = true;
+        }
+        return instructions;
     }
 
-    static constexpr uint32_t mov16(uint16_t imm, uint8_t shift, uint8_t reg) {
-        return (0b111100101 << 23) | (shift << 21) | (imm << 5) | reg;
+    static constexpr uint32_t mov16(bool keep, uint16_t imm, uint8_t shift,
+                                    uint8_t reg) {
+        return (keep << 29) | (0b110100101 << 23) | (shift << 21) | (imm << 5) |
+               reg;
     }
 };
 } // namespace mitey
