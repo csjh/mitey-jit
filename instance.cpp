@@ -89,9 +89,11 @@ void Instance::initialize(const runtime::Imports &imports) {
 
             functions[i] = imported_function;
         } else {
-            functions[i] = runtime::FunctionInfo(runtime::FunctionType(fn.type),
-                                                 memory.get(), misc.get(),
-                                                 fn.start, self.lock());
+            auto memory = this->memory.get()->memory.get();
+            auto misc = this->misc.get();
+            functions[i] =
+                runtime::FunctionInfo(runtime::FunctionType(fn.type), memory,
+                                      misc, fn.start, self.lock());
         }
         misc_functions[i] = &functions[i];
     }

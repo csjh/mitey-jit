@@ -16,26 +16,24 @@ std::jmp_buf *trap_buf;
 uint32_t call_stack_depth = 10000;
 
 #define HANDLER(name)                                                          \
-    void name(WasmMemory *memory, void **misc, WasmValue *stack,               \
-              uint64_t tmp1, uint64_t tmp2)
+    void name(uint8_t *memory, void **misc, WasmValue *stack, uint64_t tmp1,   \
+              uint64_t tmp2)
 #define PARAMS memory, misc, stack, tmp1, tmp2
-#define PRELUDE                                                                \
-    do {                                                                       \
-    } while (0)
+#define PRELUDE auto &memheader = MISC_GET(WasmMemory, 0)
 #define POSTLUDE return dummy(memory, misc, stack)
-#define GET(misc, type, idx) (*reinterpret_cast<type *>((misc)[idx]))
+#define MISC_GET(type, idx) (*reinterpret_cast<type *>(misc[idx]))
 #define byteadd(ptr, n)                                                        \
     reinterpret_cast<decltype(ptr)>(reinterpret_cast<uint64_t>(ptr) +          \
                                     static_cast<uint64_t>(n))
 
-__attribute__((noinline)) void dummy(WasmMemory *memory, void **misc,
+__attribute__((noinline)) void dummy(uint8_t *memory, void **misc,
                                      WasmValue *stack) {
     // assumption: compiler doesn't move memory/stack/misc from arg registers
     asm volatile("" ::"r"(memory), "r"(misc), "r"(stack));
     return;
 }
 
-__attribute__((noinline)) void call_dummy(WasmMemory *memory, void **misc) {
+__attribute__((noinline)) void call_dummy(uint8_t *memory, void **misc) {
     asm volatile("" ::"r"(memory), "r"(misc));
     return;
 }
@@ -156,7 +154,7 @@ HANDLER(call) {
     reinterpret_cast<Signature *>(tmp1)(PARAMS);
 
     call_stack_depth++;
-    return call_dummy(&GET(misc, WasmMemory, 0), misc);
+    return call_dummy(memory, misc);
 }
 HANDLER(call_extern) {
     // tmp1 = function offset in misc
@@ -165,19 +163,18 @@ HANDLER(call_extern) {
     if (call_stack_depth == 0)
         trap(TrapKind::call_stack_exhausted);
 
-    auto &func = GET(misc, FunctionInfo, tmp1);
-    func.signature(&GET(func.misc, WasmMemory, 0), func.misc, stack, tmp1,
-                   tmp2);
+    auto &func = MISC_GET(FunctionInfo, tmp1);
+    func.signature(func.memory, func.misc, stack, tmp1, tmp2);
 
     call_stack_depth++;
-    return call_dummy(&GET(misc, WasmMemory, 0), misc);
+    return call_dummy(memory, misc);
 }
 HANDLER(call_indirect) {
     PRELUDE;
 
     uint64_t combined[] = {tmp1, tmp2};
     auto info = std::bit_cast<CallIndirectInfo>(combined);
-    auto &table = GET(misc, WasmTable, info.table_idx);
+    auto &table = MISC_GET(WasmTable, info.table_idx);
 
     --stack;
     auto elem_idx = stack->u32;
@@ -197,11 +194,10 @@ HANDLER(call_indirect) {
     if (call_stack_depth == 0)
         trap(TrapKind::call_stack_exhausted);
 
-    auto func = funcref->signature;
-    func(&GET(funcref->misc, WasmMemory, 0), funcref->misc, stack, tmp1, tmp2);
+    funcref->signature(funcref->memory, funcref->misc, stack, tmp1, tmp2);
 
     call_stack_depth++;
-    return call_dummy(&GET(misc, WasmMemory, 0), misc);
+    return call_dummy(memory, misc);
 }
 HANDLER(drop) {
     PRELUDE;
@@ -243,7 +239,7 @@ HANDLER(localtee) {
 HANDLER(tableget) {
     // tmp1 = table index in misc table
     PRELUDE;
-    auto &table = GET(misc, WasmTable, tmp1);
+    auto &table = MISC_GET(WasmTable, tmp1);
     auto idx = stack[-1].u32;
     stack[-1] = table.get(idx);
     POSTLUDE;
@@ -251,7 +247,7 @@ HANDLER(tableget) {
 HANDLER(tableset) {
     // tmp1 = table index in misc table
     PRELUDE;
-    auto &table = GET(misc, WasmTable, tmp1);
+    auto &table = MISC_GET(WasmTable, tmp1);
     stack -= 2;
     auto idx = stack[0].u32;
     auto val = stack[1];
@@ -261,25 +257,25 @@ HANDLER(tableset) {
 HANDLER(globalget) {
     // tmp1 = global index in misc table
     PRELUDE;
-    auto &global = GET(misc, WasmValue, tmp1);
+    auto &global = MISC_GET(WasmValue, tmp1);
     *stack++ = global;
     POSTLUDE;
 }
 HANDLER(globalset) {
     // tmp1 = global index in misc table
     PRELUDE;
-    auto &global = GET(misc, WasmValue, tmp1);
+    auto &global = MISC_GET(WasmValue, tmp1);
     global = *--stack;
     POSTLUDE;
 }
 HANDLER(memorysize) {
     PRELUDE;
-    *stack++ = GET(misc, WasmMemory, 0).size();
+    *stack++ = memheader.size();
     POSTLUDE;
 }
 HANDLER(memorygrow) {
     PRELUDE;
-    stack[-1].u32 = GET(misc, WasmMemory, 0).grow(stack[-1].u32);
+    stack[-1].u32 = memheader.grow(stack[-1].u32);
     POSTLUDE;
 }
 HANDLER(ifXXconst) {
@@ -402,8 +398,10 @@ using f64 = double;
     {                                                                          \
         /* tmp1 = offset */                                                    \
         PRELUDE;                                                               \
-        stack[-1] = GET(misc, WasmMemory, 0)                                   \
-                        .load<stacktype, memtype>(stack[-1].u32 + tmp1);       \
+        auto src = memory + stack[-1].u32 + tmp1;                              \
+        memtype value;                                                         \
+        std::memcpy(&value, src, sizeof(memtype));                             \
+        stack[-1].stacktype = value;                                           \
         POSTLUDE;                                                              \
     }
 
@@ -412,8 +410,9 @@ using f64 = double;
         /* tmp1 = offset */                                                    \
         PRELUDE;                                                               \
         stack -= 2;                                                            \
-        GET(misc, WasmMemory, 0)                                               \
-            .store<stacktype, memtype>(stack[0].u32 + tmp1, stack[1]);         \
+        auto dst = memory + stack[0].u32 + tmp1;                               \
+        memtype value = stack[1].stacktype;                                    \
+        std::memcpy(dst, &value, sizeof(memtype));                             \
         POSTLUDE;                                                              \
     }
 
@@ -580,7 +579,7 @@ HANDLER(ref_func) {
     // tmp1 = funcref index in misc table
     PRELUDE;
     // & because we want the address of the funcref
-    auto funcref = &GET(misc, Funcref, tmp1);
+    auto funcref = &MISC_GET(Funcref, tmp1);
     *stack++ = funcref;
     POSTLUDE;
 }
@@ -598,13 +597,13 @@ HANDLER(i64_trunc_sat_f64_u) { TRUNC_SAT(f64, u64); }
 HANDLER(memory_init) {
     // tmp1 = segment index in misc table
     PRELUDE;
-    auto &segment = GET(misc, Segment, tmp1);
+    auto &segment = MISC_GET(Segment, tmp1);
 
     stack -= 3;
     auto size = stack[2].u32;
     auto src = stack[1].u32;
     auto dest = stack[0].u32;
-    GET(misc, WasmMemory, 0).copy_into(dest, src, segment, size);
+    memheader.copy_into(dest, src, segment, size);
     POSTLUDE;
 }
 HANDLER(data_drop) {
@@ -620,7 +619,7 @@ HANDLER(memory_copy) {
     auto size = stack[2].u32;
     auto src = stack[1].u32;
     auto dst = stack[0].u32;
-    GET(misc, WasmMemory, 0).memcpy(dst, src, size);
+    memheader.memcpy(dst, src, size);
     POSTLUDE;
 }
 HANDLER(memory_fill) {
@@ -629,15 +628,15 @@ HANDLER(memory_fill) {
     auto size = stack[2].u32;
     auto value = stack[1].u32;
     auto ptr = stack[0].u32;
-    GET(misc, WasmMemory, 0).memset(ptr, value, size);
+    memheader.memset(ptr, value, size);
     POSTLUDE;
 }
 HANDLER(table_init) {
     // tmp1 = element index in misc table
     // tmp2 = table index in misc table
     PRELUDE;
-    auto &element = GET(misc, ElementSegment, tmp1);
-    auto &table = GET(misc, WasmTable, tmp2);
+    auto &element = MISC_GET(ElementSegment, tmp1);
+    auto &table = MISC_GET(WasmTable, tmp2);
 
     stack -= 3;
     auto size = stack[2].u32;
@@ -649,7 +648,7 @@ HANDLER(table_init) {
 HANDLER(elem_drop) {
     // tmp1 = element index in misc table
     PRELUDE;
-    auto &element = GET(misc, ElementSegment, tmp1);
+    auto &element = MISC_GET(ElementSegment, tmp1);
     element.size = 0;
     element.elements = nullptr;
     POSTLUDE;
@@ -658,8 +657,8 @@ HANDLER(table_copy) {
     // tmp1 = destination table index in misc table
     // tmp2 = source table index in misc table
     PRELUDE;
-    auto &dst_table = GET(misc, WasmTable, tmp1);
-    auto &src_table = GET(misc, WasmTable, tmp2);
+    auto &dst_table = MISC_GET(WasmTable, tmp1);
+    auto &src_table = MISC_GET(WasmTable, tmp2);
 
     stack -= 3;
     auto size = stack[2].u32;
@@ -671,7 +670,7 @@ HANDLER(table_copy) {
 HANDLER(table_grow) {
     // tmp1 = table index in misc table
     PRELUDE;
-    auto &table = GET(misc, WasmTable, tmp1);
+    auto &table = MISC_GET(WasmTable, tmp1);
 
     stack -= 1;
     auto delta = stack[0].u32;
@@ -682,14 +681,14 @@ HANDLER(table_grow) {
 HANDLER(table_size) {
     // tmp1 = table index in misc table
     PRELUDE;
-    auto &table = GET(misc, WasmTable, tmp1);
+    auto &table = MISC_GET(WasmTable, tmp1);
     *stack++ = table.size();
     POSTLUDE;
 }
 HANDLER(table_fill) {
     // tmp1 = table index in misc table
     PRELUDE;
-    auto &table = GET(misc, WasmTable, tmp1);
+    auto &table = MISC_GET(WasmTable, tmp1);
 
     stack -= 3;
     auto size = stack[2].u32;

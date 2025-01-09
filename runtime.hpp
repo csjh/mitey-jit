@@ -148,12 +148,12 @@ struct __attribute__((packed)) FunctionType {
 };
 static_assert(sizeof(FunctionType) == sizeof(uint32_t) + sizeof(uint64_t));
 
-using Signature = void(WasmMemory *memory, void **misc, WasmValue *stack,
+using Signature = void(uint8_t *memory, void **misc, WasmValue *stack,
                        uint64_t tmp1, uint64_t tmp2);
 
 struct FunctionInfo {
     FunctionType type;
-    WasmMemory *memory;
+    uint8_t *memory;
     void **misc;
     Signature *signature;
     // this creates a circular dependency
@@ -279,18 +279,6 @@ struct WasmMemory {
     uint32_t max() { return maximum; }
     uint32_t grow(uint32_t delta);
 
-    template <typename StackT, typename MemT> WasmValue load(uint64_t addr) {
-        MemT val;
-        std::memcpy(&val, memory.get() + addr, sizeof(val));
-        return WasmValue(StackT(val));
-    }
-
-    template <typename StackT, typename MemT>
-    void store(uint64_t addr, StackT value) {
-        MemT val = value;
-        std::memcpy(memory.get() + addr, &val, sizeof(val));
-    }
-
     void copy_into(uint32_t dest, uint32_t src, const Segment &segment,
                    uint32_t length);
     void memcpy(uint32_t dst, uint32_t src, uint32_t length);
@@ -362,7 +350,7 @@ Signature br_if_n_n;
 Signature br_table_0;
 Signature br_table_8;
 Signature br_table_n;
-__attribute__((noinline)) void dummy(WasmMemory *, void **, WasmValue *);
+__attribute__((noinline)) void dummy(uint8_t *, void **, WasmValue *);
 #define HANDLER(name, str, byte) Signature name;
 FOREACH_INSTRUCTION(HANDLER)
 FOREACH_MULTIBYTE_INSTRUCTION(HANDLER)

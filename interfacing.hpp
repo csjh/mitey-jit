@@ -86,8 +86,7 @@ externalize(const runtime::FunctionInfo &fn) {
 }
 
 template <auto func> runtime::Signature *wasm_functionify() {
-    return [](runtime::WasmMemory *memory, void **misc,
-              runtime::WasmValue *stack, uint64_t, uint64_t) {
+    return [](auto memory, auto misc, auto stack, auto, auto) {
         using Fn = function_traits<decltype(func)>;
         using Args = typename Fn::args;
 
@@ -113,9 +112,10 @@ template <auto func> runtime::Signature *wasm_functionify() {
 
 template <auto func> runtime::FunctionInfo internalize() {
     static void *misc[] = {&runtime::WasmMemory::empty};
+    auto memory = runtime::WasmMemory::empty.memory.get();
     return runtime::FunctionInfo(WasmSignature::from_type<decltype(func)>(),
-                                 &runtime::WasmMemory::empty, misc,
-                                 wasm_functionify<func>(), nullptr);
+                                 memory, misc, wasm_functionify<func>(),
+                                 nullptr);
 }
 
 } // namespace mitey
