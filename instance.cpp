@@ -275,7 +275,7 @@ void Instance::initialize(const runtime::Imports &imports) {
         }
         auto stack =
             reinterpret_cast<runtime::WasmValue *>(initial_stack.get());
-        fn.signature(fn.memory, fn.misc, stack, 0, 0);
+        fn.signature(fn.memory, fn.misc, stack);
     }
 
     runtime::trap_buf = prev;

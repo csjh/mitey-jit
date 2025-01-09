@@ -51,7 +51,7 @@ static inline bool is_imexdesc(uint8_t byte) {
 using ImportSpecifier = std::pair<std::string, std::string>;
 
 struct FunctionShell {
-    runtime::Signature *start;
+    runtime::TemplessSignature *start;
     WasmSignature type;
     valtype_vector locals;
     std::vector<uint32_t> local_bytes;

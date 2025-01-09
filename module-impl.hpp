@@ -624,7 +624,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     std::reverse(fn.local_bytes.begin(), fn.local_bytes.end());
 
                     auto body_length = function_length - (iter - start);
-                    fn.start = reinterpret_cast<runtime::Signature *>(code);
+                    fn.start =
+                        reinterpret_cast<runtime::TemplessSignature *>(code);
                     if (!iter.has_n_left(body_length)) {
                         error<malformed_error>("length out of bounds");
                     }

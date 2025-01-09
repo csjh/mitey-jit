@@ -150,12 +150,13 @@ static_assert(sizeof(FunctionType) == sizeof(uint32_t) + sizeof(uint64_t));
 
 using Signature = void(uint8_t *memory, void **misc, WasmValue *stack,
                        uint64_t tmp1, uint64_t tmp2);
+using TemplessSignature = void(uint8_t *, void **, WasmValue *);
 
 struct FunctionInfo {
     FunctionType type;
     uint8_t *memory;
     void **misc;
-    Signature *signature;
+    TemplessSignature *signature;
     // this creates a circular dependency
     // todo: fix this
     std::shared_ptr<Instance> instance;
@@ -350,7 +351,7 @@ Signature br_if_n_n;
 Signature br_table_0;
 Signature br_table_8;
 Signature br_table_n;
-__attribute__((noinline)) void dummy(uint8_t *, void **, WasmValue *);
+TemplessSignature dummy;
 #define HANDLER(name, str, byte) Signature name;
 FOREACH_INSTRUCTION(HANDLER)
 FOREACH_MULTIBYTE_INSTRUCTION(HANDLER)

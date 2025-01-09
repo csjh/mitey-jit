@@ -18,9 +18,10 @@ uint32_t call_stack_depth = 10000;
 #define HANDLER(name)                                                          \
     void name(uint8_t *memory, void **misc, WasmValue *stack, uint64_t tmp1,   \
               uint64_t tmp2)
-#define PARAMS memory, misc, stack, tmp1, tmp2
+#define TEMPLESS_PARAMS memory, misc, stack
+#define PARAMS TEMPLESS_PARAMS, tmp1, tmp2
 #define PRELUDE auto &memheader = MISC_GET(WasmMemory, 0)
-#define POSTLUDE return dummy(memory, misc, stack)
+#define POSTLUDE return dummy(TEMPLESS_PARAMS)
 #define MISC_GET(type, idx) (*reinterpret_cast<type *>(misc[idx]))
 #define byteadd(ptr, n)                                                        \
     reinterpret_cast<decltype(ptr)>(reinterpret_cast<uint64_t>(ptr) +          \
@@ -68,7 +69,7 @@ HANDLER(move_n_results) { base_move_results<>(PARAMS); }
 HANDLER(jump) {
     // tmp1 = target
     PRELUDE;
-    [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
+    return reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
 }
 
 HANDLER(unreachable) { trap(TrapKind::unreachable); }
@@ -77,7 +78,7 @@ HANDLER(if_) {
     PRELUDE;
     --stack;
     if (!stack->u32) {
-        [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
+        return reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
     }
     POSTLUDE;
 }
@@ -91,7 +92,7 @@ template <ssize_t Arity = -1, ssize_t StackOffset = -1> HANDLER(base_br) {
 
     std::memmove(byteadd(stack, stack_offset), byteadd(stack, -arity), arity);
     stack = byteadd(stack, stack_offset + arity);
-    [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
+    return reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
 }
 // generated based on the most common in figma/duckdb binaries
 HANDLER(br_0_0) { base_br<0, 0>(PARAMS); }
@@ -151,10 +152,8 @@ HANDLER(call) {
     if (call_stack_depth == 0)
         trap(TrapKind::call_stack_exhausted);
 
-    reinterpret_cast<Signature *>(tmp1)(PARAMS);
-
-    call_stack_depth++;
-    return call_dummy(memory, misc);
+    reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
+    return dummy(TEMPLESS_PARAMS);
 }
 HANDLER(call_extern) {
     // tmp1 = function offset in misc
@@ -164,10 +163,10 @@ HANDLER(call_extern) {
         trap(TrapKind::call_stack_exhausted);
 
     auto &func = MISC_GET(FunctionInfo, tmp1);
-    func.signature(func.memory, func.misc, stack, tmp1, tmp2);
+    func.signature(func.memory, func.misc, stack);
 
     call_stack_depth++;
-    return call_dummy(memory, misc);
+    return dummy(TEMPLESS_PARAMS);
 }
 HANDLER(call_indirect) {
     PRELUDE;
@@ -194,10 +193,10 @@ HANDLER(call_indirect) {
     if (call_stack_depth == 0)
         trap(TrapKind::call_stack_exhausted);
 
-    funcref->signature(funcref->memory, funcref->misc, stack, tmp1, tmp2);
+    funcref->signature(funcref->memory, funcref->misc, stack);
 
     call_stack_depth++;
-    return call_dummy(memory, misc);
+    return dummy(TEMPLESS_PARAMS);
 }
 HANDLER(drop) {
     PRELUDE;

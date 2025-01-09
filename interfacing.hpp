@@ -34,7 +34,7 @@ std::function<FunctionType> externalize(const runtime::FunctionInfo &fn) {
             error<trap_error>(runtime::trap_kind_to_string(result));
         }
 
-        fn.signature(fn.memory, fn.misc, stack + Traits::parameter_arity, 0, 0);
+        fn.signature(fn.memory, fn.misc, stack + Traits::parameter_arity);
 
         runtime::trap_buf = prev_buf;
         runtime::call_stack_depth = prev_depth;
@@ -76,7 +76,7 @@ externalize(const runtime::FunctionInfo &fn) {
             error<trap_error>(runtime::trap_kind_to_string(result));
         }
 
-        fn.signature(fn.memory, fn.misc, stack + args.size(), 0, 0);
+        fn.signature(fn.memory, fn.misc, stack + args.size());
 
         runtime::trap_buf = prev_buf;
         runtime::call_stack_depth = prev_depth;
@@ -85,8 +85,8 @@ externalize(const runtime::FunctionInfo &fn) {
     };
 }
 
-template <auto func> runtime::Signature *wasm_functionify() {
-    return [](auto memory, auto misc, auto stack, auto, auto) {
+template <auto func> runtime::TemplessSignature *wasm_functionify() {
+    return [](auto memory, auto misc, auto stack) {
         using Fn = function_traits<decltype(func)>;
         using Args = typename Fn::args;
 
