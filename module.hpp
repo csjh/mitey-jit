@@ -229,6 +229,9 @@ class Module {
         if (!Instance::initial_stack)
             Instance::initial_stack =
                 Pager::allocate(Instance::STACK_SIZE, AllocationKind::Stack);
+        // same problem as above but even worse
+        runtime::WasmMemory::default_make_memory = Pager::allocate;
+        runtime::WasmMemory::default_grow_memory = Pager::grow;
         return mod;
     }
 

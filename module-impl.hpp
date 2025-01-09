@@ -1204,7 +1204,7 @@ HANDLER(call) {
     stack.apply(func.type);
 
     if (func.import) {
-        put(code, Target::set_temp1(fn_idx));
+        put(code, Target::set_temp1(1 + fn_idx));
         put(code, Target::call(runtime::call_extern));
     } else {
         mod.pending_calls.push_back({code, fn_idx});
@@ -1226,7 +1226,7 @@ HANDLER(call_indirect) {
     auto &type = mod.types[type_idx];
     stack.apply(type);
 
-    auto info = runtime::CallIndirectInfo(mod.functions.size() + table_idx,
+    auto info = runtime::CallIndirectInfo(1 + mod.functions.size() + table_idx,
                                           runtime::FunctionType(type));
     auto [temp1, temp2] = std::bit_cast<std::array<uint64_t, 2>>(info);
 
@@ -1308,7 +1308,7 @@ HANDLER(tableget) {
     auto table_ty = mod.tables[table_idx].type;
     stack.apply(std::array{valtype::i32}, std::array{table_ty});
 
-    put(code, Target::set_temp1(mod.functions.size() + table_idx));
+    put(code, Target::set_temp1(1 + mod.functions.size() + table_idx));
     put(code, Target::call(runtime::tableget));
     nextop();
 }
@@ -1318,7 +1318,7 @@ HANDLER(tableset) {
     auto table_ty = mod.tables[table_idx].type;
     stack.apply(std::array{valtype::i32, table_ty}, std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(mod.functions.size() + table_idx));
+    put(code, Target::set_temp1(1 + mod.functions.size() + table_idx));
     put(code, Target::call(runtime::tableset));
     nextop();
 }
@@ -1328,7 +1328,7 @@ HANDLER(globalget) {
     auto global_ty = mod.globals[global_idx].type;
     stack.apply(std::array<valtype, 0>(), std::array{global_ty});
 
-    put(code, Target::set_temp1(mod.functions.size() + mod.tables.size() +
+    put(code, Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
                                 global_idx));
     put(code, Target::call(runtime::globalget));
     nextop();
@@ -1341,7 +1341,7 @@ HANDLER(globalset) {
     auto global_ty = mod.globals[global_idx].type;
     stack.apply(std::array{global_ty}, std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(mod.functions.size() + mod.tables.size() +
+    put(code, Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
                                 global_idx));
     put(code, Target::call(runtime::globalset));
     nextop();
@@ -1577,7 +1577,7 @@ HANDLER(ref_func) {
            "undeclared function reference");
     stack.apply(std::array<valtype, 0>(), std::array{valtype::funcref});
 
-    put(code, Target::set_temp1(func_idx));
+    put(code, Target::set_temp1(1 + func_idx));
     put(code, Target::call(runtime::ref_func));
     nextop();
 }
@@ -1617,7 +1617,7 @@ HANDLER(memory_init) {
     // since data segments are shared and known at this point,
     // but data section comes after code section so stuff would have to move
     put(code,
-        Target::set_temp1(mod.functions.size() + mod.tables.size() +
+        Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
                           mod.globals.size() + mod.elements.size() + seg_idx));
     put(code, Target::call(runtime::memory_init));
     nextop();
@@ -1629,7 +1629,7 @@ HANDLER(data_drop) {
     }
     ensure(seg_idx < mod.n_data, "unknown data segment");
     put(code,
-        Target::set_temp1(mod.functions.size() + mod.tables.size() +
+        Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
                           mod.globals.size() + mod.elements.size() + seg_idx));
     put(code, Target::call(runtime::data_drop));
     nextop();
@@ -1670,9 +1670,9 @@ HANDLER(table_init) {
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(mod.functions.size() + mod.tables.size() +
+    put(code, Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
                                 mod.globals.size() + seg_idx));
-    put(code, Target::set_temp2(mod.functions.size() + table_idx));
+    put(code, Target::set_temp2(1 + mod.functions.size() + table_idx));
     put(code, Target::call(runtime::table_init));
     nextop();
 }
@@ -1680,7 +1680,7 @@ HANDLER(elem_drop) {
     auto seg_idx = safe_read_leb128<uint32_t>(iter);
     ensure(seg_idx < mod.elements.size(), "unknown elem segment");
 
-    put(code, Target::set_temp1(mod.functions.size() + mod.tables.size() +
+    put(code, Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
                                 mod.globals.size() + seg_idx));
     put(code, Target::call(runtime::elem_drop));
     nextop();
@@ -1696,8 +1696,8 @@ HANDLER(table_copy) {
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(mod.functions.size() + dst_table_idx));
-    put(code, Target::set_temp2(mod.functions.size() + src_table_idx));
+    put(code, Target::set_temp1(1 + mod.functions.size() + dst_table_idx));
+    put(code, Target::set_temp2(1 + mod.functions.size() + src_table_idx));
     put(code, Target::call(runtime::table_copy));
     nextop();
 }
@@ -1708,7 +1708,7 @@ HANDLER(table_grow) {
     stack.apply(std::array{mod.tables[table_idx].type, valtype::i32},
                 std::array{valtype::i32});
 
-    put(code, Target::set_temp1(mod.functions.size() + table_idx));
+    put(code, Target::set_temp1(1 + mod.functions.size() + table_idx));
     put(code, Target::call(runtime::table_grow));
     nextop();
 }
@@ -1718,7 +1718,7 @@ HANDLER(table_size) {
 
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
 
-    put(code, Target::set_temp1(mod.functions.size() + table_idx));
+    put(code, Target::set_temp1(1 + mod.functions.size() + table_idx));
     put(code, Target::call(runtime::table_size));
     nextop();
 }
@@ -1730,7 +1730,7 @@ HANDLER(table_fill) {
         std::array{valtype::i32, mod.tables[table_idx].type, valtype::i32},
         std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(mod.functions.size() + table_idx));
+    put(code, Target::set_temp1(1 + mod.functions.size() + table_idx));
     put(code, Target::call(runtime::table_fill));
     nextop();
 }

@@ -10,7 +10,7 @@ auto Instance::initial_stack = Allocation(nullptr, [](auto) {});
 
 Instance::Instance(std::shared_ptr<Module> module)
     : module(module), misc(std::make_unique<void *[]>(
-                          module->functions.size() + module->tables.size() +
+                          1 + module->functions.size() + module->tables.size() +
                           module->globals.size() + module->elements.size() +
                           module->data_segments.size())),
       memory(nullptr), functions(module->functions.size()),
@@ -27,9 +27,10 @@ void Instance::initialize(const runtime::Imports &imports) {
     }
 
     void **misc_ptr = misc.get();
+    auto misc_memory = reinterpret_cast<runtime::WasmMemory **>(misc_ptr);
     // only used for imported functions
     // good opportunity for tiering up though
-    auto misc_functions = reinterpret_cast<runtime::Funcref *>(misc_ptr);
+    auto misc_functions = reinterpret_cast<runtime::Funcref *>(misc_ptr += 1);
     auto misc_tables = reinterpret_cast<runtime::WasmTable **>(
         misc_ptr += module->functions.size());
     auto misc_globals = reinterpret_cast<runtime::WasmValue **>(
@@ -57,7 +58,7 @@ void Instance::initialize(const runtime::Imports &imports) {
     };
 
     if (!module->memory.exists) {
-        memory = std::make_shared<runtime::WasmMemory>(0, 0);
+        memory = std::make_shared<runtime::WasmMemory>();
     } else if (module->memory.import) {
         auto imported_memory = std::get<std::shared_ptr<runtime::WasmMemory>>(
             get_import(*module->memory.import));
@@ -73,6 +74,7 @@ void Instance::initialize(const runtime::Imports &imports) {
         memory = std::make_shared<runtime::WasmMemory>(module->memory.min,
                                                        module->memory.max);
     }
+    *misc_memory = memory.get();
 
     for (uint32_t i = 0; i < functions.size(); i++) {
         const auto &fn = module->functions[i];

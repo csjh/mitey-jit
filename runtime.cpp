@@ -8,6 +8,9 @@ namespace mitey {
 namespace runtime {
 
 Segment Segment::empty(0, 0, nullptr, nullptr);
+WasmMemory WasmMemory::empty = WasmMemory();
+Allocation (*WasmMemory::default_make_memory)(size_t, AllocationKind) = nullptr;
+int (*WasmMemory::default_grow_memory)(WasmMemory &, size_t) = nullptr;
 
 std::jmp_buf *trap_buf;
 uint32_t call_stack_depth = 10000;
@@ -153,7 +156,7 @@ HANDLER(call) {
     reinterpret_cast<Signature *>(tmp1)(PARAMS);
 
     call_stack_depth++;
-    return call_dummy(memory, misc);
+    return call_dummy(&GET(misc, WasmMemory, 0), misc);
 }
 HANDLER(call_extern) {
     // tmp1 = function offset in misc
@@ -163,10 +166,11 @@ HANDLER(call_extern) {
         trap(TrapKind::call_stack_exhausted);
 
     auto &func = GET(misc, FunctionInfo, tmp1);
-    func.signature(func.memory, func.misc, stack, tmp1, tmp2);
+    func.signature(&GET(func.misc, WasmMemory, 0), func.misc, stack, tmp1,
+                   tmp2);
 
     call_stack_depth++;
-    return call_dummy(memory, misc);
+    return call_dummy(&GET(misc, WasmMemory, 0), misc);
 }
 HANDLER(call_indirect) {
     PRELUDE;
@@ -194,10 +198,10 @@ HANDLER(call_indirect) {
         trap(TrapKind::call_stack_exhausted);
 
     auto func = funcref->signature;
-    func(funcref->memory, funcref->misc, stack, tmp1, tmp2);
+    func(&GET(funcref->misc, WasmMemory, 0), funcref->misc, stack, tmp1, tmp2);
 
     call_stack_depth++;
-    return call_dummy(memory, misc);
+    return call_dummy(&GET(misc, WasmMemory, 0), misc);
 }
 HANDLER(drop) {
     PRELUDE;
@@ -270,12 +274,12 @@ HANDLER(globalset) {
 }
 HANDLER(memorysize) {
     PRELUDE;
-    *stack++ = memory->size();
+    *stack++ = GET(misc, WasmMemory, 0).size();
     POSTLUDE;
 }
 HANDLER(memorygrow) {
     PRELUDE;
-    stack[-1].u32 = memory->grow(stack[-1].u32);
+    stack[-1].u32 = GET(misc, WasmMemory, 0).grow(stack[-1].u32);
     POSTLUDE;
 }
 HANDLER(ifXXconst) {
@@ -398,7 +402,8 @@ using f64 = double;
     {                                                                          \
         /* tmp1 = offset */                                                    \
         PRELUDE;                                                               \
-        stack[-1] = memory->load<stacktype, memtype>(stack[-1].u32 + tmp1);    \
+        stack[-1] = GET(misc, WasmMemory, 0)                                   \
+                        .load<stacktype, memtype>(stack[-1].u32 + tmp1);       \
         POSTLUDE;                                                              \
     }
 
@@ -407,7 +412,8 @@ using f64 = double;
         /* tmp1 = offset */                                                    \
         PRELUDE;                                                               \
         stack -= 2;                                                            \
-        memory->store<stacktype, memtype>(stack[0].u32 + tmp1, stack[1]);      \
+        GET(misc, WasmMemory, 0)                                               \
+            .store<stacktype, memtype>(stack[0].u32 + tmp1, stack[1]);         \
         POSTLUDE;                                                              \
     }
 
@@ -598,7 +604,7 @@ HANDLER(memory_init) {
     auto size = stack[2].u32;
     auto src = stack[1].u32;
     auto dest = stack[0].u32;
-    memory->copy_into(dest, src, segment, size);
+    GET(misc, WasmMemory, 0).copy_into(dest, src, segment, size);
     POSTLUDE;
 }
 HANDLER(data_drop) {
@@ -614,7 +620,7 @@ HANDLER(memory_copy) {
     auto size = stack[2].u32;
     auto src = stack[1].u32;
     auto dst = stack[0].u32;
-    memory->memcpy(dst, src, size);
+    GET(misc, WasmMemory, 0).memcpy(dst, src, size);
     POSTLUDE;
 }
 HANDLER(memory_fill) {
@@ -623,7 +629,7 @@ HANDLER(memory_fill) {
     auto size = stack[2].u32;
     auto value = stack[1].u32;
     auto ptr = stack[0].u32;
-    memory->memset(ptr, value, size);
+    GET(misc, WasmMemory, 0).memset(ptr, value, size);
     POSTLUDE;
 }
 HANDLER(table_init) {
@@ -714,16 +720,12 @@ uint32_t WasmMemory::grow(uint32_t delta) {
         return -1;
     }
 
-    auto new_current = current + delta;
-    auto new_memory =
-        static_cast<uint8_t *>(realloc(memory, new_current * PAGE_SIZE));
-    if (new_memory == NULL)
+    auto result = grow_memory(*this, delta);
+    if (result == -1)
         return -1;
-    memory = new_memory;
-    std::memset(memory + current * PAGE_SIZE, 0, delta * PAGE_SIZE);
 
     auto old_current = current;
-    current = new_current;
+    current += delta;
     return old_current;
 }
 
@@ -733,7 +735,7 @@ void WasmMemory::copy_into(uint32_t dest, uint32_t src, const Segment &segment,
         src + length > segment.size) {
         trap(TrapKind::out_of_bounds_memory_access);
     }
-    std::memcpy(memory + dest, segment.data.get() + src, length);
+    std::memcpy(memory.get() + dest, segment.data.get() + src, length);
 }
 
 void WasmMemory::memcpy(uint32_t dst, uint32_t src, uint32_t length) {
@@ -741,14 +743,14 @@ void WasmMemory::memcpy(uint32_t dst, uint32_t src, uint32_t length) {
         static_cast<uint64_t>(src) + length > current * PAGE_SIZE) {
         trap(TrapKind::out_of_bounds_memory_access);
     }
-    std::memmove(memory + dst, memory + src, length);
+    std::memmove(memory.get() + dst, memory.get() + src, length);
 }
 
 void WasmMemory::memset(uint32_t dst, uint8_t value, uint32_t length) {
     if (static_cast<uint64_t>(dst) + length > current * PAGE_SIZE) {
         trap(TrapKind::out_of_bounds_memory_access);
     }
-    std::memset(memory + dst, value, length);
+    std::memset(memory.get() + dst, value, length);
 }
 
 uint32_t WasmTable::grow(uint32_t delta, WasmValue value) {

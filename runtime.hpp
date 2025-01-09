@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pager/shared.hpp"
 #include "spec.hpp"
 #include <csetjmp>
 #include <cstdint>
@@ -245,19 +246,30 @@ struct WasmMemory {
     static constexpr uint32_t MAX_PAGES = 65536;
     static constexpr uint32_t PAGE_SIZE = 65536;
 
+    // :(
+    static Allocation (*default_make_memory)(size_t, AllocationKind);
+    static int (*default_grow_memory)(runtime::WasmMemory &, size_t);
+
     uint32_t current;
     uint32_t maximum;
     // todo: make this be passed around in calling convetion
     // can be updated after memory.grow or unknown calls
-    uint8_t *memory;
+    Allocation memory;
+    int (*grow_memory)(runtime::WasmMemory &, size_t);
 
-    WasmMemory(uint32_t initial, uint32_t maximum)
+    WasmMemory(uint32_t initial, uint32_t maximum,
+               decltype(default_make_memory) make_memory,
+               decltype(default_grow_memory) grow_memory)
         : current(initial), maximum(std::min(maximum, MAX_PAGES)),
-          memory(static_cast<uint8_t *>(calloc(initial, PAGE_SIZE))) {}
+          memory(make_memory(PAGE_SIZE * initial, AllocationKind::Heap)),
+          grow_memory(grow_memory) {}
+    WasmMemory(uint32_t initial, uint32_t maximum)
+        : WasmMemory(initial, maximum, default_make_memory,
+                     default_grow_memory) {}
 
-    ~WasmMemory() { free(memory); }
-
-    WasmMemory() = delete;
+    WasmMemory()
+        : current(0), maximum(0), memory(nullptr, [](auto *) {}),
+          grow_memory(nullptr) {}
     WasmMemory(const WasmMemory &) = delete;
     WasmMemory(WasmTable &&) = delete;
     WasmMemory &operator=(const WasmMemory &) = delete;
@@ -268,27 +280,23 @@ struct WasmMemory {
     uint32_t grow(uint32_t delta);
 
     template <typename StackT, typename MemT> WasmValue load(uint64_t addr) {
-        if (addr + sizeof(MemT) > current * PAGE_SIZE) {
-            trap(TrapKind::out_of_bounds_memory_access);
-        }
         MemT val;
-        std::memcpy(&val, memory + addr, sizeof(val));
+        std::memcpy(&val, memory.get() + addr, sizeof(val));
         return WasmValue(StackT(val));
     }
 
     template <typename StackT, typename MemT>
     void store(uint64_t addr, StackT value) {
-        if (addr + sizeof(MemT) > current * PAGE_SIZE) {
-            trap(TrapKind::out_of_bounds_memory_access);
-        }
         MemT val = value;
-        std::memcpy(memory + addr, &val, sizeof(val));
+        std::memcpy(memory.get() + addr, &val, sizeof(val));
     }
 
     void copy_into(uint32_t dest, uint32_t src, const Segment &segment,
                    uint32_t length);
     void memcpy(uint32_t dst, uint32_t src, uint32_t length);
     void memset(uint32_t dst, uint8_t value, uint32_t length);
+
+    static WasmMemory empty;
 };
 
 struct WasmGlobal {

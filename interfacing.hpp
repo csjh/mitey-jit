@@ -112,9 +112,10 @@ template <auto func> runtime::Signature *wasm_functionify() {
 }
 
 template <auto func> runtime::FunctionInfo internalize() {
+    static void *misc[] = {&runtime::WasmMemory::empty};
     return runtime::FunctionInfo(WasmSignature::from_type<decltype(func)>(),
-                                 nullptr, nullptr, wasm_functionify<func>(),
-                                 nullptr);
+                                 &runtime::WasmMemory::empty, misc,
+                                 wasm_functionify<func>(), nullptr);
 }
 
 } // namespace mitey
