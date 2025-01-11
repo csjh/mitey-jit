@@ -153,6 +153,7 @@ HANDLER(call) {
         trap(TrapKind::call_stack_exhausted);
 
     reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
+    call_stack_depth++;
     return dummy(TEMPLESS_PARAMS);
 }
 HANDLER(call_extern) {
