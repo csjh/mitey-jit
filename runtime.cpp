@@ -64,7 +64,7 @@ HANDLER(move_n_results) { base_move_results<>(PARAMS); }
 HANDLER(jump) {
     // tmp1 = target
     PRELUDE;
-    return reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
+    [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
 }
 
 HANDLER(unreachable) { trap(TrapKind::unreachable); }
@@ -73,7 +73,7 @@ HANDLER(if_) {
     PRELUDE;
     --stack;
     if (!stack->u32) {
-        return reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
+        [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
     }
     POSTLUDE;
 }
@@ -87,19 +87,19 @@ template <ssize_t Arity = -1, ssize_t StackOffset = -1> HANDLER(base_br) {
 
     std::memmove(byteadd(stack, stack_offset), byteadd(stack, -arity), arity);
     stack = byteadd(stack, stack_offset + arity);
-    return reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
+    [[clang::musttail]] return reinterpret_cast<Signature *>(tmp1)(PARAMS);
 }
 // generated based on the most common in figma/duckdb binaries
-HANDLER(br_0_0) { base_br<0, 0>(PARAMS); }
-HANDLER(br_0_8) { base_br<0, 8>(PARAMS); }
-HANDLER(br_0_16) { base_br<0, 16>(PARAMS); }
-HANDLER(br_0_24) { base_br<0, 24>(PARAMS); }
-HANDLER(br_0_32) { base_br<0, 32>(PARAMS); }
-HANDLER(br_0_40) { base_br<0, 40>(PARAMS); }
-HANDLER(br_8_8) { base_br<8, 8>(PARAMS); }
-HANDLER(br_8_16) { base_br<8, 16>(PARAMS); }
-HANDLER(br_8_24) { base_br<8, 24>(PARAMS); }
-HANDLER(br_n_n) { base_br<>(PARAMS); }
+HANDLER(br_0_0) { [[clang::musttail]] return base_br<0, 0>(PARAMS); }
+HANDLER(br_0_8) { [[clang::musttail]] return base_br<0, 8>(PARAMS); }
+HANDLER(br_0_16) { [[clang::musttail]] return base_br<0, 16>(PARAMS); }
+HANDLER(br_0_24) { [[clang::musttail]] return base_br<0, 24>(PARAMS); }
+HANDLER(br_0_32) { [[clang::musttail]] return base_br<0, 32>(PARAMS); }
+HANDLER(br_0_40) { [[clang::musttail]] return base_br<0, 40>(PARAMS); }
+HANDLER(br_8_8) { [[clang::musttail]] return base_br<8, 8>(PARAMS); }
+HANDLER(br_8_16) { [[clang::musttail]] return base_br<8, 16>(PARAMS); }
+HANDLER(br_8_24) { [[clang::musttail]] return base_br<8, 24>(PARAMS); }
+HANDLER(br_n_n) { [[clang::musttail]] return base_br<>(PARAMS); }
 
 template <ssize_t Arity = -1, ssize_t StackOffset = -1> HANDLER(base_br_if) {
     // tmp1 = target
@@ -111,16 +111,16 @@ template <ssize_t Arity = -1, ssize_t StackOffset = -1> HANDLER(base_br_if) {
     }
     POSTLUDE;
 }
-HANDLER(br_if_0_0) { base_br_if<0, 0>(PARAMS); }
-HANDLER(br_if_0_8) { base_br_if<0, 8>(PARAMS); }
-HANDLER(br_if_0_16) { base_br_if<0, 16>(PARAMS); }
-HANDLER(br_if_0_24) { base_br_if<0, 24>(PARAMS); }
-HANDLER(br_if_0_32) { base_br_if<0, 32>(PARAMS); }
-HANDLER(br_if_0_40) { base_br_if<0, 40>(PARAMS); }
-HANDLER(br_if_8_8) { base_br_if<8, 8>(PARAMS); }
-HANDLER(br_if_8_16) { base_br_if<8, 16>(PARAMS); }
-HANDLER(br_if_8_24) { base_br_if<8, 24>(PARAMS); }
-HANDLER(br_if_n_n) { base_br_if<>(PARAMS); }
+HANDLER(br_if_0_0) { [[clang::musttail]] return base_br_if<0, 0>(PARAMS); }
+HANDLER(br_if_0_8) { [[clang::musttail]] return base_br_if<0, 8>(PARAMS); }
+HANDLER(br_if_0_16) { [[clang::musttail]] return base_br_if<0, 16>(PARAMS); }
+HANDLER(br_if_0_24) { [[clang::musttail]] return base_br_if<0, 24>(PARAMS); }
+HANDLER(br_if_0_32) { [[clang::musttail]] return base_br_if<0, 32>(PARAMS); }
+HANDLER(br_if_0_40) { [[clang::musttail]] return base_br_if<0, 40>(PARAMS); }
+HANDLER(br_if_8_8) { [[clang::musttail]] return base_br_if<8, 8>(PARAMS); }
+HANDLER(br_if_8_16) { [[clang::musttail]] return base_br_if<8, 16>(PARAMS); }
+HANDLER(br_if_8_24) { [[clang::musttail]] return base_br_if<8, 24>(PARAMS); }
+HANDLER(br_if_n_n) { [[clang::musttail]] return base_br_if<>(PARAMS); }
 
 template <ssize_t Arity = -1> HANDLER(br_table) {
     // tmp1 = lookup table addr
@@ -136,9 +136,9 @@ template <ssize_t Arity = -1> HANDLER(br_table) {
     tmp2 = std::bit_cast<uint64_t>(info);
     [[clang::musttail]] return base_br<Arity>(PARAMS);
 }
-HANDLER(br_table_0) { br_table<0>(PARAMS); }
-HANDLER(br_table_8) { br_table<8>(PARAMS); }
-HANDLER(br_table_n) { br_table<>(PARAMS); }
+HANDLER(br_table_0) { [[clang::musttail]] return br_table<0>(PARAMS); }
+HANDLER(br_table_8) { [[clang::musttail]] return br_table<8>(PARAMS); }
+HANDLER(br_table_n) { [[clang::musttail]] return br_table<>(PARAMS); }
 
 HANDLER(call) {
     // tmp1 = function start
@@ -148,7 +148,7 @@ HANDLER(call) {
         trap(TrapKind::call_stack_exhausted);
 
     reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
-    asm volatile("" : "=r"(stack)); // indicate stack is clobbered
+    stack = byteadd(stack, tmp2);
 
     call_stack_depth++;
     POSTLUDE;
@@ -162,7 +162,7 @@ HANDLER(call_extern) {
 
     auto &func = MISC_GET(FunctionInfo, tmp1);
     func.signature(func.memory, func.misc, stack);
-    asm volatile("" : "=r"(stack)); // indicate stack is clobbered
+    stack = byteadd(stack, tmp2);
 
     call_stack_depth++;
     POSTLUDE;
@@ -193,7 +193,8 @@ HANDLER(call_indirect) {
         trap(TrapKind::call_stack_exhausted);
 
     funcref->signature(funcref->memory, funcref->misc, stack);
-    asm volatile("" : "=r"(stack)); // indicate stack is clobbered
+    stack = byteadd(stack, sizeof(runtime::WasmValue) *
+                               (funcref->type.results - funcref->type.params));
 
     call_stack_depth++;
     POSTLUDE;

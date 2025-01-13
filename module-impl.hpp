@@ -1206,10 +1206,12 @@ HANDLER(call) {
 
     if (func.import) {
         put(code, Target::set_temp1(1 + fn_idx));
+        put(code, Target::set_temp2(func.type.results.bytesize() - func.type.params.bytesize()));
         put(code, Target::call(runtime::call_extern));
     } else {
         mod.pending_calls.push_back({code, fn_idx});
         code += Target::temp1_size;
+        put(code, Target::set_temp2(func.type.results.bytesize() - func.type.params.bytesize()));
         put(code, Target::call(runtime::call));
     }
     nextop();
