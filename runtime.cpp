@@ -34,11 +34,6 @@ __attribute__((noinline)) void dummy(uint8_t *memory, void **misc,
     return;
 }
 
-__attribute__((noinline)) void call_dummy(uint8_t *memory, void **misc) {
-    asm volatile("" ::"r"(memory), "r"(misc));
-    return;
-}
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
@@ -153,6 +148,8 @@ HANDLER(call) {
         trap(TrapKind::call_stack_exhausted);
 
     reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
+    asm volatile("" : "=r"(stack)); // indicate stack is clobbered
+
     call_stack_depth++;
     return dummy(TEMPLESS_PARAMS);
 }
@@ -165,6 +162,7 @@ HANDLER(call_extern) {
 
     auto &func = MISC_GET(FunctionInfo, tmp1);
     func.signature(func.memory, func.misc, stack);
+    asm volatile("" : "=r"(stack)); // indicate stack is clobbered
 
     call_stack_depth++;
     return dummy(TEMPLESS_PARAMS);
@@ -195,6 +193,7 @@ HANDLER(call_indirect) {
         trap(TrapKind::call_stack_exhausted);
 
     funcref->signature(funcref->memory, funcref->misc, stack);
+    asm volatile("" : "=r"(stack)); // indicate stack is clobbered
 
     call_stack_depth++;
     return dummy(TEMPLESS_PARAMS);
