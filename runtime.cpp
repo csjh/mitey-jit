@@ -21,14 +21,14 @@ uint32_t call_stack_depth = 10000;
 #define TEMPLESS_PARAMS memory, misc, stack
 #define PARAMS TEMPLESS_PARAMS, tmp1, tmp2
 #define PRELUDE auto &memheader = MISC_GET(WasmMemory, 0)
-#define POSTLUDE return dummy(TEMPLESS_PARAMS)
+#define POSTLUDE [[clang::musttail]] return dummy(PARAMS)
 #define MISC_GET(type, idx) (*reinterpret_cast<type *>(misc[idx]))
 #define byteadd(ptr, n)                                                        \
     reinterpret_cast<decltype(ptr)>(reinterpret_cast<uint64_t>(ptr) +          \
                                     static_cast<uint64_t>(n))
 
 __attribute__((noinline)) void dummy(uint8_t *memory, void **misc,
-                                     WasmValue *stack) {
+                                     WasmValue *stack, uint64_t, uint64_t) {
     // assumption: compiler doesn't move memory/stack/misc from arg registers
     asm volatile("" ::"r"(memory), "r"(misc), "r"(stack));
     return;
@@ -151,7 +151,7 @@ HANDLER(call) {
     asm volatile("" : "=r"(stack)); // indicate stack is clobbered
 
     call_stack_depth++;
-    return dummy(TEMPLESS_PARAMS);
+    POSTLUDE;
 }
 HANDLER(call_extern) {
     // tmp1 = function offset in misc
@@ -165,7 +165,7 @@ HANDLER(call_extern) {
     asm volatile("" : "=r"(stack)); // indicate stack is clobbered
 
     call_stack_depth++;
-    return dummy(TEMPLESS_PARAMS);
+    POSTLUDE;
 }
 HANDLER(call_indirect) {
     PRELUDE;
@@ -196,7 +196,7 @@ HANDLER(call_indirect) {
     asm volatile("" : "=r"(stack)); // indicate stack is clobbered
 
     call_stack_depth++;
-    return dummy(TEMPLESS_PARAMS);
+    POSTLUDE;
 }
 HANDLER(drop) {
     PRELUDE;

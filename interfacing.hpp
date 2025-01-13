@@ -106,7 +106,7 @@ template <auto func> runtime::TemplessSignature *wasm_functionify() {
         }
         stack += arity;
 
-        return runtime::dummy(memory, misc, stack);
+        return runtime::dummy(memory, misc, stack, 0, 0);
     };
 }
 

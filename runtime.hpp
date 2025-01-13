@@ -351,7 +351,7 @@ Signature br_if_n_n;
 Signature br_table_0;
 Signature br_table_8;
 Signature br_table_n;
-TemplessSignature dummy;
+Signature dummy;
 #define HANDLER(name, str, byte) Signature name;
 FOREACH_INSTRUCTION(HANDLER)
 FOREACH_MULTIBYTE_INSTRUCTION(HANDLER)
