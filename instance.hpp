@@ -12,7 +12,6 @@ class Module;
 
 class Instance {
     friend class Module;
-    friend runtime::Signature runtime::call_indirect;
 
     template <typename FunctionType>
     friend std::function<FunctionType>
