@@ -79,16 +79,58 @@ class Arm64 {
             value >>= 16;
             if (literal == 0)
                 continue;
-            instructions[j++] = mov16(keep, literal, i, reg);
+            instructions[j++] = mov16(true, keep, literal, i, reg);
             keep = true;
         }
         return instructions;
+
+        /* these additions save ~3-4% in the executable, but
+         * slow down compilation by 40-60ms
+
+        uint64_t v = value;
+
+        // decide to use movn or movz
+        int8_t zeros = 0;
+        for (size_t i = 0; i < 4; i++) {
+            uint16_t literal = v & 0xffff;
+            v >>= 16;
+            if (literal == 0)
+                zeros++;
+            if (literal == static_cast<uint16_t>(-1))
+                zeros--;
+        }
+
+        size_t i, j;
+        if (zeros >= 0) {
+            auto keep = false;
+            for (i = 0, j = 0; i < 4; i++) {
+                auto literal = value & 0xffff;
+                value >>= 16;
+                if (literal == 0)
+                    continue;
+                instructions[j++] = mov16(true, keep, literal, i, reg);
+                keep = true;
+            }
+        } else {
+            auto notneg = false;
+            for (i = 0, j = 0; i < 4; i++) {
+                auto literal = value & 0xffff;
+                value >>= 16;
+                if (literal == static_cast<uint16_t>(-1))
+                    continue;
+                instructions[j++] =
+                    mov16(notneg, notneg, notneg ? literal : ~literal, i,
+                    reg);
+                notneg = true;
+            }
+        }
+        */
     }
 
-    static constexpr uint32_t mov16(bool keep, uint16_t imm, uint8_t shift,
-                                    uint8_t reg) {
-        return (keep << 29) | (0b110100101 << 23) | (shift << 21) | (imm << 5) |
-               reg;
+    static constexpr uint32_t mov16(bool notneg, bool keep, uint16_t imm,
+                                    uint8_t shift, uint8_t reg) {
+        return (notneg << 30) | (keep << 29) | (0b100100101 << 23) |
+               (shift << 21) | (imm << 5) | reg;
     }
 };
 } // namespace mitey
