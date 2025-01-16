@@ -19,10 +19,11 @@ template <typename T> struct function_traits;
 
 template <typename R, typename... Args> struct function_traits<R (*)(Args...)> {
     using args = std::tuple<Args...>;
-    using return_type = TupleIfNotTuple<R>;
+    using return_type = R;
+    using return_type_tuple = TupleIfNotTuple<R>;
 
     static constexpr size_t parameter_arity = std::tuple_size_v<args>;
-    static constexpr size_t result_arity = std::tuple_size_v<return_type>;
+    static constexpr size_t result_arity = std::tuple_size_v<return_type_tuple>;
 };
 
 template <typename R, typename... Args>

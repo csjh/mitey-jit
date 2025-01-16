@@ -63,7 +63,10 @@ template <> static constexpr auto Valtype<int64_t> = valtype::i64;
 template <> static constexpr auto Valtype<uint64_t> = valtype::i64;
 template <> static constexpr auto Valtype<float> = valtype::f32;
 template <> static constexpr auto Valtype<double> = valtype::f64;
-template <typename T> static constexpr auto Valtype<T *> = valtype::externref;
+struct FunctionInfo;
+template <> static constexpr auto Valtype<FunctionInfo *> = valtype::funcref;
+template <> static constexpr auto Valtype<void *> = valtype::externref;
+template <typename T> static constexpr auto Valtype<T *> = valtype::i32;
 
 #ifdef WASM_DEBUG
 static std::string valtype_names[] = {
@@ -160,7 +163,7 @@ struct WasmSignature {
     template <typename Func> static WasmSignature from_type() {
         using Traits = function_traits<Func>;
         using Args = typename Traits::args;
-        using ReturnType = typename Traits::return_type;
+        using ReturnType = typename Traits::return_type_tuple;
 
         WasmSignature sig;
 

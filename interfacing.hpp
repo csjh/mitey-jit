@@ -1,6 +1,7 @@
 #include "instance.hpp"
 #include "runtime.hpp"
 #include "type-templates.hpp"
+#include <tuple>
 
 namespace mitey {
 
@@ -8,6 +9,14 @@ template <typename Tuple, size_t... I>
 void push_tuple_to_wasm(const Tuple &t, runtime::WasmValue *out,
                         std::index_sequence<I...>) {
     ((out[I] = std::get<I>(t)), ...);
+}
+
+template <typename T> T normalize(uint8_t *memory, runtime::WasmValue value) {
+    if constexpr (std::is_pointer_v<T>) {
+        return memory + value.u32;
+    } else {
+        return T(value);
+    }
 }
 
 template <typename FunctionType>
@@ -43,10 +52,12 @@ std::function<FunctionType> externalize(const runtime::FunctionInfo &fn) {
         if constexpr (arity == 0) {
             return;
         } else if constexpr (arity == 1) {
-            return stack[0];
+            return normalize<ReturnType>(fn.memory, stack[0]);
         } else {
             return [&]<size_t... I>(std::index_sequence<I...>) {
-                return ReturnType{(stack[I])...};
+                return ReturnType{
+                    normalize<std::tuple_element_t<I, ReturnType>>(
+                        fn.memory, stack[I])...};
             }(std::make_index_sequence<arity>{});
         }
     };
@@ -92,7 +103,8 @@ template <auto func> runtime::TemplessSignature *wasm_functionify() {
 
         // Convert input arguments to tuple
         auto args = [&]<size_t... I>(std::index_sequence<I...>) {
-            return Args{(stack[I])...};
+            return Args{
+                normalize<std::tuple_element_t<I, Args>>(memory, stack[I])...};
         }(std::make_index_sequence<Fn::parameter_arity>{});
 
         constexpr auto arity = Fn::result_arity;
