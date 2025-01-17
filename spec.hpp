@@ -7,6 +7,15 @@
 #include <vector>
 
 namespace mitey {
+
+class Externref {
+    void *data;
+
+  public:
+    template <typename T> Externref(T data) : data(data) {}
+    operator void *() { return data; }
+};
+
 template <typename Err>
 [[noreturn]] static void __attribute__((preserve_most)) error(const char *msg) {
     throw Err(msg);
@@ -57,18 +66,22 @@ enum class valtype : uint8_t {
 };
 
 template <typename T> static constexpr auto Valtype = valtype::null;
-template <> static constexpr auto Valtype<int32_t> = valtype::i32;
-template <> static constexpr auto Valtype<uint32_t> = valtype::i32;
-template <> static constexpr auto Valtype<int64_t> = valtype::i64;
-template <> static constexpr auto Valtype<uint64_t> = valtype::i64;
+template <> static constexpr auto Valtype<int> = valtype::i32;
+template <> static constexpr auto Valtype<unsigned> = valtype::i32;
+template <> static constexpr auto Valtype<long> = valtype::i64;
+template <> static constexpr auto Valtype<unsigned long> = valtype::i64;
+template <> static constexpr auto Valtype<long long> = valtype::i64;
+template <> static constexpr auto Valtype<unsigned long long> = valtype::i64;
 template <> static constexpr auto Valtype<float> = valtype::f32;
 template <> static constexpr auto Valtype<double> = valtype::f64;
+namespace runtime {
 struct FunctionInfo;
-template <> static constexpr auto Valtype<FunctionInfo *> = valtype::funcref;
-template <> static constexpr auto Valtype<void *> = valtype::externref;
+}
+template <>
+static constexpr auto Valtype<runtime::FunctionInfo *> = valtype::funcref;
+template <> static constexpr auto Valtype<Externref> = valtype::externref;
 template <typename T> static constexpr auto Valtype<T *> = valtype::i32;
 
-#ifdef WASM_DEBUG
 static std::string valtype_names[] = {
     [static_cast<uint8_t>(valtype::null)] = "null",
     [static_cast<uint8_t>(valtype::any)] = "any",
@@ -78,7 +91,6 @@ static std::string valtype_names[] = {
     [static_cast<uint8_t>(valtype::f64)] = "f64",
     [static_cast<uint8_t>(valtype::funcref)] = "funcref",
     [static_cast<uint8_t>(valtype::externref)] = "externref"};
-#endif
 
 static inline uint32_t valtype_size(valtype type) {
     switch (type) {

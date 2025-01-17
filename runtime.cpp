@@ -568,7 +568,7 @@ HANDLER(i64extend16_s) { UNARY_OP(i64, (int64_t)(int16_t)); }
 HANDLER(i64extend32_s) { UNARY_OP(i64, (int64_t)(int32_t)); }
 HANDLER(ref_null) {
     PRELUDE;
-    *stack++ = (void*)nullptr;
+    *stack++ = (Funcref)nullptr;
     POSTLUDE;
 }
 HANDLER(ref_is_null) {
@@ -581,7 +581,7 @@ HANDLER(ref_func) {
     // tmp1 = funcref index in misc table
     PRELUDE;
     // & because we want the address of the funcref
-    auto funcref = &MISC_GET(Funcref, tmp1);
+    auto funcref = &MISC_GET(FunctionInfo, tmp1);
     *stack++ = funcref;
     POSTLUDE;
 }

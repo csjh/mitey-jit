@@ -88,6 +88,11 @@ void Instance::initialize(const runtime::Imports &imports) {
             }
 
             functions[i] = imported_function;
+            if (!functions[i].instance) {
+                functions[i].memory = memory.get()->memory.get();
+                functions[i].misc = misc.get();
+                functions[i].instance = self.lock();
+            }
         } else {
             auto memory = this->memory.get()->memory.get();
             auto misc = this->misc.get();
@@ -341,7 +346,7 @@ runtime::WasmValue Instance::interpret_const(uint8_t *&iter) {
             I64_OP(*);
         case ref_null: {
             safe_read_leb128<uint32_t>(iter);
-            stack.push_back((void *)nullptr);
+            stack.push_back(Externref(nullptr));
             break;
         }
         case ref_func: {

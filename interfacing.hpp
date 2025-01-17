@@ -13,7 +13,7 @@ void push_tuple_to_wasm(const Tuple &t, runtime::WasmValue *out,
 
 template <typename T> T normalize(uint8_t *memory, runtime::WasmValue value) {
     if constexpr (std::is_pointer_v<T>) {
-        return memory + value.u32;
+        return T(memory + value.u32);
     } else {
         return T(value);
     }
@@ -101,6 +101,8 @@ template <auto func> runtime::TemplessSignature *wasm_functionify() {
         using Fn = function_traits<decltype(func)>;
         using Args = typename Fn::args;
 
+        stack -= Fn::parameter_arity;
+
         // Convert input arguments to tuple
         auto args = [&]<size_t... I>(std::index_sequence<I...>) {
             return Args{
@@ -126,7 +128,7 @@ template <auto func> runtime::FunctionInfo internalize() {
     static void *misc[] = {&runtime::WasmMemory::empty};
     auto memory = runtime::WasmMemory::empty.memory.get();
     return runtime::FunctionInfo(WasmSignature::from_type<decltype(func)>(),
-                                 memory, misc, wasm_functionify<func>(),
+                                 nullptr, nullptr, wasm_functionify<func>(),
                                  nullptr);
 }
 

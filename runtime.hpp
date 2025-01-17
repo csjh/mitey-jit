@@ -163,7 +163,6 @@ struct FunctionInfo {
 };
 
 using Funcref = FunctionInfo *;
-using Externref = void *;
 
 union WasmValue {
     int32_t i32;
@@ -186,10 +185,12 @@ union WasmValue {
     WasmValue(Funcref funcref) : funcref(funcref) {}
     WasmValue(Externref externref) : externref(externref) {}
 
-    operator int32_t() { return i32; }
-    operator uint32_t() { return u32; }
-    operator int64_t() { return i64; }
-    operator uint64_t() { return u64; }
+    operator int() { return i32; }
+    operator unsigned() { return u32; }
+    operator long() { return i64; }
+    operator unsigned long() { return u64; }
+    operator long long() { return i64; }
+    operator unsigned long long() { return u64; }
     operator float() { return f32; }
     operator double() { return f64; }
     operator Funcref() { return funcref; }
