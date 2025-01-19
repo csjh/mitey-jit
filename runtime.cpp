@@ -3,6 +3,10 @@
 #include <bit>
 #include <cmath>
 
+#ifdef WASM_DEBUG
+extern std::vector<std::string> names;
+#endif
+
 namespace mitey {
 namespace runtime {
 

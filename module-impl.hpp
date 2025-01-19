@@ -7,6 +7,8 @@
 
 #ifdef WASM_DEBUG
 #include <iostream>
+
+extern std::vector<std::string> names;
 #endif
 
 namespace mitey {
@@ -80,6 +82,44 @@ void Module::initialize(std::span<uint8_t> bytes) {
             if (start + section_length < iter) {
                 error<malformed_error>("unexpected end");
             }
+
+#ifdef WASM_DEBUG
+            // technically this should strictly be after the data section
+            // but idc
+            if (name_length == 4 &&
+                std::memcmp(iter.get_with_at_least(4), "name", 4) == 0) {
+
+                iter += 4;
+                // module name subsection
+                if (*iter == 0) {
+                    iter++;
+                    // skip
+                    iter += safe_read_leb128<uint32_t>(iter);
+                }
+                // function name subsection
+                if (*iter == 1) {
+                    iter++;
+                    auto subsection_size = safe_read_leb128<uint32_t>(iter);
+                    auto n_names = safe_read_leb128<uint32_t>(iter);
+
+                    names.reserve(n_names);
+                    for (uint32_t i = 0; i < n_names; ++i) {
+                        auto fn_idx = safe_read_leb128<uint32_t>(iter);
+                        auto name_len = safe_read_leb128<uint32_t>(iter);
+                        names.push_back(
+                            std::string(reinterpret_cast<char *>(
+                                            iter.get_with_at_least(name_len)),
+                                        name_len));
+                        iter += name_len;
+                    }
+                }
+                // local name subsection
+                if (*iter == 2) {
+                    iter++;
+                    // ignore
+                }
+            }
+#endif
 
             iter = start + section_length;
         }
@@ -1206,12 +1246,14 @@ HANDLER(call) {
 
     if (func.import) {
         put(code, Target::set_temp1(1 + fn_idx));
-        put(code, Target::set_temp2(func.type.results.bytesize() - func.type.params.bytesize()));
+        put(code, Target::set_temp2(func.type.results.bytesize() -
+                                    func.type.params.bytesize()));
         put(code, Target::call(runtime::call_extern));
     } else {
         mod.pending_calls.push_back({code, fn_idx});
         code += Target::temp1_size;
-        put(code, Target::set_temp2(func.type.results.bytesize() - func.type.params.bytesize()));
+        put(code, Target::set_temp2(func.type.results.bytesize() -
+                                    func.type.params.bytesize()));
         put(code, Target::call(runtime::call));
     }
     nextop();

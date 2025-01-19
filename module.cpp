@@ -5,6 +5,8 @@
 
 #ifdef WASM_DEBUG
 #include <iostream>
+
+std::vector<std::string> names;
 #endif
 
 namespace mitey {
