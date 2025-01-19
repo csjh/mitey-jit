@@ -1,23 +1,56 @@
 #include <stdint.h>
 
+#define __WASM_MEMORY uint8_t *memory
+
 typedef uint32_t wasm_size_t;
+typedef uint32_t wasm_ptr_t;
+
+typedef struct {
+    wasm_ptr_t buf;
+    wasm_size_t buf_len;
+} iovec;
+
+typedef struct {
+    uint8_t fs_filetype;
+    uint32_t fs_flags;
+    uint64_t fs_rights_base;
+    uint64_t fs_rights_inheriting;
+} fd_fdstat_t;
+
+typedef struct {
+    uint64_t dev;
+    uint64_t ino;
+    uint8_t filetype;
+    uint64_t nlink;
+    uint64_t size;
+    uint64_t atim;
+    uint64_t mtim;
+    uint64_t ctim;
+} filestat_t;
+
+typedef struct {
+    uint32_t v;
+} ptr_32bit_t;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+int32_t register_preopen(int32_t fd, const char *path);
+
 void set_args(int argc, const char **argv);
 
 // File descriptor write
-int32_t fd_write(int32_t fd,
-                 const void *iovs, // Array of iovec structs
+int32_t fd_write(__WASM_MEMORY, // non-standard: wasm memory passed in
+                 int32_t fd,
+                 const iovec *iovs, // Array of iovec structs
                  wasm_size_t iovs_len,
                  wasm_size_t *nwritten // Bytes written
 );
 
 // Command line arguments
-int32_t args_get(char **argv,   // Buffer to store args
-                 char *argv_buf // Buffer for arg string data
+int32_t args_get(__WASM_MEMORY, ptr_32bit_t *argv, // Buffer to store args
+                 char *argv_buf                    // Buffer for arg string data
 );
 
 int32_t args_sizes_get(
@@ -26,7 +59,8 @@ int32_t args_sizes_get(
 );
 
 // Environment variables
-int32_t environ_get(char **environ,   // Buffer to store environment vars
+int32_t environ_get(__WASM_MEMORY,
+                    char **environ,   // Buffer to store environment vars
                     char *environ_buf // Buffer for environment string data
 );
 
@@ -73,8 +107,9 @@ int32_t fd_prestat_dir_name(int32_t fd,          // File descriptor
 );
 
 // File reading
-int32_t fd_read(int32_t fd,           // File descriptor
-                const void *iovs,     // Array of iovec structs
+int32_t fd_read(__WASM_MEMORY,        // non-standard: wasm memory passed in
+                int32_t fd,           // File descriptor
+                const iovec *iovs,    // Array of iovec structs
                 wasm_size_t iovs_len, // Number of iovecs
                 wasm_size_t *nread    // Bytes read
 );
