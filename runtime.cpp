@@ -10,6 +10,17 @@ extern std::vector<std::string> names;
 namespace mitey {
 namespace runtime {
 
+// manual implementation because std::rotl/rotr had weird codegen
+template <typename T> T rotl(T x, T n) {
+    n &= sizeof(T) * 8 - 1;
+    return (x << n) | (x >> (sizeof(T) * 8 - n));
+}
+
+template <typename T> T rotr(T x, T n) {
+    n &= sizeof(T) * 8 - 1;
+    return (x >> n) | (x << (sizeof(T) * 8 - n));
+}
+
 Segment Segment::empty(0, 0, nullptr, nullptr);
 WasmMemory WasmMemory::empty = WasmMemory();
 Allocation (*WasmMemory::default_make_memory)(size_t, AllocationKind) = nullptr;
@@ -512,10 +523,10 @@ HANDLER(i32shr_s)     { SHIFT    (i32, >>); }
 HANDLER(i64shr_s)     { SHIFT    (i64, >>); }
 HANDLER(i32shr_u)     { SHIFT    (u32, >>); }
 HANDLER(i64shr_u)     { SHIFT    (u64, >>); }
-HANDLER(i32rotl)      { BINARY_FN(u32, std::rotl); }
-HANDLER(i64rotl)      { BINARY_FN(u64, std::rotl); }
-HANDLER(i32rotr)      { BINARY_FN(u32, std::rotr); }
-HANDLER(i64rotr)      { BINARY_FN(u64, std::rotr); }
+HANDLER(i32rotl)      { BINARY_FN(u32, rotl); }
+HANDLER(i64rotl)      { BINARY_FN(u64, rotl); }
+HANDLER(i32rotr)      { BINARY_FN(u32, rotr); }
+HANDLER(i64rotr)      { BINARY_FN(u64, rotr); }
 HANDLER(f32abs)       { UNARY_FN (f32, std::abs); }
 HANDLER(f64abs)       { UNARY_FN (f64, std::abs); }
 HANDLER(f32neg)       { UNARY_OP (f32, -); }
