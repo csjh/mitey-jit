@@ -29,6 +29,14 @@ int (*WasmMemory::default_grow_memory)(WasmMemory &, size_t) = nullptr;
 std::jmp_buf *trap_buf;
 uint32_t call_stack_depth = 10000;
 
+static inline void gas(auto call) {
+    if (call_stack_depth == 0)
+        trap(TrapKind::call_stack_exhausted);
+    call_stack_depth--;
+    call();
+    call_stack_depth++;
+}
+
 #define HANDLER(name)                                                          \
     void name(uint8_t *memory, void **misc, WasmValue *stack, uint64_t tmp1,   \
               uint64_t tmp2)
@@ -157,28 +165,20 @@ HANDLER(br_table_n) { [[clang::musttail]] return br_table<>(PARAMS); }
 HANDLER(call) {
     // tmp1 = function start
     PRELUDE;
-    call_stack_depth--;
-    if (call_stack_depth == 0)
-        trap(TrapKind::call_stack_exhausted);
-
-    reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
-    stack = byteadd(stack, tmp2);
-
-    call_stack_depth++;
+    gas([&] {
+        reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
+        stack = byteadd(stack, tmp2);
+    });
     POSTLUDE;
 }
 HANDLER(call_extern) {
     // tmp1 = function offset in misc
     PRELUDE;
-    call_stack_depth--;
-    if (call_stack_depth == 0)
-        trap(TrapKind::call_stack_exhausted);
-
-    auto &func = MISC_GET(FunctionInfo, tmp1);
-    func.signature(func.memory, func.misc, stack);
-    stack = byteadd(stack, tmp2);
-
-    call_stack_depth++;
+    gas([&] {
+        auto &func = MISC_GET(FunctionInfo, tmp1);
+        func.signature(func.memory, func.misc, stack);
+        stack = byteadd(stack, tmp2);
+    });
     POSTLUDE;
 }
 HANDLER(call_indirect) {
@@ -202,15 +202,13 @@ HANDLER(call_indirect) {
         trap(TrapKind::indirect_call_type_mismatch);
     }
 
-    call_stack_depth--;
-    if (call_stack_depth == 0)
-        trap(TrapKind::call_stack_exhausted);
-
-    funcref->signature(funcref->memory, funcref->misc, stack);
-    stack = byteadd(stack, sizeof(runtime::WasmValue) *
+    gas([&] {
+        funcref->signature(funcref->memory, funcref->misc, stack);
+        stack =
+            byteadd(stack, sizeof(runtime::WasmValue) *
                                (funcref->type.results - funcref->type.params));
+    });
 
-    call_stack_depth++;
     POSTLUDE;
 }
 HANDLER(drop) {
