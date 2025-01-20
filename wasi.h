@@ -3,7 +3,10 @@
 #define __WASM_MEMORY uint8_t *memory
 
 typedef uint32_t wasm_size_t;
-typedef uint32_t wasm_ptr_t;
+
+typedef struct {
+    uint32_t v;
+} wasm_ptr_t;
 
 typedef struct {
     wasm_ptr_t buf;
@@ -28,10 +31,6 @@ typedef struct {
     uint64_t ctim;
 } filestat_t;
 
-typedef struct {
-    uint32_t v;
-} ptr_32bit_t;
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -49,8 +48,8 @@ int32_t fd_write(__WASM_MEMORY, // non-standard: wasm memory passed in
 );
 
 // Command line arguments
-int32_t args_get(__WASM_MEMORY, ptr_32bit_t *argv, // Buffer to store args
-                 char *argv_buf                    // Buffer for arg string data
+int32_t args_get(__WASM_MEMORY, wasm_ptr_t *argv, // Buffer to store args
+                 char *argv_buf                   // Buffer for arg string data
 );
 
 int32_t args_sizes_get(

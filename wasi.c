@@ -65,7 +65,7 @@ int32_t fd_write(__WASM_MEMORY, int32_t fd, const iovec *iovs,
     wasm_size_t total_written = 0;
 
     for (wasm_size_t i = 0; i < iovs_len; i++) {
-        ssize_t written = write(fd, memory + iovs[i].buf, iovs[i].buf_len);
+        ssize_t written = write(fd, memory + iovs[i].buf.v, iovs[i].buf_len);
         if (written < 0) {
             return 28;
         }
@@ -76,7 +76,7 @@ int32_t fd_write(__WASM_MEMORY, int32_t fd, const iovec *iovs,
     return 0;
 }
 
-int32_t args_get(__WASM_MEMORY, ptr_32bit_t *argv, char *argv_buf) {
+int32_t args_get(__WASM_MEMORY, wasm_ptr_t *argv, char *argv_buf) {
     if (!g_argv || !g_argc) {
         return 28;
     }
@@ -249,7 +249,7 @@ int32_t fd_read(__WASM_MEMORY, int32_t fd, const iovec *iovs,
     wasm_size_t total_read = 0;
 
     for (wasm_size_t i = 0; i < iovs_len; i++) {
-        ssize_t bytes_read = read(fd, memory + iovs[i].buf, iovs[i].buf_len);
+        ssize_t bytes_read = read(fd, memory + iovs[i].buf.v, iovs[i].buf_len);
         if (bytes_read < 0) {
             return 28;
         }
