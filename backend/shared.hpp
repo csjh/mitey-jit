@@ -11,7 +11,11 @@ template <size_t Bits, size_t Offset> class Immediate {
 
     constexpr Immediate(uint32_t *base) : base(base) {}
 
-    constexpr void operator=(uint32_t value) {
+    constexpr void operator=(int32_t value) {
+        // sign lower int32_t to intBits_t
+        uint32_t imm = value;
+        imm = imm << (32 - Bits) >> (32 - Bits);
+
         auto v = *base;
         auto high_len = Offset;
         auto low_len = 32 - high_len - Bits;
@@ -19,7 +23,7 @@ template <size_t Bits, size_t Offset> class Immediate {
         auto low = (v << (high_len + Bits)) >> (high_len + Bits);
         auto high = (v >> (low_len + Bits)) << (low_len + Bits);
 
-        *base = high | (value << low_len) | low;
+        *base = high | (imm << low_len) | low;
     }
 };
 
