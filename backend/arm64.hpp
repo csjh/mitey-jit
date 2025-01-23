@@ -11,71 +11,75 @@
 namespace mitey {
 class Arm64 {
   public:
-    static constexpr std::array<uint8_t, sizeof(uint32_t) * 2> get_prelude() {
-        auto arm = std::array<uint32_t, 2>{
-            0xa9bf7bfd, // stp     x29, x30, [sp, #-0x10]!
-            0x910003fd  // mov     x29, sp
-        };
+    template <typename F> static void placehold(uint8_t *&code, F func) {
+        size_t size = 0;
+        if ((void *)func == (void *)put_prelude) {
+            size = max_prelude_size;
+        } else if ((void *)func == (void *)put_postlude) {
+            size = max_postlude_size;
+        } else if ((void *)func == (void *)put_call) {
+            size = max_call_size;
+        } else if ((void *)func == (void *)put_temp1) {
+            size = max_temp1_size;
+        } else if ((void *)func == (void *)put_temp2) {
+            size = max_temp2_size;
+        } else {
+            __builtin_unreachable();
+        }
 
-        return u32_to_u8(arm);
+        uint32_t *nooped = reinterpret_cast<uint32_t *>(code);
+        for (size_t i = 0; i < size / sizeof(uint32_t); i++) {
+            nooped[i] = 0xd503201f; // nop
+        }
+        code += size;
     }
 
-    static constexpr std::array<uint8_t, sizeof(uint32_t) * 2> get_postlude() {
-        auto arm = std::array<uint32_t, 2>{
-            0xa8c17bfd, // ldp     x29, x30, [sp], #0x10
-            0xd65f03c0  // ret
-        };
-
-        return u32_to_u8(arm);
+    static void put_prelude(uint8_t *&code) {
+        put(code, std::array<uint32_t, 2>{
+                      0xa9bf7bfd, // stp     x29, x30, [sp, #-0x10]!
+                      0x910003fd  // mov     x29, sp
+                  });
     }
+    static constexpr size_t max_prelude_size = sizeof(uint32_t) * 2;
 
-    static std::array<uint8_t, sizeof(uint32_t) * 5>
-    call(runtime::Signature *addr) {
+    static void put_postlude(uint8_t *&code) {
+        put(code, std::array<uint32_t, 2>{
+                      0xa8c17bfd, // ldp     x29, x30, [sp], #0x10
+                      0xd65f03c0  // ret
+                  });
+    }
+    static constexpr size_t max_postlude_size = sizeof(uint32_t) * 2;
+
+    static void put_call(uint8_t *&code, runtime::Signature *addr) {
         constexpr uint8_t x6 = 6;
         // todo: test pc-relative ldr instead (smaller, maybe more perf?)
-        auto put_addr = mov64(reinterpret_cast<uint64_t>(addr), x6);
-        std::array<uint32_t, 5> instructions;
-        std::copy(put_addr.begin(), put_addr.end(), instructions.begin());
-
-        // call
-        instructions.back() = (0b1101011000111111000000u << 10) | (x6 << 5);
-
-        return u32_to_u8(instructions);
+        put_mov64(code, reinterpret_cast<uint64_t>(addr), x6);
+        put<uint32_t>(code, (0b1101011000111111000000u << 10) | (x6 << 5));
     }
-    static constexpr size_t call_size = sizeof(call(nullptr));
+    static constexpr size_t max_call_size = sizeof(uint32_t) * 5;
 
-    static constexpr std::array<uint8_t, sizeof(uint32_t) * 4>
-    set_temp1(uint64_t value) {
+    static void put_temp1(uint8_t *&code, uint64_t value) {
         constexpr uint8_t x3 = 3;
-        auto instructions = mov64(value, x3);
-        return u32_to_u8(instructions);
+        put_mov64(code, value, x3);
     }
-    static constexpr size_t temp1_size = sizeof(set_temp1(0));
+    static constexpr size_t max_temp1_size = sizeof(uint32_t) * 4;
 
-    static constexpr std::array<uint8_t, sizeof(uint32_t) * 4>
-    set_temp2(uint64_t value) {
+    static void put_temp2(uint8_t *&code, uint64_t value) {
         constexpr uint8_t x4 = 4;
-        auto instructions = mov64(value, x4);
-        return u32_to_u8(instructions);
+        put_mov64(code, value, x4);
     }
-    static constexpr size_t temp2_size = sizeof(set_temp1(0));
+    static constexpr size_t max_temp2_size = sizeof(uint32_t) * 4;
 
   private:
-    template <size_t N>
-    static constexpr std::array<uint8_t, N * 4>
-    u32_to_u8(std::array<uint32_t, N> u32) {
-        return std::bit_cast<std::array<uint8_t, N * 4>>(u32);
-    }
-
-    static constexpr std::array<uint32_t, 4> mov64(uint64_t value,
-                                                   uint8_t reg) {
+    static void put_mov64(uint8_t *&code, uint64_t value, uint8_t reg) {
         constexpr uint32_t nop = 0xd503201f;
 
         // default to mov <reg>, #0x0 as first instruction
         auto instructions =
             std::array<uint32_t, 4>{0xd2800000 | reg, nop, nop, nop};
         auto keep = false;
-        for (size_t i = 0, j = 0; i < 4; i++) {
+        size_t i, j;
+        for (i = 0, j = 0; i < sizeof(uint32_t); i++) {
             auto literal = value & 0xffff;
             value >>= 16;
             if (literal == 0)
@@ -83,7 +87,9 @@ class Arm64 {
             instructions[j++] = mov16(true, keep, literal, i, reg);
             keep = true;
         }
-        return instructions;
+        std::memcpy(code, instructions.data(), sizeof(instructions));
+        code += sizeof(uint32_t) * (j == 0 ? 1 : j);
+        return;
 
         /* these additions save ~3-4% in the executable, but
          * slow down compilation by 40-60ms
@@ -132,6 +138,11 @@ class Arm64 {
                                     uint8_t shift, uint8_t reg) {
         return (notneg << 30) | (keep << 29) | (0b100100101 << 23) |
                (shift << 21) | (imm << 5) | reg;
+    }
+
+    template <typename T> static void put(uint8_t *&code, const T &value) {
+        std::memcpy(code, &value, sizeof(T));
+        code += sizeof(T);
     }
 };
 } // namespace mitey

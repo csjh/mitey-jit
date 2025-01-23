@@ -614,12 +614,12 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     "function and code section have inconsistent lengths");
             }
 
-            auto ludes = n_functions * (sizeof(Target::get_prelude()) +
-                                        sizeof(Target::get_postlude()));
+            auto ludes = n_functions *
+                         (Target::max_prelude_size + Target::max_postlude_size);
 
-            auto other = section_length * (sizeof(Target::call(nullptr)) +
-                                           sizeof(Target::set_temp1(0)) +
-                                           sizeof(Target::set_temp2(0)));
+            auto other = section_length *
+                         (Target::max_call_size + Target::max_temp1_size +
+                          Target::max_temp2_size);
 
             executable =
                 Pager::allocate(ludes + other, AllocationKind::Executable);
@@ -688,9 +688,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 }
 
                 for (auto [call, func_idx] : pending_calls) {
-                    auto tmp1 = Target::set_temp1(
-                        reinterpret_cast<uint64_t>(functions[func_idx].start));
-                    std::memcpy(call, &tmp1, sizeof(tmp1));
+                    Target::put_temp1(call, reinterpret_cast<uint64_t>(
+                                                functions[func_idx].start));
                 }
 
                 return code - executable.get();
@@ -854,8 +853,8 @@ void WasmStack::apply(std::array<valtype, pc> params,
                "alignment must not be larger than natural");                   \
         auto offset = safe_read_leb128<uint32_t>(iter);                        \
         stack.apply(std::array{valtype::i32}, std::array{stacktype});          \
-        put(code, Target::set_temp1(offset));                                  \
-        put(code, Target::call(runtime::name));                                \
+        Target::put_temp1(code, offset);                                       \
+        Target::put_call(code, runtime::name);                                 \
         nextop();                                                              \
     }
 
@@ -875,8 +874,8 @@ void WasmStack::apply(std::array<valtype, pc> params,
         auto offset = safe_read_leb128<uint32_t>(iter);                        \
         stack.apply(std::array{valtype::i32, stacktype},                       \
                     std::array<valtype, 0>());                                 \
-        put(code, Target::set_temp1(offset));                                  \
-        put(code, Target::call(runtime::name));                                \
+        Target::put_temp1(code, offset);                                       \
+        Target::put_call(code, runtime::name);                                 \
         nextop();                                                              \
     }
 
@@ -950,7 +949,7 @@ template <typename T> void put(uint8_t *&code, const T &value) {
 HANDLER(unreachable) {
     stack.polymorphize();
 
-    put(code, Target::call(runtime::unreachable));
+    Target::put_call(code, runtime::unreachable);
     nextop();
 }
 HANDLER(nop) { nextop(); }
@@ -978,8 +977,8 @@ HANDLER(if_) {
     auto &signature = read_blocktype(mod.types, iter);
 
     auto if_ = If(code);
-    code += Target::temp1_size;
-    put(code, Target::call(runtime::if_));
+    Target::placehold(code, Target::put_temp1);
+    Target::put_call(code, runtime::if_);
 
     stack.pop(valtype::i32);
     stack.enter_flow(signature.params);
@@ -1004,9 +1003,9 @@ HANDLER(else_) {
     auto [else_jump] = std::get<If>(construct);
     // jump to end of if/else block after if block
     pending_br.push_back(code);
-    code += Target::temp1_size;
-    put(code, Target::call(runtime::jump));
-    put(else_jump, Target::set_temp1(reinterpret_cast<uint64_t>(code)));
+    Target::placehold(code, Target::put_temp1);
+    Target::put_call(code, runtime::jump);
+    Target::put_temp1(else_jump, reinterpret_cast<uint64_t>(code));
 
     control_stack.back().construct = IfElse();
     stack.unpolymorphize();
@@ -1020,14 +1019,14 @@ HANDLER(end) {
 
     if (std::holds_alternative<If>(construct)) {
         ensure(sig.params == sig.results, "type mismatch params vs. results");
-        put(std::get<If>(construct).else_jump,
-            Target::set_temp1(reinterpret_cast<uint64_t>(code)));
+        Target::put_temp1(std::get<If>(construct).else_jump,
+                          reinterpret_cast<uint64_t>(code));
     }
 
     // everything except loop jumps to end
     if (!std::holds_alternative<Loop>(construct)) {
         for (auto target : pending_br) {
-            put(target, Target::set_temp1(reinterpret_cast<uint64_t>(code)));
+            Target::put_temp1(target, reinterpret_cast<uint64_t>(code));
         }
         for (auto [table, target] : pending_br_tables) {
             auto diff = code - table;
@@ -1039,18 +1038,18 @@ HANDLER(end) {
 
     if (std::holds_alternative<Function>(construct)) {
         // move results past locals
-        put(code, Target::set_temp1(-fn.locals.bytesize()));
+        Target::put_temp1(code, -fn.locals.bytesize());
         auto byte_results = sig.results.bytesize();
         if (byte_results == 0) {
-            put(code, Target::call(runtime::move_0_results));
+            Target::put_call(code, runtime::move_0_results);
         } else if (byte_results == 8) {
-            put(code, Target::call(runtime::move_8_results));
+            Target::put_call(code, runtime::move_8_results);
         } else {
-            put(code, Target::set_temp2(-byte_results));
-            put(code, Target::call(runtime::move_n_results));
+            Target::put_temp2(code, -byte_results);
+            Target::put_call(code, runtime::move_n_results);
         }
 
-        put(code, Target::get_postlude());
+        Target::put_postlude(code);
         return code;
     }
 
@@ -1075,16 +1074,16 @@ HANDLER(br) {
     auto info = runtime::BrInfo(0, flow.expected.bytesize(),
                                 flow.stack_offset - stack.sp());
     if (std::holds_alternative<Loop>(flow.construct)) {
-        put(code, Target::set_temp1(reinterpret_cast<uint64_t>(
-                      std::get<Loop>(flow.construct).start)));
+        Target::put_temp1(code, reinterpret_cast<uint64_t>(
+                                    std::get<Loop>(flow.construct).start));
     } else {
         flow.pending_br.push_back(code);
-        code += Target::temp1_size;
+        Target::placehold(code, Target::put_temp1);
     }
 
 #define BR(arity_, stack_offset_)                                              \
     if (info.arity == arity_ && info.stack_offset == stack_offset_) {          \
-        put(code, Target::call(runtime::br_##arity_##_##stack_offset_));       \
+        Target::put_call(code, runtime::br_##arity_##_##stack_offset_);        \
         break;                                                                 \
     }
     do {
@@ -1098,8 +1097,8 @@ HANDLER(br) {
         BR(8, 16);
         BR(8, 24);
 
-        put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
-        put(code, Target::call(runtime::br_n_n));
+        Target::put_temp2(code, std::bit_cast<uint64_t>(info));
+        Target::put_call(code, runtime::br_n_n);
     } while (0);
 #undef BR
 
@@ -1116,16 +1115,16 @@ HANDLER(br_if) {
     auto info = runtime::BrInfo(0, flow.expected.bytesize(),
                                 flow.stack_offset - stack.sp());
     if (std::holds_alternative<Loop>(flow.construct)) {
-        put(code, Target::set_temp1(reinterpret_cast<uint64_t>(
-                      std::get<Loop>(flow.construct).start)));
+        Target::put_temp1(code, reinterpret_cast<uint64_t>(
+                                    std::get<Loop>(flow.construct).start));
     } else {
         flow.pending_br.push_back(code);
-        code += Target::temp1_size;
+        Target::placehold(code, Target::put_temp1);
     }
 
 #define BR_IF(arity_, stack_offset_)                                           \
     if (info.arity == arity_ && info.stack_offset == stack_offset_) {          \
-        put(code, Target::call(runtime::br_if_##arity_##_##stack_offset_));    \
+        Target::put_call(code, runtime::br_if_##arity_##_##stack_offset_);     \
         break;                                                                 \
     }
     do {
@@ -1139,8 +1138,8 @@ HANDLER(br_if) {
         BR_IF(8, 16);
         BR_IF(8, 24);
 
-        put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
-        put(code, Target::call(runtime::br_if_n_n));
+        Target::put_temp2(code, std::bit_cast<uint64_t>(info));
+        Target::put_call(code, runtime::br_if_n_n);
     } while (0);
 #undef BR
 
@@ -1151,11 +1150,15 @@ HANDLER(br_table) {
     // todo: maybe a different function for low n could be good?
     auto n_targets = safe_read_leb128<uint32_t>(iter);
 
-    auto table_addr =
-        code + Target::temp1_size + Target::temp2_size + Target::call_size;
-    put(code, Target::set_temp1(reinterpret_cast<uint64_t>(table_addr)));
-    auto brinfo_loc = code;
-    code += Target::temp2_size;
+    auto t1_addr = code;
+    Target::placehold(code, Target::put_temp1);
+    auto t2_addr = code;
+    Target::placehold(code, Target::put_temp2);
+    auto call_addr = code;
+    Target::placehold(code, Target::put_call);
+    auto table_addr = code;
+
+    Target::put_temp1(t1_addr, reinterpret_cast<uint64_t>(table_addr));
 
     auto targets = (uint32_t *)alloca(sizeof(uint32_t) * (n_targets + 1));
     for (uint32_t i = 0; i <= n_targets; ++i) {
@@ -1168,13 +1171,13 @@ HANDLER(br_table) {
 
     auto info = runtime::BrInfo(n_targets, default_target.bytesize());
     if (info.arity == 0) {
-        put(code, Target::call(runtime::br_table_0));
+        Target::put_call(call_addr, runtime::br_table_0);
     } else if (info.arity == 8) {
-        put(code, Target::call(runtime::br_table_8));
+        Target::put_call(call_addr, runtime::br_table_8);
     } else {
-        put(code, Target::call(runtime::br_table_n));
+        Target::put_call(call_addr, runtime::br_table_n);
     }
-    put(brinfo_loc, Target::set_temp2(std::bit_cast<uint64_t>(info)));
+    Target::put_temp2(t2_addr, std::bit_cast<uint64_t>(info));
 
     for (uint32_t i = 0; i <= n_targets; ++i) {
         auto &target = control_stack[base - targets[i]].expected;
@@ -1211,11 +1214,11 @@ HANDLER(return_) {
                                 flow.stack_offset - stack.sp());
 
     flow.pending_br.push_back(code);
-    code += Target::temp1_size;
+    Target::placehold(code, Target::put_temp1);
 
 #define BR(arity_, stack_offset_)                                              \
     if (info.arity == arity_ && info.stack_offset == stack_offset_) {          \
-        put(code, Target::call(runtime::br_##arity_##_##stack_offset_));       \
+        Target::put_call(code, runtime::br_##arity_##_##stack_offset_);        \
         break;                                                                 \
     }
     do {
@@ -1229,8 +1232,8 @@ HANDLER(return_) {
         BR(8, 16);
         BR(8, 24);
 
-        put(code, Target::set_temp2(std::bit_cast<uint64_t>(info)));
-        put(code, Target::call(runtime::br_n_n));
+        Target::put_temp2(code, std::bit_cast<uint64_t>(info));
+        Target::put_call(code, runtime::br_n_n);
     } while (0);
 #undef BR
 
@@ -1245,16 +1248,16 @@ HANDLER(call) {
     stack.apply(func.type);
 
     if (func.import) {
-        put(code, Target::set_temp1(1 + fn_idx));
-        put(code, Target::set_temp2(func.type.results.bytesize() -
-                                    func.type.params.bytesize()));
-        put(code, Target::call(runtime::call_extern));
+        Target::put_temp1(code, 1 + fn_idx);
+        Target::put_temp2(code, func.type.results.bytesize() -
+                                    func.type.params.bytesize());
+        Target::put_call(code, runtime::call_extern);
     } else {
         mod.pending_calls.push_back({code, fn_idx});
-        code += Target::temp1_size;
-        put(code, Target::set_temp2(func.type.results.bytesize() -
-                                    func.type.params.bytesize()));
-        put(code, Target::call(runtime::call));
+        Target::placehold(code, Target::put_temp1);
+        Target::put_temp2(code, func.type.results.bytesize() -
+                                    func.type.params.bytesize());
+        Target::put_call(code, runtime::call);
     }
     nextop();
 }
@@ -1275,15 +1278,15 @@ HANDLER(call_indirect) {
                                           runtime::FunctionType(type));
     auto [temp1, temp2] = std::bit_cast<std::array<uint64_t, 2>>(info);
 
-    put(code, Target::set_temp1(temp1));
-    put(code, Target::set_temp2(temp2));
-    put(code, Target::call(runtime::call_indirect));
+    Target::put_temp1(code, temp1);
+    Target::put_temp2(code, temp2);
+    Target::put_call(code, runtime::call_indirect);
     nextop();
 }
 HANDLER(drop) {
     stack.pop(stack.back());
 
-    put(code, Target::call(runtime::drop));
+    Target::put_call(code, runtime::drop);
     nextop();
 }
 HANDLER(select) {
@@ -1296,7 +1299,7 @@ HANDLER(select) {
     // then apply the dynamic type
     stack.apply(std::array{ty, ty}, std::array{ty});
 
-    put(code, Target::call(runtime::select));
+    Target::put_call(code, runtime::select);
     nextop();
 }
 HANDLER(select_t) {
@@ -1311,15 +1314,15 @@ HANDLER(select_t) {
     // then apply the dynamic type
     stack.apply(std::array{ty, ty}, std::array{ty});
 
-    put(code, Target::call(runtime::select_t));
+    Target::put_call(code, runtime::select_t);
     nextop();
 }
 HANDLER(localget) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
 
-    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
-    put(code, Target::call(runtime::localget));
+    Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx]));
+    Target::put_call(code, runtime::localget);
 
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array<valtype, 0>(), std::array{local_ty});
@@ -1329,8 +1332,8 @@ HANDLER(localset) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
 
-    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
-    put(code, Target::call(runtime::localset));
+    Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx]));
+    Target::put_call(code, runtime::localset);
 
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array{local_ty}, std::array<valtype, 0>());
@@ -1340,8 +1343,8 @@ HANDLER(localtee) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
 
-    put(code, Target::set_temp1(-(stack.sp() + fn.local_bytes[local_idx])));
-    put(code, Target::call(runtime::localtee));
+    Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx]));
+    Target::put_call(code, runtime::localtee);
 
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array{local_ty}, std::array{local_ty});
@@ -1353,8 +1356,8 @@ HANDLER(tableget) {
     auto table_ty = mod.tables[table_idx].type;
     stack.apply(std::array{valtype::i32}, std::array{table_ty});
 
-    put(code, Target::set_temp1(1 + mod.functions.size() + table_idx));
-    put(code, Target::call(runtime::tableget));
+    Target::put_temp1(code, 1 + mod.functions.size() + table_idx);
+    Target::put_call(code, runtime::tableget);
     nextop();
 }
 HANDLER(tableset) {
@@ -1363,8 +1366,8 @@ HANDLER(tableset) {
     auto table_ty = mod.tables[table_idx].type;
     stack.apply(std::array{valtype::i32, table_ty}, std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(1 + mod.functions.size() + table_idx));
-    put(code, Target::call(runtime::tableset));
+    Target::put_temp1(code, 1 + mod.functions.size() + table_idx);
+    Target::put_call(code, runtime::tableset);
     nextop();
 }
 HANDLER(globalget) {
@@ -1373,9 +1376,9 @@ HANDLER(globalget) {
     auto global_ty = mod.globals[global_idx].type;
     stack.apply(std::array<valtype, 0>(), std::array{global_ty});
 
-    put(code, Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
-                                global_idx));
-    put(code, Target::call(runtime::globalget));
+    Target::put_temp1(code, 1 + mod.functions.size() + mod.tables.size() +
+                                global_idx);
+    Target::put_call(code, runtime::globalget);
     nextop();
 }
 HANDLER(globalset) {
@@ -1386,9 +1389,9 @@ HANDLER(globalset) {
     auto global_ty = mod.globals[global_idx].type;
     stack.apply(std::array{global_ty}, std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
-                                global_idx));
-    put(code, Target::call(runtime::globalset));
+    Target::put_temp1(code, 1 + mod.functions.size() + mod.tables.size() +
+                                global_idx);
+    Target::put_call(code, runtime::globalset);
     nextop();
 }
 HANDLER(memorysize) {
@@ -1397,7 +1400,7 @@ HANDLER(memorysize) {
     ensure(mod.memory.exists, "unknown memory");
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
 
-    put(code, Target::call(runtime::memorysize));
+    Target::put_call(code, runtime::memorysize);
     nextop();
 }
 HANDLER(memorygrow) {
@@ -1406,23 +1409,23 @@ HANDLER(memorygrow) {
     ensure(mod.memory.exists, "unknown memory");
     stack.apply(std::array{valtype::i32}, std::array{valtype::i32});
 
-    put(code, Target::call(runtime::memorygrow));
+    Target::put_call(code, runtime::memorygrow);
     nextop();
 }
 HANDLER(i32const) {
     runtime::WasmValue v = safe_read_sleb128<uint32_t>(iter);
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
 
-    put(code, Target::set_temp1(v.u64));
-    put(code, Target::call(runtime::ifXXconst));
+    Target::put_temp1(code, v.u64);
+    Target::put_call(code, runtime::ifXXconst);
     nextop();
 }
 HANDLER(i64const) {
     runtime::WasmValue v = safe_read_sleb128<uint64_t>(iter);
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i64});
 
-    put(code, Target::set_temp1(v.u64));
-    put(code, Target::call(runtime::ifXXconst));
+    Target::put_temp1(code, v.u64);
+    Target::put_call(code, runtime::ifXXconst);
     nextop();
 }
 HANDLER(f32const) {
@@ -1431,8 +1434,8 @@ HANDLER(f32const) {
     iter += sizeof(float);
     stack.apply(std::array<valtype, 0>(), std::array{valtype::f32});
 
-    put(code, Target::set_temp1(v.u64));
-    put(code, Target::call(runtime::ifXXconst));
+    Target::put_temp1(code, v.u64);
+    Target::put_call(code, runtime::ifXXconst);
     nextop();
 }
 HANDLER(f64const) {
@@ -1441,8 +1444,8 @@ HANDLER(f64const) {
     iter += sizeof(double);
     stack.apply(std::array<valtype, 0>(), std::array{valtype::f64});
 
-    put(code, Target::set_temp1(v.u64));
-    put(code, Target::call(runtime::ifXXconst));
+    Target::put_temp1(code, v.u64);
+    Target::put_call(code, runtime::ifXXconst);
     nextop();
 }
 // clang-format off
@@ -1469,134 +1472,134 @@ HANDLER(i32store16) {  STORE(uint16_t, valtype::i32, i32store16); }
 HANDLER(i64store8) {   STORE(uint8_t,  valtype::i64, i64store8); }
 HANDLER(i64store16) {  STORE(uint16_t, valtype::i64, i64store16); }
 HANDLER(i64store32) {  STORE(uint32_t, valtype::i64, i64store32); }
-HANDLER(i32eqz) {      stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); put(code, Target::call(runtime::i32eqz)); nextop(); }
-HANDLER(i64eqz) {      stack.apply(std::array{valtype::i64              }, std::array{valtype::i32}); put(code, Target::call(runtime::i64eqz)); nextop(); }
-HANDLER(i32eq) {       stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32eq)); nextop(); }
-HANDLER(i64eq) {       stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i64eq)); nextop(); }
-HANDLER(i32ne) {       stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32ne)); nextop(); }
-HANDLER(i64ne) {       stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i64ne)); nextop(); }
-HANDLER(i32lt_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32lt_s)); nextop(); }
-HANDLER(i64lt_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i64lt_s)); nextop(); }
-HANDLER(i32lt_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32lt_u)); nextop(); }
-HANDLER(i64lt_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i64lt_u)); nextop(); }
-HANDLER(i32gt_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32gt_s)); nextop(); }
-HANDLER(i64gt_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i64gt_s)); nextop(); }
-HANDLER(i32gt_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32gt_u)); nextop(); }
-HANDLER(i64gt_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i64gt_u)); nextop(); }
-HANDLER(i32le_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32le_s)); nextop(); }
-HANDLER(i64le_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i64le_s)); nextop(); }
-HANDLER(i32le_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32le_u)); nextop(); }
-HANDLER(i64le_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i64le_u)); nextop(); }
-HANDLER(i32ge_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32ge_s)); nextop(); }
-HANDLER(i64ge_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i64ge_s)); nextop(); }
-HANDLER(i32ge_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32ge_u)); nextop(); }
-HANDLER(i64ge_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i64ge_u)); nextop(); }
-HANDLER(f32eq) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); put(code, Target::call(runtime::f32eq)); nextop(); }
-HANDLER(f64eq) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); put(code, Target::call(runtime::f64eq)); nextop(); }
-HANDLER(f32ne) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); put(code, Target::call(runtime::f32ne)); nextop(); }
-HANDLER(f64ne) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); put(code, Target::call(runtime::f64ne)); nextop(); }
-HANDLER(f32lt) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); put(code, Target::call(runtime::f32lt)); nextop(); }
-HANDLER(f64lt) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); put(code, Target::call(runtime::f64lt)); nextop(); }
-HANDLER(f32gt) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); put(code, Target::call(runtime::f32gt)); nextop(); }
-HANDLER(f64gt) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); put(code, Target::call(runtime::f64gt)); nextop(); }
-HANDLER(f32le) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); put(code, Target::call(runtime::f32le)); nextop(); }
-HANDLER(f64le) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); put(code, Target::call(runtime::f64le)); nextop(); }
-HANDLER(f32ge) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); put(code, Target::call(runtime::f32ge)); nextop(); }
-HANDLER(f64ge) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); put(code, Target::call(runtime::f64ge)); nextop(); }
-HANDLER(i32clz) {      stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); put(code, Target::call(runtime::i32clz)); nextop(); }
-HANDLER(i64clz) {      stack.apply(std::array{valtype::i64              }, std::array{valtype::i64}); put(code, Target::call(runtime::i64clz)); nextop(); }
-HANDLER(i32ctz) {      stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); put(code, Target::call(runtime::i32ctz)); nextop(); }
-HANDLER(i64ctz) {      stack.apply(std::array{valtype::i64              }, std::array{valtype::i64}); put(code, Target::call(runtime::i64ctz)); nextop(); }
-HANDLER(i32popcnt) {   stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); put(code, Target::call(runtime::i32popcnt)); nextop(); }
-HANDLER(i64popcnt) {   stack.apply(std::array{valtype::i64              }, std::array{valtype::i64}); put(code, Target::call(runtime::i64popcnt)); nextop(); }
-HANDLER(i32add) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32add)); nextop(); }
-HANDLER(i64add) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64add)); nextop(); }
-HANDLER(i32sub) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32sub)); nextop(); }
-HANDLER(i64sub) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64sub)); nextop(); }
-HANDLER(i32mul) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32mul)); nextop(); }
-HANDLER(i64mul) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64mul)); nextop(); }
-HANDLER(i32div_s) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32div_s)); nextop(); }
-HANDLER(i64div_s) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64div_s)); nextop(); }
-HANDLER(i32div_u) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32div_u)); nextop(); }
-HANDLER(i64div_u) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64div_u)); nextop(); }
-HANDLER(i32rem_s) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32rem_s)); nextop(); }
-HANDLER(i64rem_s) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64rem_s)); nextop(); }
-HANDLER(i32rem_u) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32rem_u)); nextop(); }
-HANDLER(i64rem_u) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64rem_u)); nextop(); }
-HANDLER(i32and) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32and)); nextop(); }
-HANDLER(i64and) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64and)); nextop(); }
-HANDLER(i32or) {       stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32or)); nextop(); }
-HANDLER(i64or) {       stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64or)); nextop(); }
-HANDLER(i32xor) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32xor)); nextop(); }
-HANDLER(i64xor) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64xor)); nextop(); }
-HANDLER(i32shl) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32shl)); nextop(); }
-HANDLER(i64shl) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64shl)); nextop(); }
-HANDLER(i32shr_s) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32shr_s)); nextop(); }
-HANDLER(i64shr_s) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64shr_s)); nextop(); }
-HANDLER(i32shr_u) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32shr_u)); nextop(); }
-HANDLER(i64shr_u) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64shr_u)); nextop(); }
-HANDLER(i32rotl) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32rotl)); nextop(); }
-HANDLER(i64rotl) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64rotl)); nextop(); }
-HANDLER(i32rotr) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32rotr)); nextop(); }
-HANDLER(i64rotr) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64rotr)); nextop(); }
-HANDLER(f32abs) {      stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); put(code, Target::call(runtime::f32abs)); nextop(); }
-HANDLER(f64abs) {      stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); put(code, Target::call(runtime::f64abs)); nextop(); }
-HANDLER(f32neg) {      stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); put(code, Target::call(runtime::f32neg)); nextop(); }
-HANDLER(f64neg) {      stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); put(code, Target::call(runtime::f64neg)); nextop(); }
-HANDLER(f32ceil) {     stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); put(code, Target::call(runtime::f32ceil)); nextop(); }
-HANDLER(f64ceil) {     stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); put(code, Target::call(runtime::f64ceil)); nextop(); }
-HANDLER(f32floor) {    stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); put(code, Target::call(runtime::f32floor)); nextop(); }
-HANDLER(f64floor) {    stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); put(code, Target::call(runtime::f64floor)); nextop(); }
-HANDLER(f32trunc) {    stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); put(code, Target::call(runtime::f32trunc)); nextop(); }
-HANDLER(f64trunc) {    stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); put(code, Target::call(runtime::f64trunc)); nextop(); }
-HANDLER(f32nearest) {  stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); put(code, Target::call(runtime::f32nearest)); nextop(); }
-HANDLER(f64nearest) {  stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); put(code, Target::call(runtime::f64nearest)); nextop(); }
-HANDLER(f32sqrt) {     stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); put(code, Target::call(runtime::f32sqrt)); nextop(); }
-HANDLER(f64sqrt) {     stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); put(code, Target::call(runtime::f64sqrt)); nextop(); }
-HANDLER(f32add) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); put(code, Target::call(runtime::f32add)); nextop(); }
-HANDLER(f64add) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); put(code, Target::call(runtime::f64add)); nextop(); }
-HANDLER(f32sub) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); put(code, Target::call(runtime::f32sub)); nextop(); }
-HANDLER(f64sub) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); put(code, Target::call(runtime::f64sub)); nextop(); }
-HANDLER(f32mul) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); put(code, Target::call(runtime::f32mul)); nextop(); }
-HANDLER(f64mul) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); put(code, Target::call(runtime::f64mul)); nextop(); }
-HANDLER(f32div) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); put(code, Target::call(runtime::f32div)); nextop(); }
-HANDLER(f64div) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); put(code, Target::call(runtime::f64div)); nextop(); }
-HANDLER(f32min) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); put(code, Target::call(runtime::f32min)); nextop(); }
-HANDLER(f64min) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); put(code, Target::call(runtime::f64min)); nextop(); }
-HANDLER(f32max) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); put(code, Target::call(runtime::f32max)); nextop(); }
-HANDLER(f64max) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); put(code, Target::call(runtime::f64max)); nextop(); }
-HANDLER(f32copysign) { stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); put(code, Target::call(runtime::f32copysign)); nextop(); }
-HANDLER(f64copysign) { stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); put(code, Target::call(runtime::f64copysign)); nextop(); }
-HANDLER(i32wrap_i64) {      stack.apply(std::array{valtype::i64}, std::array{valtype::i32}); put(code, Target::call(runtime::i32wrap_i64)); nextop(); }
-HANDLER(i64extend_i32_s) {  stack.apply(std::array{valtype::i32}, std::array{valtype::i64}); put(code, Target::call(runtime::i64extend_i32_s)); nextop(); }
-HANDLER(i64extend_i32_u) {  stack.apply(std::array{valtype::i32}, std::array{valtype::i64}); put(code, Target::call(runtime::i64extend_i32_u)); nextop(); }
-HANDLER(i32trunc_f32_s) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32trunc_f32_s)); nextop(); }
-HANDLER(i64trunc_f32_s) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i64}); put(code, Target::call(runtime::i64trunc_f32_s)); nextop(); }
-HANDLER(i32trunc_f32_u) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32trunc_f32_u)); nextop(); }
-HANDLER(i64trunc_f32_u) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i64}); put(code, Target::call(runtime::i64trunc_f32_u)); nextop(); }
-HANDLER(i32trunc_f64_s) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i32}); put(code, Target::call(runtime::i32trunc_f64_s)); nextop(); }
-HANDLER(i64trunc_f64_s) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64trunc_f64_s)); nextop(); }
-HANDLER(i32trunc_f64_u) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i32}); put(code, Target::call(runtime::i32trunc_f64_u)); nextop(); }
-HANDLER(i64trunc_f64_u) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64trunc_f64_u)); nextop(); }
-HANDLER(f32convert_i32_s) { stack.apply(std::array{valtype::i32}, std::array{valtype::f32}); put(code, Target::call(runtime::f32convert_i32_s)); nextop(); }
-HANDLER(f64convert_i32_s) { stack.apply(std::array{valtype::i32}, std::array{valtype::f64}); put(code, Target::call(runtime::f64convert_i32_s)); nextop(); }
-HANDLER(f32convert_i32_u) { stack.apply(std::array{valtype::i32}, std::array{valtype::f32}); put(code, Target::call(runtime::f32convert_i32_u)); nextop(); }
-HANDLER(f64convert_i32_u) { stack.apply(std::array{valtype::i32}, std::array{valtype::f64}); put(code, Target::call(runtime::f64convert_i32_u)); nextop(); }
-HANDLER(f32convert_i64_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::f32}); put(code, Target::call(runtime::f32convert_i64_s)); nextop(); }
-HANDLER(f64convert_i64_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::f64}); put(code, Target::call(runtime::f64convert_i64_s)); nextop(); }
-HANDLER(f32convert_i64_u) { stack.apply(std::array{valtype::i64}, std::array{valtype::f32}); put(code, Target::call(runtime::f32convert_i64_u)); nextop(); }
-HANDLER(f64convert_i64_u) { stack.apply(std::array{valtype::i64}, std::array{valtype::f64}); put(code, Target::call(runtime::f64convert_i64_u)); nextop(); }
-HANDLER(f32demote_f64) {    stack.apply(std::array{valtype::f64}, std::array{valtype::f32}); put(code, Target::call(runtime::f32demote_f64)); nextop(); }
-HANDLER(f64promote_f32) {   stack.apply(std::array{valtype::f32}, std::array{valtype::f64}); put(code, Target::call(runtime::f64promote_f32)); nextop(); }
+HANDLER(i32eqz) {      stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); Target::put_call(code, runtime::i32eqz); nextop(); }
+HANDLER(i64eqz) {      stack.apply(std::array{valtype::i64              }, std::array{valtype::i32}); Target::put_call(code, runtime::i64eqz); nextop(); }
+HANDLER(i32eq) {       stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32eq); nextop(); }
+HANDLER(i64eq) {       stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i64eq); nextop(); }
+HANDLER(i32ne) {       stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32ne); nextop(); }
+HANDLER(i64ne) {       stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i64ne); nextop(); }
+HANDLER(i32lt_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32lt_s); nextop(); }
+HANDLER(i64lt_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i64lt_s); nextop(); }
+HANDLER(i32lt_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32lt_u); nextop(); }
+HANDLER(i64lt_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i64lt_u); nextop(); }
+HANDLER(i32gt_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32gt_s); nextop(); }
+HANDLER(i64gt_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i64gt_s); nextop(); }
+HANDLER(i32gt_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32gt_u); nextop(); }
+HANDLER(i64gt_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i64gt_u); nextop(); }
+HANDLER(i32le_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32le_s); nextop(); }
+HANDLER(i64le_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i64le_s); nextop(); }
+HANDLER(i32le_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32le_u); nextop(); }
+HANDLER(i64le_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i64le_u); nextop(); }
+HANDLER(i32ge_s) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32ge_s); nextop(); }
+HANDLER(i64ge_s) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i64ge_s); nextop(); }
+HANDLER(i32ge_u) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32ge_u); nextop(); }
+HANDLER(i64ge_u) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i64ge_u); nextop(); }
+HANDLER(f32eq) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); Target::put_call(code, runtime::f32eq); nextop(); }
+HANDLER(f64eq) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); Target::put_call(code, runtime::f64eq); nextop(); }
+HANDLER(f32ne) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); Target::put_call(code, runtime::f32ne); nextop(); }
+HANDLER(f64ne) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); Target::put_call(code, runtime::f64ne); nextop(); }
+HANDLER(f32lt) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); Target::put_call(code, runtime::f32lt); nextop(); }
+HANDLER(f64lt) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); Target::put_call(code, runtime::f64lt); nextop(); }
+HANDLER(f32gt) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); Target::put_call(code, runtime::f32gt); nextop(); }
+HANDLER(f64gt) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); Target::put_call(code, runtime::f64gt); nextop(); }
+HANDLER(f32le) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); Target::put_call(code, runtime::f32le); nextop(); }
+HANDLER(f64le) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); Target::put_call(code, runtime::f64le); nextop(); }
+HANDLER(f32ge) {       stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::i32}); Target::put_call(code, runtime::f32ge); nextop(); }
+HANDLER(f64ge) {       stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::i32}); Target::put_call(code, runtime::f64ge); nextop(); }
+HANDLER(i32clz) {      stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); Target::put_call(code, runtime::i32clz); nextop(); }
+HANDLER(i64clz) {      stack.apply(std::array{valtype::i64              }, std::array{valtype::i64}); Target::put_call(code, runtime::i64clz); nextop(); }
+HANDLER(i32ctz) {      stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); Target::put_call(code, runtime::i32ctz); nextop(); }
+HANDLER(i64ctz) {      stack.apply(std::array{valtype::i64              }, std::array{valtype::i64}); Target::put_call(code, runtime::i64ctz); nextop(); }
+HANDLER(i32popcnt) {   stack.apply(std::array{valtype::i32              }, std::array{valtype::i32}); Target::put_call(code, runtime::i32popcnt); nextop(); }
+HANDLER(i64popcnt) {   stack.apply(std::array{valtype::i64              }, std::array{valtype::i64}); Target::put_call(code, runtime::i64popcnt); nextop(); }
+HANDLER(i32add) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32add); nextop(); }
+HANDLER(i64add) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64add); nextop(); }
+HANDLER(i32sub) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32sub); nextop(); }
+HANDLER(i64sub) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64sub); nextop(); }
+HANDLER(i32mul) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32mul); nextop(); }
+HANDLER(i64mul) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64mul); nextop(); }
+HANDLER(i32div_s) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32div_s); nextop(); }
+HANDLER(i64div_s) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64div_s); nextop(); }
+HANDLER(i32div_u) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32div_u); nextop(); }
+HANDLER(i64div_u) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64div_u); nextop(); }
+HANDLER(i32rem_s) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32rem_s); nextop(); }
+HANDLER(i64rem_s) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64rem_s); nextop(); }
+HANDLER(i32rem_u) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32rem_u); nextop(); }
+HANDLER(i64rem_u) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64rem_u); nextop(); }
+HANDLER(i32and) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32and); nextop(); }
+HANDLER(i64and) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64and); nextop(); }
+HANDLER(i32or) {       stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32or); nextop(); }
+HANDLER(i64or) {       stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64or); nextop(); }
+HANDLER(i32xor) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32xor); nextop(); }
+HANDLER(i64xor) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64xor); nextop(); }
+HANDLER(i32shl) {      stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32shl); nextop(); }
+HANDLER(i64shl) {      stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64shl); nextop(); }
+HANDLER(i32shr_s) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32shr_s); nextop(); }
+HANDLER(i64shr_s) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64shr_s); nextop(); }
+HANDLER(i32shr_u) {    stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32shr_u); nextop(); }
+HANDLER(i64shr_u) {    stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64shr_u); nextop(); }
+HANDLER(i32rotl) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32rotl); nextop(); }
+HANDLER(i64rotl) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64rotl); nextop(); }
+HANDLER(i32rotr) {     stack.apply(std::array{valtype::i32, valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32rotr); nextop(); }
+HANDLER(i64rotr) {     stack.apply(std::array{valtype::i64, valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64rotr); nextop(); }
+HANDLER(f32abs) {      stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); Target::put_call(code, runtime::f32abs); nextop(); }
+HANDLER(f64abs) {      stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); Target::put_call(code, runtime::f64abs); nextop(); }
+HANDLER(f32neg) {      stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); Target::put_call(code, runtime::f32neg); nextop(); }
+HANDLER(f64neg) {      stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); Target::put_call(code, runtime::f64neg); nextop(); }
+HANDLER(f32ceil) {     stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); Target::put_call(code, runtime::f32ceil); nextop(); }
+HANDLER(f64ceil) {     stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); Target::put_call(code, runtime::f64ceil); nextop(); }
+HANDLER(f32floor) {    stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); Target::put_call(code, runtime::f32floor); nextop(); }
+HANDLER(f64floor) {    stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); Target::put_call(code, runtime::f64floor); nextop(); }
+HANDLER(f32trunc) {    stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); Target::put_call(code, runtime::f32trunc); nextop(); }
+HANDLER(f64trunc) {    stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); Target::put_call(code, runtime::f64trunc); nextop(); }
+HANDLER(f32nearest) {  stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); Target::put_call(code, runtime::f32nearest); nextop(); }
+HANDLER(f64nearest) {  stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); Target::put_call(code, runtime::f64nearest); nextop(); }
+HANDLER(f32sqrt) {     stack.apply(std::array{valtype::f32              }, std::array{valtype::f32}); Target::put_call(code, runtime::f32sqrt); nextop(); }
+HANDLER(f64sqrt) {     stack.apply(std::array{valtype::f64              }, std::array{valtype::f64}); Target::put_call(code, runtime::f64sqrt); nextop(); }
+HANDLER(f32add) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); Target::put_call(code, runtime::f32add); nextop(); }
+HANDLER(f64add) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); Target::put_call(code, runtime::f64add); nextop(); }
+HANDLER(f32sub) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); Target::put_call(code, runtime::f32sub); nextop(); }
+HANDLER(f64sub) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); Target::put_call(code, runtime::f64sub); nextop(); }
+HANDLER(f32mul) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); Target::put_call(code, runtime::f32mul); nextop(); }
+HANDLER(f64mul) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); Target::put_call(code, runtime::f64mul); nextop(); }
+HANDLER(f32div) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); Target::put_call(code, runtime::f32div); nextop(); }
+HANDLER(f64div) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); Target::put_call(code, runtime::f64div); nextop(); }
+HANDLER(f32min) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); Target::put_call(code, runtime::f32min); nextop(); }
+HANDLER(f64min) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); Target::put_call(code, runtime::f64min); nextop(); }
+HANDLER(f32max) {      stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); Target::put_call(code, runtime::f32max); nextop(); }
+HANDLER(f64max) {      stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); Target::put_call(code, runtime::f64max); nextop(); }
+HANDLER(f32copysign) { stack.apply(std::array{valtype::f32, valtype::f32}, std::array{valtype::f32}); Target::put_call(code, runtime::f32copysign); nextop(); }
+HANDLER(f64copysign) { stack.apply(std::array{valtype::f64, valtype::f64}, std::array{valtype::f64}); Target::put_call(code, runtime::f64copysign); nextop(); }
+HANDLER(i32wrap_i64) {      stack.apply(std::array{valtype::i64}, std::array{valtype::i32}); Target::put_call(code, runtime::i32wrap_i64); nextop(); }
+HANDLER(i64extend_i32_s) {  stack.apply(std::array{valtype::i32}, std::array{valtype::i64}); Target::put_call(code, runtime::i64extend_i32_s); nextop(); }
+HANDLER(i64extend_i32_u) {  stack.apply(std::array{valtype::i32}, std::array{valtype::i64}); Target::put_call(code, runtime::i64extend_i32_u); nextop(); }
+HANDLER(i32trunc_f32_s) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32trunc_f32_s); nextop(); }
+HANDLER(i64trunc_f32_s) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i64}); Target::put_call(code, runtime::i64trunc_f32_s); nextop(); }
+HANDLER(i32trunc_f32_u) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32trunc_f32_u); nextop(); }
+HANDLER(i64trunc_f32_u) {   stack.apply(std::array{valtype::f32}, std::array{valtype::i64}); Target::put_call(code, runtime::i64trunc_f32_u); nextop(); }
+HANDLER(i32trunc_f64_s) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i32}); Target::put_call(code, runtime::i32trunc_f64_s); nextop(); }
+HANDLER(i64trunc_f64_s) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64trunc_f64_s); nextop(); }
+HANDLER(i32trunc_f64_u) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i32}); Target::put_call(code, runtime::i32trunc_f64_u); nextop(); }
+HANDLER(i64trunc_f64_u) {   stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64trunc_f64_u); nextop(); }
+HANDLER(f32convert_i32_s) { stack.apply(std::array{valtype::i32}, std::array{valtype::f32}); Target::put_call(code, runtime::f32convert_i32_s); nextop(); }
+HANDLER(f64convert_i32_s) { stack.apply(std::array{valtype::i32}, std::array{valtype::f64}); Target::put_call(code, runtime::f64convert_i32_s); nextop(); }
+HANDLER(f32convert_i32_u) { stack.apply(std::array{valtype::i32}, std::array{valtype::f32}); Target::put_call(code, runtime::f32convert_i32_u); nextop(); }
+HANDLER(f64convert_i32_u) { stack.apply(std::array{valtype::i32}, std::array{valtype::f64}); Target::put_call(code, runtime::f64convert_i32_u); nextop(); }
+HANDLER(f32convert_i64_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::f32}); Target::put_call(code, runtime::f32convert_i64_s); nextop(); }
+HANDLER(f64convert_i64_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::f64}); Target::put_call(code, runtime::f64convert_i64_s); nextop(); }
+HANDLER(f32convert_i64_u) { stack.apply(std::array{valtype::i64}, std::array{valtype::f32}); Target::put_call(code, runtime::f32convert_i64_u); nextop(); }
+HANDLER(f64convert_i64_u) { stack.apply(std::array{valtype::i64}, std::array{valtype::f64}); Target::put_call(code, runtime::f64convert_i64_u); nextop(); }
+HANDLER(f32demote_f64) {    stack.apply(std::array{valtype::f64}, std::array{valtype::f32}); Target::put_call(code, runtime::f32demote_f64); nextop(); }
+HANDLER(f64promote_f32) {   stack.apply(std::array{valtype::f32}, std::array{valtype::f64}); Target::put_call(code, runtime::f64promote_f32); nextop(); }
 HANDLER(i32reinterpret_f32) { stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); nextop(); }
 HANDLER(f32reinterpret_i32) { stack.apply(std::array{valtype::i32}, std::array{valtype::f32}); nextop(); }
 HANDLER(i64reinterpret_f64) { stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); nextop(); }
 HANDLER(f64reinterpret_i64) { stack.apply(std::array{valtype::i64}, std::array{valtype::f64}); nextop(); }
-HANDLER(i32extend8_s) {  stack.apply(std::array{valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32extend8_s)); nextop(); }
-HANDLER(i32extend16_s) { stack.apply(std::array{valtype::i32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32extend16_s)); nextop(); }
-HANDLER(i64extend8_s) {  stack.apply(std::array{valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64extend8_s)); nextop(); }
-HANDLER(i64extend16_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64extend16_s)); nextop(); }
-HANDLER(i64extend32_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64extend32_s)); nextop(); }
+HANDLER(i32extend8_s) {  stack.apply(std::array{valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32extend8_s); nextop(); }
+HANDLER(i32extend16_s) { stack.apply(std::array{valtype::i32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32extend16_s); nextop(); }
+HANDLER(i64extend8_s) {  stack.apply(std::array{valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64extend8_s); nextop(); }
+HANDLER(i64extend16_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64extend16_s); nextop(); }
+HANDLER(i64extend32_s) { stack.apply(std::array{valtype::i64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64extend32_s); nextop(); }
 // clang-format on
 HANDLER(ref_null) {
     auto type_idx = safe_read_leb128<uint32_t>(iter);
@@ -1604,7 +1607,7 @@ HANDLER(ref_null) {
     stack.apply(std::array<valtype, 0>(),
                 std::array{static_cast<valtype>(type_idx)});
 
-    put(code, Target::call(runtime::ref_null));
+    Target::put_call(code, runtime::ref_null);
     nextop();
 }
 HANDLER(ref_is_null) {
@@ -1612,7 +1615,7 @@ HANDLER(ref_is_null) {
     ensure(peek == valtype::any || is_reftype(peek), "type mismatch");
     stack.apply(std::array{peek}, std::array{valtype::i32});
 
-    put(code, Target::call(runtime::ref_is_null));
+    Target::put_call(code, runtime::ref_is_null);
     nextop();
 }
 HANDLER(ref_func) {
@@ -1622,8 +1625,8 @@ HANDLER(ref_func) {
            "undeclared function reference");
     stack.apply(std::array<valtype, 0>(), std::array{valtype::funcref});
 
-    put(code, Target::set_temp1(1 + func_idx));
-    put(code, Target::call(runtime::ref_func));
+    Target::put_temp1(code, 1 + func_idx);
+    Target::put_call(code, runtime::ref_func);
     nextop();
 }
 HANDLER(ref_eq) {
@@ -1631,18 +1634,18 @@ HANDLER(ref_eq) {
     ensure(peek == valtype::any || is_reftype(peek), "type mismatch");
     stack.apply(std::array{peek, peek}, std::array{valtype::i32});
 
-    put(code, Target::call(runtime::ref_eq));
+    Target::put_call(code, runtime::ref_eq);
     nextop();
 }
 // clang-format off
-HANDLER(i32_trunc_sat_f32_s) { stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32_trunc_sat_f32_s)); nextop(); }
-HANDLER(i32_trunc_sat_f32_u) { stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); put(code, Target::call(runtime::i32_trunc_sat_f32_u)); nextop(); }
-HANDLER(i32_trunc_sat_f64_s) { stack.apply(std::array{valtype::f64}, std::array{valtype::i32}); put(code, Target::call(runtime::i32_trunc_sat_f64_s)); nextop(); }
-HANDLER(i32_trunc_sat_f64_u) { stack.apply(std::array{valtype::f64}, std::array{valtype::i32}); put(code, Target::call(runtime::i32_trunc_sat_f64_u)); nextop(); }
-HANDLER(i64_trunc_sat_f32_s) { stack.apply(std::array{valtype::f32}, std::array{valtype::i64}); put(code, Target::call(runtime::i64_trunc_sat_f32_s)); nextop(); }
-HANDLER(i64_trunc_sat_f32_u) { stack.apply(std::array{valtype::f32}, std::array{valtype::i64}); put(code, Target::call(runtime::i64_trunc_sat_f32_u)); nextop(); }
-HANDLER(i64_trunc_sat_f64_s) { stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64_trunc_sat_f64_s)); nextop(); }
-HANDLER(i64_trunc_sat_f64_u) { stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); put(code, Target::call(runtime::i64_trunc_sat_f64_u)); nextop(); }
+HANDLER(i32_trunc_sat_f32_s) { stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32_trunc_sat_f32_s); nextop(); }
+HANDLER(i32_trunc_sat_f32_u) { stack.apply(std::array{valtype::f32}, std::array{valtype::i32}); Target::put_call(code, runtime::i32_trunc_sat_f32_u); nextop(); }
+HANDLER(i32_trunc_sat_f64_s) { stack.apply(std::array{valtype::f64}, std::array{valtype::i32}); Target::put_call(code, runtime::i32_trunc_sat_f64_s); nextop(); }
+HANDLER(i32_trunc_sat_f64_u) { stack.apply(std::array{valtype::f64}, std::array{valtype::i32}); Target::put_call(code, runtime::i32_trunc_sat_f64_u); nextop(); }
+HANDLER(i64_trunc_sat_f32_s) { stack.apply(std::array{valtype::f32}, std::array{valtype::i64}); Target::put_call(code, runtime::i64_trunc_sat_f32_s); nextop(); }
+HANDLER(i64_trunc_sat_f32_u) { stack.apply(std::array{valtype::f32}, std::array{valtype::i64}); Target::put_call(code, runtime::i64_trunc_sat_f32_u); nextop(); }
+HANDLER(i64_trunc_sat_f64_s) { stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64_trunc_sat_f64_s); nextop(); }
+HANDLER(i64_trunc_sat_f64_u) { stack.apply(std::array{valtype::f64}, std::array{valtype::i64}); Target::put_call(code, runtime::i64_trunc_sat_f64_u); nextop(); }
 // clang-format on
 HANDLER(memory_init) {
     auto seg_idx = safe_read_leb128<uint32_t>(iter);
@@ -1661,10 +1664,10 @@ HANDLER(memory_init) {
     // todo: in theory this could be optimized to directly give address
     // since data segments are shared and known at this point,
     // but data section comes after code section so stuff would have to move
-    put(code,
-        Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
-                          mod.globals.size() + mod.elements.size() + seg_idx));
-    put(code, Target::call(runtime::memory_init));
+    Target::put_temp1(code, 1 + mod.functions.size() + mod.tables.size() +
+                                mod.globals.size() + mod.elements.size() +
+                                seg_idx);
+    Target::put_call(code, runtime::memory_init);
     nextop();
 }
 HANDLER(data_drop) {
@@ -1673,10 +1676,10 @@ HANDLER(data_drop) {
         error<malformed_error>("data count section required");
     }
     ensure(seg_idx < mod.n_data, "unknown data segment");
-    put(code,
-        Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
-                          mod.globals.size() + mod.elements.size() + seg_idx));
-    put(code, Target::call(runtime::data_drop));
+    Target::put_temp1(code, 1 + mod.functions.size() + mod.tables.size() +
+                                mod.globals.size() + mod.elements.size() +
+                                seg_idx);
+    Target::put_call(code, runtime::data_drop);
     nextop();
 }
 HANDLER(memory_copy) {
@@ -1689,7 +1692,7 @@ HANDLER(memory_copy) {
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
 
-    put(code, Target::call(runtime::memory_copy));
+    Target::put_call(code, runtime::memory_copy);
     nextop();
 }
 HANDLER(memory_fill) {
@@ -1700,7 +1703,7 @@ HANDLER(memory_fill) {
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
 
-    put(code, Target::call(runtime::memory_fill));
+    Target::put_call(code, runtime::memory_fill);
     nextop();
 }
 HANDLER(table_init) {
@@ -1715,19 +1718,19 @@ HANDLER(table_init) {
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
-                                mod.globals.size() + seg_idx));
-    put(code, Target::set_temp2(1 + mod.functions.size() + table_idx));
-    put(code, Target::call(runtime::table_init));
+    Target::put_temp1(code, 1 + mod.functions.size() + mod.tables.size() +
+                                mod.globals.size() + seg_idx);
+    Target::put_temp2(code, 1 + mod.functions.size() + table_idx);
+    Target::put_call(code, runtime::table_init);
     nextop();
 }
 HANDLER(elem_drop) {
     auto seg_idx = safe_read_leb128<uint32_t>(iter);
     ensure(seg_idx < mod.elements.size(), "unknown elem segment");
 
-    put(code, Target::set_temp1(1 + mod.functions.size() + mod.tables.size() +
-                                mod.globals.size() + seg_idx));
-    put(code, Target::call(runtime::elem_drop));
+    Target::put_temp1(code, 1 + mod.functions.size() + mod.tables.size() +
+                                mod.globals.size() + seg_idx);
+    Target::put_call(code, runtime::elem_drop);
     nextop();
 }
 HANDLER(table_copy) {
@@ -1741,9 +1744,9 @@ HANDLER(table_copy) {
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(1 + mod.functions.size() + dst_table_idx));
-    put(code, Target::set_temp2(1 + mod.functions.size() + src_table_idx));
-    put(code, Target::call(runtime::table_copy));
+    Target::put_temp1(code, 1 + mod.functions.size() + dst_table_idx);
+    Target::put_temp2(code, 1 + mod.functions.size() + src_table_idx);
+    Target::put_call(code, runtime::table_copy);
     nextop();
 }
 HANDLER(table_grow) {
@@ -1753,8 +1756,8 @@ HANDLER(table_grow) {
     stack.apply(std::array{mod.tables[table_idx].type, valtype::i32},
                 std::array{valtype::i32});
 
-    put(code, Target::set_temp1(1 + mod.functions.size() + table_idx));
-    put(code, Target::call(runtime::table_grow));
+    Target::put_temp1(code, 1 + mod.functions.size() + table_idx);
+    Target::put_call(code, runtime::table_grow);
     nextop();
 }
 HANDLER(table_size) {
@@ -1763,8 +1766,8 @@ HANDLER(table_size) {
 
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
 
-    put(code, Target::set_temp1(1 + mod.functions.size() + table_idx));
-    put(code, Target::call(runtime::table_size));
+    Target::put_temp1(code, 1 + mod.functions.size() + table_idx);
+    Target::put_call(code, runtime::table_size);
     nextop();
 }
 HANDLER(table_fill) {
@@ -1775,8 +1778,8 @@ HANDLER(table_fill) {
         std::array{valtype::i32, mod.tables[table_idx].type, valtype::i32},
         std::array<valtype, 0>());
 
-    put(code, Target::set_temp1(1 + mod.functions.size() + table_idx));
-    put(code, Target::call(runtime::table_fill));
+    Target::put_temp1(code, 1 + mod.functions.size() + table_idx);
+    Target::put_call(code, runtime::table_fill);
     nextop();
 }
 
@@ -1809,9 +1812,9 @@ uint8_t *Module::validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
 
     auto locals_bytes = fn.locals.bytesize() - fn.type.params.bytesize();
 
-    put(code, Target::get_prelude());
-    put(code, Target::set_temp1(locals_bytes));
-    put(code, Target::call(runtime::clear_locals));
+    Target::put_prelude(code);
+    Target::put_temp1(code, locals_bytes);
+    Target::put_call(code, runtime::clear_locals);
 
     return funcs<Target>[*iter++](*this, iter, fn, stack, control_stack, code);
 }
