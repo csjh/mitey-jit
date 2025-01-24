@@ -73,22 +73,21 @@ class Arm64 {
   private:
     static void put_mov64(uint8_t *&code, uint64_t value, uint8_t reg) {
         constexpr uint32_t nop = 0xd503201f;
+        const uint32_t movz = 0xd2800000 | reg;
 
         // default to mov <reg>, #0x0 as first instruction
-        auto instructions =
-            std::array<uint32_t, 4>{0xd2800000 | reg, nop, nop, nop};
-        auto keep = false;
-        size_t i, j;
-        for (i = 0, j = 0; i < sizeof(uint32_t); i++) {
+        std::memcpy(code, &movz, sizeof(uint32_t));
+        if (!value) {
+            code += sizeof(uint32_t);
+        }
+
+        bool keep = false;
+        for (size_t i = 0; i < sizeof(uint32_t) && value; i++) {
             auto literal = value & 0xffff;
             value >>= 16;
-            if (literal == 0)
-                continue;
-            instructions[j++] = mov16(true, keep, literal, i, reg);
+            put(code, mov16(true, keep, literal, i, reg));
             keep = true;
         }
-        std::memcpy(code, instructions.data(), sizeof(instructions));
-        code += sizeof(uint32_t) * (j == 0 ? 1 : j);
         return;
 
         /* these additions save ~3-4% in the executable, but
