@@ -6,7 +6,7 @@ namespace mitey {
 // places an N-bit immediate Offset bits into a 32-bit word
 // ---------------xxxxxxx----------
 // ^^ above would be Immediate<7, 15>
-template <size_t Bits, size_t Offset> class Immediate {
+template <size_t Bits, size_t Offset> struct Immediate {
     uint32_t *base;
 
     constexpr Immediate(uint32_t *base) : base(base) {}
