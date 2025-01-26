@@ -70,7 +70,46 @@ class Arm64 {
     }
     static constexpr size_t max_temp2_size = sizeof(uint32_t) * 4;
 
+    // todo: everything should return an Immediate
+    // which writes the jump offsets
+    // but how do I store these Immediates :/
+    static Immediate<19, 8> put_br(uint8_t *&code, uint32_t arity,
+                                   uint32_t stack_offset) {
+        auto imm = Immediate<19, 8>((uint32_t *)code);
+        put(code, (0b01010100u << 24) | (0 << 5) | AL); // b 0x0
+        return imm;
+    }
+
+    static Immediate<19, 8> put_br_if(uint8_t *&code, uint32_t arity,
+                                      uint32_t stack_offset) {
+        constexpr uint8_t w8 = 8;
+
+        put(code, 0xb85f8c48u); // ldr	w8, [x2, #-0x8]!
+        auto imm = Immediate<19, 8>((uint32_t *)code);
+        put(code, (0b00110100u << 24) | (0 << 5) | w8); // cbz w8, 0x0
+        auto dest = put_br(code, arity, stack_offset);
+        imm = (uint32_t *)code - imm.base;
+        return dest;
+    }
+
+    static Immediate<19, 8> put_if(uint8_t *&code) {
+        constexpr uint8_t w8 = 8;
+
+        put(code, 0xb85f8c48u); // ldr	w8, [x2, #-0x8]!
+        auto imm = Immediate<19, 8>((uint32_t *)code);
+        put(code, (0b00110100u << 24) | (0 << 5) | w8); // cbz w8, 0x0
+        return imm;
+    }
+
+    // else is just a br(0, 0)?
+
   private:
+    enum Condition {
+        EQ = 0b0000,
+        NE = 0b0001,
+        AL = 0b1110,
+    };
+
     static void put_mov64(uint8_t *&code, uint64_t value, uint8_t reg) {
         constexpr uint32_t nop = 0xd503201f;
         const uint32_t movz = 0xd2800000 | reg;
