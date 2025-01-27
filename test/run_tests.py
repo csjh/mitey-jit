@@ -25,12 +25,17 @@ for file in os.listdir("core"):
             continue
 
         print(f"Testing {file}")
-        result = subprocess.run(["./executor", output_path], capture_output=True)
-        print(result.stdout.decode("utf-8"))
-        print(result.stderr.decode("utf-8"), file=sys.stderr)
+        out, err = "", ""
+        try:
+            result = subprocess.run(["./executor", output_path], capture_output=True)
+            out, err = result.stdout.decode("utf-8"), result.stderr.decode("utf-8")
+        except KeyboardInterrupt:
+            err = "Skipped. Passes: 0\nSoft passes: 0\nFailures: 1"
+        print(out)
+        print(err, file=sys.stderr)
 
         try:
-            p, sp, f = result.stdout.decode("utf-8").split("\n")[-4:-1]
+            p, sp, f = out.split("\n")[-4:-1]
             passed += int(p[len("Passes: ") :])
             soft_passed += int(sp[len("Soft passes: ") :])
             failed += int(f[len("Failures: ") :])
