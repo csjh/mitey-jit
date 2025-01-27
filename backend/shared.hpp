@@ -1,29 +1,38 @@
-#include <cstddef>
+#pragma once
+
 #include <cstdint>
+#include <cstring>
 
 namespace mitey {
 
 // places an N-bit immediate Offset bits into a 32-bit word
 // ---------------xxxxxxx----------
 // ^^ above would be Immediate<7, 15>
-template <size_t Bits, size_t Offset> struct Immediate {
-    uint32_t *base;
+struct Immediate {
+    void *base;
+    uint16_t bits;
+    uint16_t offset;
+    uint16_t align;
 
-    constexpr Immediate(uint32_t *base) : base(base) {}
+    void set(void *to) {
+        auto diff = static_cast<uint8_t *>(to) - static_cast<uint8_t *>(base);
+        auto value = diff / align;
 
-    constexpr void operator=(int32_t value) {
         // sign lower int32_t to intBits_t
-        uint32_t imm = value;
-        imm = imm << (32 - Bits) >> (32 - Bits);
+        auto imm = static_cast<uint32_t>(value);
+        imm = imm << (32 - bits) >> (32 - bits);
 
-        auto v = *base;
-        auto high_len = Offset;
-        auto low_len = 32 - high_len - Bits;
+        uint32_t v;
+        std::memcpy(&v, base, sizeof(v));
 
-        auto low = (v << (high_len + Bits)) >> (high_len + Bits);
-        auto high = (v >> (low_len + Bits)) << (low_len + Bits);
+        auto high_len = offset;
+        auto low_len = 32 - high_len - bits;
 
-        *base = high | (imm << low_len) | low;
+        auto low = (v << (high_len + bits)) >> (high_len + bits);
+        auto high = (v >> (low_len + bits)) << (low_len + bits);
+
+        uint32_t result = high | (imm << low_len) | low;
+        std::memcpy(base, &result, sizeof(result));
     }
 };
 

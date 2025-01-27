@@ -1,5 +1,6 @@
 #pragma once
 
+#include "./backend/shared.hpp"
 #include "./instance.hpp"
 #include "pager/shared.hpp"
 #include "runtime.hpp"
@@ -98,7 +99,7 @@ struct Loop {
 };
 
 struct If {
-    uint8_t *else_jump;
+    Immediate else_jump;
 };
 
 struct IfElse {};
@@ -110,7 +111,7 @@ struct PendingBrTable {
 
 struct ControlFlow {
     valtype_vector &expected;
-    std::vector<uint8_t *> pending_br;
+    std::vector<Immediate> pending_br;
     std::vector<PendingBrTable> pending_br_tables;
     WasmSignature &sig;
     bool polymorphized;

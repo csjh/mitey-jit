@@ -976,9 +976,7 @@ HANDLER(loop) {
 HANDLER(if_) {
     auto &signature = read_blocktype(mod.types, iter);
 
-    auto if_ = If(code);
-    Target::placehold(code, Target::put_temp1);
-    Target::put_call(code, runtime::if_);
+    auto if_ = If(Target::put_if(code));
 
     stack.pop(valtype::i32);
     stack.enter_flow(signature.params);
@@ -1002,10 +1000,8 @@ HANDLER(else_) {
 
     auto [else_jump] = std::get<If>(construct);
     // jump to end of if/else block after if block
-    pending_br.push_back(code);
-    Target::placehold(code, Target::put_temp1);
-    Target::put_call(code, runtime::jump);
-    Target::put_temp1(else_jump, reinterpret_cast<uint64_t>(code));
+    pending_br.push_back(Target::put_br(code, 0, 0));
+    else_jump.set(code);
 
     control_stack.back().construct = IfElse();
     stack.unpolymorphize();
@@ -1019,14 +1015,13 @@ HANDLER(end) {
 
     if (std::holds_alternative<If>(construct)) {
         ensure(sig.params == sig.results, "type mismatch params vs. results");
-        Target::put_temp1(std::get<If>(construct).else_jump,
-                          reinterpret_cast<uint64_t>(code));
+        std::get<If>(construct).else_jump.set(code);
     }
 
     // everything except loop jumps to end
     if (!std::holds_alternative<Loop>(construct)) {
         for (auto target : pending_br) {
-            Target::put_temp1(target, reinterpret_cast<uint64_t>(code));
+            target.set(code);
         }
         for (auto [table, target] : pending_br_tables) {
             auto diff = code - table;
@@ -1071,36 +1066,14 @@ HANDLER(br) {
     stack.check_br(control_stack, depth);
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
-    auto info = runtime::BrInfo(0, flow.expected.bytesize(),
-                                flow.stack_offset - stack.sp());
+    auto imm = Target::put_br(code, flow.expected.bytesize(),
+                              flow.stack_offset - stack.sp());
+
     if (std::holds_alternative<Loop>(flow.construct)) {
-        Target::put_temp1(code, reinterpret_cast<uint64_t>(
-                                    std::get<Loop>(flow.construct).start));
+        imm.set(std::get<Loop>(flow.construct).start);
     } else {
-        flow.pending_br.push_back(code);
-        Target::placehold(code, Target::put_temp1);
+        flow.pending_br.push_back(imm);
     }
-
-#define BR(arity_, stack_offset_)                                              \
-    if (info.arity == arity_ && info.stack_offset == stack_offset_) {          \
-        Target::put_call(code, runtime::br_##arity_##_##stack_offset_);        \
-        break;                                                                 \
-    }
-    do {
-        BR(0, 0);
-        BR(0, 8);
-        BR(0, 16);
-        BR(0, 24);
-        BR(0, 32);
-        BR(0, 40);
-        BR(8, 8);
-        BR(8, 16);
-        BR(8, 24);
-
-        Target::put_temp2(code, std::bit_cast<uint64_t>(info));
-        Target::put_call(code, runtime::br_n_n);
-    } while (0);
-#undef BR
 
     stack.polymorphize();
     nextop();
@@ -1112,36 +1085,14 @@ HANDLER(br_if) {
     stack.check_br(control_stack, depth);
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
-    auto info = runtime::BrInfo(0, flow.expected.bytesize(),
-                                flow.stack_offset - stack.sp());
+    auto imm = Target::put_br_if(code, flow.expected.bytesize(),
+                                 flow.stack_offset - stack.sp());
+
     if (std::holds_alternative<Loop>(flow.construct)) {
-        Target::put_temp1(code, reinterpret_cast<uint64_t>(
-                                    std::get<Loop>(flow.construct).start));
+        imm.set(std::get<Loop>(flow.construct).start);
     } else {
-        flow.pending_br.push_back(code);
-        Target::placehold(code, Target::put_temp1);
+        flow.pending_br.push_back(imm);
     }
-
-#define BR_IF(arity_, stack_offset_)                                           \
-    if (info.arity == arity_ && info.stack_offset == stack_offset_) {          \
-        Target::put_call(code, runtime::br_if_##arity_##_##stack_offset_);     \
-        break;                                                                 \
-    }
-    do {
-        BR_IF(0, 0);
-        BR_IF(0, 8);
-        BR_IF(0, 16);
-        BR_IF(0, 24);
-        BR_IF(0, 32);
-        BR_IF(0, 40);
-        BR_IF(8, 8);
-        BR_IF(8, 16);
-        BR_IF(8, 24);
-
-        Target::put_temp2(code, std::bit_cast<uint64_t>(info));
-        Target::put_call(code, runtime::br_if_n_n);
-    } while (0);
-#undef BR
 
     nextop();
 }
@@ -1210,32 +1161,14 @@ HANDLER(return_) {
     stack.check_br(control_stack, control_stack.size() - 1);
 
     auto &flow = control_stack.front();
-    auto info = runtime::BrInfo(0, flow.expected.bytesize(),
-                                flow.stack_offset - stack.sp());
+    auto imm = Target::put_br(code, flow.expected.bytesize(),
+                              flow.stack_offset - stack.sp());
 
-    flow.pending_br.push_back(code);
-    Target::placehold(code, Target::put_temp1);
-
-#define BR(arity_, stack_offset_)                                              \
-    if (info.arity == arity_ && info.stack_offset == stack_offset_) {          \
-        Target::put_call(code, runtime::br_##arity_##_##stack_offset_);        \
-        break;                                                                 \
+    if (std::holds_alternative<Loop>(flow.construct)) {
+        imm.set(std::get<Loop>(flow.construct).start);
+    } else {
+        flow.pending_br.push_back(imm);
     }
-    do {
-        BR(0, 0);
-        BR(0, 8);
-        BR(0, 16);
-        BR(0, 24);
-        BR(0, 32);
-        BR(0, 40);
-        BR(8, 8);
-        BR(8, 16);
-        BR(8, 24);
-
-        Target::put_temp2(code, std::bit_cast<uint64_t>(info));
-        Target::put_call(code, runtime::br_n_n);
-    } while (0);
-#undef BR
 
     stack.polymorphize();
     nextop();
