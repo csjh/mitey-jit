@@ -88,6 +88,8 @@ class Arm64 {
             for (auto m = 0; m < arity; m += sizeof(uint64_t)) {
                 auto src = -arity + m;
                 auto dst = stack_offset + m;
+                // note: this should be handled better when src/dst
+                // are higher than 1<<9
                 put(code, memop(LOAD, src, x6, stackptr));
                 put(code, memop(STORE, dst, x6, stackptr));
             }
