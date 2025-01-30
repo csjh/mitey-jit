@@ -82,15 +82,20 @@ static constexpr auto Valtype<runtime::FunctionInfo *> = valtype::funcref;
 template <> static constexpr auto Valtype<Externref> = valtype::externref;
 template <typename T> static constexpr auto Valtype<T *> = valtype::i32;
 
-static std::string valtype_names[] = {
-    [static_cast<uint8_t>(valtype::null)] = "null",
-    [static_cast<uint8_t>(valtype::any)] = "any",
-    [static_cast<uint8_t>(valtype::i32)] = "i32",
-    [static_cast<uint8_t>(valtype::i64)] = "i64",
-    [static_cast<uint8_t>(valtype::f32)] = "f32",
-    [static_cast<uint8_t>(valtype::f64)] = "f64",
-    [static_cast<uint8_t>(valtype::funcref)] = "funcref",
-    [static_cast<uint8_t>(valtype::externref)] = "externref"};
+consteval auto make_valtype_names() {
+    std::array<std::string, 256> names{};
+    names[static_cast<uint8_t>(valtype::null)] = "null";
+    names[static_cast<uint8_t>(valtype::any)] = "any";
+    names[static_cast<uint8_t>(valtype::i32)] = "i32";
+    names[static_cast<uint8_t>(valtype::i64)] = "i64";
+    names[static_cast<uint8_t>(valtype::f32)] = "f32";
+    names[static_cast<uint8_t>(valtype::f64)] = "f64";
+    names[static_cast<uint8_t>(valtype::funcref)] = "funcref";
+    names[static_cast<uint8_t>(valtype::externref)] = "externref";
+    return names;
+}
+
+static constexpr auto valtype_names = make_valtype_names();
 
 static inline uint32_t valtype_size(valtype type) {
     switch (type) {
