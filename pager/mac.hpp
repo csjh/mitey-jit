@@ -2,6 +2,7 @@
 
 #include "../runtime.hpp"
 #include "./shared.hpp"
+#include <algorithm>
 #include <functional>
 #include <libkern/OSCacheControl.h>
 #include <signal.h>

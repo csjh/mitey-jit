@@ -7,6 +7,7 @@
 #include <cstring>
 #include <memory>
 #include <unordered_map>
+#include <variant>
 
 namespace mitey {
 

@@ -917,8 +917,9 @@ FOREACH_INSTRUCTION(V)
 #else
 #define nextop()                                                               \
     do {                                                                       \
-        [[clang::musttail]] return funcs<Target>[*iter++](                     \
-            mod, iter, fn, stack, control_stack, code);                        \
+        auto byte = *iter++;                                                   \
+        [[clang::musttail]] return funcs<Target>[byte](mod, iter, fn, stack,   \
+                                                       control_stack, code);   \
     } while (0)
 #endif
 
@@ -1731,8 +1732,9 @@ consteval std::array<CompilationHandler *, 256> make_fc_funcs() {
 HANDLER(multibyte) {
     constexpr auto fc_funcs = make_fc_funcs<Target>();
 
-    [[clang::musttail]] return fc_funcs[safe_read_leb128<uint8_t, 32>(iter)](
-        mod, iter, fn, stack, control_stack, code);
+    auto byte = safe_read_leb128<uint8_t, 32>(iter);
+    [[clang::musttail]] return fc_funcs[byte](mod, iter, fn, stack,
+                                              control_stack, code);
 }
 
 template <typename Pager, typename Target>
@@ -1749,7 +1751,8 @@ uint8_t *Module::validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
     Target::put_temp1(code, locals_bytes);
     Target::put_call(code, runtime::clear_locals);
 
-    return funcs<Target>[*iter++](*this, iter, fn, stack, control_stack, code);
+    auto byte = *iter++;
+    return funcs<Target>[byte](*this, iter, fn, stack, control_stack, code);
 }
 
 #undef LOAD
