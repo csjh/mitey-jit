@@ -241,4 +241,6 @@ class Module {
 
 } // namespace mitey
 
+#ifndef WASM_SPECIALIZATION
 #include "module-impl.hpp"
+#endif
