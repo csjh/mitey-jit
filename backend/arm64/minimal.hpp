@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../runtime.hpp"
-#include "./shared.hpp"
+#include "../../runtime.hpp"
+#include "../shared.hpp"
 #include <array>
 #include <cstring>
 #include <libkern/OSCacheControl.h>

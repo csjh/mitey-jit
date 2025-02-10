@@ -1,5 +1,5 @@
+#include "./backend/arm64/minimal.hpp"
 #include "./wasi.h"
-#include "backend/arm64.hpp"
 #include "interfacing.hpp"
 #include "module.hpp"
 #include "pager/mac.hpp"
