@@ -25,10 +25,25 @@ constexpr auto caller_saved = std::to_array({
     ireg::x16, ireg::x17, ireg::x18});
 // clang-format on
 
+// todo: maybe put in callee saved? can bench
+constexpr auto memreg = ireg::x0;
+constexpr auto miscreg = ireg::x1;
+
 // locals go in callee saved registers, because we don't want to save them
 // around every call
 // stack scratch can probably go in caller saved registers, because there's
 // probably less of them at callsites
+
+// some basics:
+// instead of just tracking type, validation stack also tracks:
+// - location (register name or stack)
+//   - stack offset is implicit, even variables in registers are "on the stack"
+//     for easier spills
+//   - note register name can be a local
+// - whether or not it's a const, if so its value
+// - whether or not it's a flag
+//   - note there can't be multiple flags in the stack at once, so it has to be
+//     tracked (by index) and spilled if another flag comes along before its use
 
 } // namespace arm64
 } // namespace mitey
