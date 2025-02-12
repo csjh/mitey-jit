@@ -45,5 +45,16 @@ constexpr auto miscreg = ireg::x1;
 //   - note there can't be multiple flags in the stack at once, so it has to be
 //     tracked (by index) and spilled if another flag comes along before its use
 
+// calling convention:
+// - scratch registers are caller saved (duh)
+//   - opportunity for optimization here; after all functions are compiled, can
+//     know whether or not a function actually clobbers a given register
+// - parameters are passed on the stack
+//   - this could probably be optimized more; note that stack pointer could be
+//     decremented instead of pushing to the stack, because stuff past sp is
+//     dead values
+// - results are passed in caller saved registers, or on the stack if there are
+//   too many
+
 } // namespace arm64
 } // namespace mitey
