@@ -56,5 +56,18 @@ constexpr auto miscreg = ireg::x1;
 // - results are passed in caller saved registers, or on the stack if there are
 //   too many
 
+// block handling:
+// - things that can be clobbered in a block:
+//   - flags
+//     - flags will always be clobbered in a block (otherwise it's a block
+//     without conditions, which is stupid) so always spill them
+//   - scratch registers
+//     - put a nop at the start for each scratch reg thing in scope
+//     - todo: would it be better to just put 16 nops for everything? prolly not
+//   - by the end we know what's clobbered so that can be done anyways
+// - things that can't be clobbered in a block:
+//   - locals
+//   - the stack
+
 } // namespace arm64
 } // namespace mitey
