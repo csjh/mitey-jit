@@ -56,4 +56,9 @@ class RegLRU {
         store = std::rotr(store, Bits);
         return last;
     }
+
+    void discard(size_t n) {
+        bump(n);
+        store = std::rotl(store, Bits);
+    }
 };
