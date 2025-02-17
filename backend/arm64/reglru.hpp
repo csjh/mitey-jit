@@ -15,19 +15,20 @@ class RegLRU {
     uint64_t store = 0xfedcba9876543210;
     static constexpr auto StoreBits = sizeof(store) * 8;
 
+    static constexpr auto LowBitsMask = 0x7777777777777777ull;
+    static constexpr auto OnesBitMask = 0x1111111111111111ull;
+
     // returns the match with a single bit set, in the ones digit of the match
     // adapted from stringzilla
     size_t find(size_t n) {
         ASSUME(n <= Max);
 
-        n *= 0x1111111111111111ull;
+        n *= OnesBitMask;
         auto mask = ~(store ^ n);
-        // The match is valid, if every bit within each byte is set.
-        // For that take the bottom 7 bits of each byte, add one to them,
-        // and if this sets the top bit to one, then all the 7 bits are ones as
-        // well.
-        mask = ((mask & 0x7777777777777777ull) + 0x1111111111111111ull) &
-               ((mask & 0x8888888888888888ull));
+        // The match is valid, if every bit within each byte is set. For that,
+        // take the bottom 7 bits of each byte, add one to them, and if this
+        // sets the top bit to one, then all the 7 bits are ones as well.
+        mask = ((mask & LowBitsMask) + OnesBitMask) & ((mask & ~LowBitsMask));
         return mask >> 3;
     }
 
