@@ -884,7 +884,7 @@ void WasmStack::apply(std::array<valtype, pc> params,
     uint8_t *validate_##name(Module &mod, safe_byte_iterator &iter,            \
                              FunctionShell &fn, WasmStack &stack,              \
                              std::vector<ControlFlow> &control_stack,          \
-                             uint8_t *code)
+                             uint8_t *code, typename Target::extra extra)
 
 #define V(name, _, byte) HANDLER(name);
 FOREACH_INSTRUCTION(V)
@@ -929,8 +929,8 @@ FOREACH_INSTRUCTION(V)
 HANDLER(missing) { error<malformed_error>("invalid instruction"); }
 
 template <typename Target>
-consteval std::array<CompilationHandler *, 256> make_funcs() {
-    std::array<CompilationHandler *, 256> funcs;
+consteval std::array<CompilationHandler<Target> *, 256> make_funcs() {
+    std::array<CompilationHandler<Target> *, 256> funcs;
     funcs.fill(validate_missing<Target>);
 
 #define V(name, _, byte) funcs[byte] = &validate_##name<Target>;
@@ -942,18 +942,16 @@ consteval std::array<CompilationHandler *, 256> make_funcs() {
 
 template <typename Target> static auto funcs = make_funcs<Target>();
 
-template <typename T> void put(uint8_t *&code, const T &value) {
-    std::memcpy(code, &value, sizeof(T));
-    code += sizeof(T);
-}
-
 HANDLER(unreachable) {
     stack.polymorphize();
 
-    Target::put_call(code, runtime::unreachable);
+    Target::unreachable(code);
     nextop();
 }
-HANDLER(nop) { nextop(); }
+HANDLER(nop) {
+    Target::nop(code);
+    nextop();
+}
 HANDLER(block) {
     auto &signature = read_blocktype(mod.types, iter);
 
@@ -962,6 +960,8 @@ HANDLER(block) {
         ControlFlow(signature.results, {}, {}, signature, stack.polymorphism(),
                     stack.sp() - signature.params.bytesize(), Block()));
     stack.unpolymorphize();
+
+    Target::block(code);
     nextop();
 }
 HANDLER(loop) {
@@ -1220,7 +1220,7 @@ HANDLER(call_indirect) {
 HANDLER(drop) {
     stack.pop(stack.back());
 
-    Target::put_call(code, runtime::drop);
+    Target::drop(code);
     nextop();
 }
 HANDLER(select) {
@@ -1718,8 +1718,8 @@ HANDLER(table_fill) {
 }
 
 template <typename Target>
-consteval std::array<CompilationHandler *, 256> make_fc_funcs() {
-    std::array<CompilationHandler *, 256> fc_funcs;
+consteval std::array<CompilationHandler<Target> *, 256> make_fc_funcs() {
+    std::array<CompilationHandler<Target> *, 256> fc_funcs;
     fc_funcs.fill(validate_missing<Target>);
 
 #define V(name, _, byte) fc_funcs[byte] = &validate_##name<Target>;

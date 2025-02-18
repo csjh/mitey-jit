@@ -171,15 +171,18 @@ class WasmStack {
 
 class Module;
 
+template <typename Target>
 using CompilationHandler = uint8_t *(Module &, safe_byte_iterator &,
                                      FunctionShell &, WasmStack &,
-                                     std::vector<ControlFlow> &, uint8_t *);
+                                     std::vector<ControlFlow> &, uint8_t *,
+                                     typename Target::extra);
 
 class Module {
     friend class Instance;
 
 #define V(name, _, byte)                                                       \
-    template <typename Target> friend CompilationHandler validate_##name;
+    template <typename Target>                                                 \
+    friend CompilationHandler<Target> validate_##name;
     FOREACH_INSTRUCTION(V)
     FOREACH_MULTIBYTE_INSTRUCTION(V)
 #undef V
