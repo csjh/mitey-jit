@@ -4,6 +4,7 @@
 #include "runtime.hpp"
 #include "spec.hpp"
 #include <numeric>
+#include <variant>
 
 #ifdef WASM_DEBUG
 #include <iostream>
@@ -957,7 +958,7 @@ HANDLER(block) {
                     stack.sp() - signature.params.bytesize(), Block()));
     stack.unpolymorphize();
 
-    Target::block(code);
+    _(block, signature);
     nextop();
 }
 HANDLER(loop) {
@@ -968,19 +969,22 @@ HANDLER(loop) {
         ControlFlow(signature.params, {}, {}, signature, stack.polymorphism(),
                     stack.sp() - signature.params.bytesize(), Loop(code)));
     stack.unpolymorphize();
+
+    _(loop, signature);
     nextop();
 }
 HANDLER(if_) {
     auto &signature = read_blocktype(mod.types, iter);
 
-    auto if_ = If(Target::put_if(code));
-
     stack.pop(valtype::i32);
     stack.enter_flow(signature.params);
     control_stack.emplace_back(
         ControlFlow(signature.results, {}, {}, signature, stack.polymorphism(),
-                    stack.sp() - signature.params.bytesize(), if_));
+                    stack.sp() - signature.params.bytesize(), If(nullptr)));
     stack.unpolymorphize();
+
+    auto if_ptr = _(if_, signature);
+    control_stack.back().construct = If(if_ptr);
     nextop();
 }
 HANDLER(else_) {
@@ -989,19 +993,19 @@ HANDLER(else_) {
     ensure(std::holds_alternative<If>(construct), "else must close an if");
     ensure(stack == sig.results, "type mismatch");
 
+    auto [else_jump] = std::get<If>(construct);
+
     stack.pop(sig.results);
     stack.push(sig.params);
 
     // necessary in case of polymorphic stack
     stack.set_sp(stack_offset + sig.params.bytesize());
 
-    auto [else_jump] = std::get<If>(construct);
-    // jump to end of if/else block after if block
-    pending_br.push_back(Target::put_br(code, 0, 0));
-    else_jump.set(code);
-
     control_stack.back().construct = IfElse();
     stack.unpolymorphize();
+
+    auto else_ptr = _(else_, sig, else_jump);
+    pending_br.push_back(else_ptr);
     nextop();
 }
 HANDLER(end) {
@@ -1012,36 +1016,15 @@ HANDLER(end) {
 
     if (std::holds_alternative<If>(construct)) {
         ensure(sig.params == sig.results, "type mismatch params vs. results");
-        std::get<If>(construct).else_jump.set(code);
-    }
-
-    // everything except loop jumps to end
-    if (!std::holds_alternative<Loop>(construct)) {
-        for (auto target : pending_br) {
-            target.set(code);
-        }
-        for (auto [table, target] : pending_br_tables) {
-            auto diff = code - table;
-            auto idiff = static_cast<int32_t>(diff);
-            ensure(idiff == diff, "branch target out of range");
-            std::memcpy(target, &idiff, sizeof(idiff));
-        }
-    }
-
-    if (std::holds_alternative<Function>(construct)) {
-        // move results past locals
-        Target::put_temp1(code, -fn.locals.bytesize());
-        auto byte_results = sig.results.bytesize();
-        if (byte_results == 0) {
-            Target::put_call(code, runtime::move_0_results);
-        } else if (byte_results == 8) {
-            Target::put_call(code, runtime::move_8_results);
-        } else {
-            Target::put_temp2(code, -byte_results);
-            Target::put_call(code, runtime::move_n_results);
-        }
-
-        Target::put_postlude(code);
+        _(end_if, control_stack.back(), std::get<If>(construct).else_jump);
+    } else if (std::holds_alternative<IfElse>(construct)) {
+        _(end_ifelse, control_stack.back());
+    } else if (std::holds_alternative<Block>(construct)) {
+        _(end_block, control_stack.back());
+    } else if (std::holds_alternative<Loop>(construct)) {
+        _(end_loop, control_stack.back(), std::get<Loop>(construct).start);
+    } else if (std::holds_alternative<Function>(construct)) {
+        _(end_function, control_stack.back(), fn);
         return code;
     }
 
@@ -1061,18 +1044,9 @@ HANDLER(end) {
 HANDLER(br) {
     auto depth = safe_read_leb128<uint32_t>(iter);
     stack.check_br(control_stack, depth);
-    auto &flow = control_stack[control_stack.size() - depth - 1];
-
-    auto imm = Target::put_br(code, flow.expected.bytesize(),
-                              flow.stack_offset - stack.sp());
-
-    if (std::holds_alternative<Loop>(flow.construct)) {
-        imm.set(std::get<Loop>(flow.construct).start);
-    } else {
-        flow.pending_br.push_back(imm);
-    }
-
     stack.polymorphize();
+
+    _(br, control_stack, depth);
     nextop();
 }
 HANDLER(br_if) {
@@ -1080,17 +1054,8 @@ HANDLER(br_if) {
 
     auto depth = safe_read_leb128<uint32_t>(iter);
     stack.check_br(control_stack, depth);
-    auto &flow = control_stack[control_stack.size() - depth - 1];
 
-    auto imm = Target::put_br_if(code, flow.expected.bytesize(),
-                                 flow.stack_offset - stack.sp());
-
-    if (std::holds_alternative<Loop>(flow.construct)) {
-        imm.set(std::get<Loop>(flow.construct).start);
-    } else {
-        flow.pending_br.push_back(imm);
-    }
-
+    _(br_if, control_stack, depth);
     nextop();
 }
 HANDLER(br_table) {
@@ -1098,76 +1063,36 @@ HANDLER(br_table) {
     // todo: maybe a different function for low n could be good?
     auto n_targets = safe_read_leb128<uint32_t>(iter);
 
-    auto t1_addr = code;
-    Target::placehold(code, Target::put_temp1);
-    auto t2_addr = code;
-    Target::placehold(code, Target::put_temp2);
-    auto call_addr = code;
-    Target::placehold(code, Target::put_call);
-    auto table_addr = code;
-
-    Target::put_temp1(t1_addr, reinterpret_cast<uint64_t>(table_addr));
-
-    auto targets = (uint32_t *)alloca(sizeof(uint32_t) * (n_targets + 1));
-    for (uint32_t i = 0; i <= n_targets; ++i) {
+    auto targets = std::span(
+        (uint32_t *)alloca(sizeof(uint32_t) * (n_targets + 1)), n_targets + 1);
+    for (auto &depth : targets) {
         auto target = safe_read_leb128<uint32_t>(iter);
         ensure(target < control_stack.size(), "unknown label");
-        targets[i] = target;
+        depth = target;
     }
     auto base = control_stack.size() - 1;
-    auto &default_target = control_stack[base - targets[n_targets]].expected;
+    auto &default_target = control_stack[base - targets.back()].expected;
 
-    auto info = runtime::BrInfo(n_targets, default_target.bytesize());
-    if (info.arity == 0) {
-        Target::put_call(call_addr, runtime::br_table_0);
-    } else if (info.arity == 8) {
-        Target::put_call(call_addr, runtime::br_table_8);
-    } else {
-        Target::put_call(call_addr, runtime::br_table_n);
-    }
-    Target::put_temp2(t2_addr, std::bit_cast<uint64_t>(info));
-
-    for (uint32_t i = 0; i <= n_targets; ++i) {
-        auto &target = control_stack[base - targets[i]].expected;
+    for (auto &depth : targets) {
+        auto &target = control_stack[base - depth].expected;
         if (stack.can_be_anything()) {
             ensure(stack.check(target), "type mismatch");
             ensure(default_target.size() == target.size(), "type mismatch");
         } else {
-            stack.check_br(control_stack, targets[i]);
-
-            auto &flow = control_stack[control_stack.size() - targets[i] - 1];
-            auto offset = flow.stack_offset - stack.sp();
-            if (std::holds_alternative<Loop>(flow.construct)) {
-                put(code, runtime::BrTableTarget(
-                              std::get<Loop>(flow.construct).start - table_addr,
-                              offset));
-            } else {
-                flow.pending_br_tables.push_back(
-                    PendingBrTable(table_addr, code));
-                code += sizeof(uint32_t);
-                put(code, static_cast<uint32_t>(offset));
-            }
-
+            stack.check_br(control_stack, depth);
             ensure(default_target == target, "type mismatch");
         }
     }
     stack.polymorphize();
+
+    _(br_table, control_stack, targets);
     nextop();
 }
 HANDLER(return_) {
     stack.check_br(control_stack, control_stack.size() - 1);
-
-    auto &flow = control_stack.front();
-    auto imm = Target::put_br(code, flow.expected.bytesize(),
-                              flow.stack_offset - stack.sp());
-
-    if (std::holds_alternative<Loop>(flow.construct)) {
-        imm.set(std::get<Loop>(flow.construct).start);
-    } else {
-        flow.pending_br.push_back(imm);
-    }
-
     stack.polymorphize();
+
+    _(return_, control_stack);
     nextop();
 }
 HANDLER(call) {
@@ -1178,22 +1103,14 @@ HANDLER(call) {
     stack.apply(func.type);
 
     if (func.import) {
-        Target::put_temp1(code, 1 + fn_idx);
-        Target::put_temp2(code, func.type.results.bytesize() -
-                                    func.type.params.bytesize());
-        Target::put_call(code, runtime::call_extern);
+        _(call_extern, func, 1 + fn_idx);
     } else {
-        mod.pending_calls.push_back({code, fn_idx});
-        Target::placehold(code, Target::put_temp1);
-        Target::put_temp2(code, func.type.results.bytesize() -
-                                    func.type.params.bytesize());
-        Target::put_call(code, runtime::call);
+        auto imm = _(call, func);
+        mod.pending_calls.push_back({imm, fn_idx});
     }
     nextop();
 }
 HANDLER(call_indirect) {
-    stack.pop(valtype::i32);
-
     auto type_idx = safe_read_leb128<uint32_t>(iter);
     ensure(type_idx < mod.types.size(), "unknown type");
 
@@ -1202,15 +1119,10 @@ HANDLER(call_indirect) {
     ensure(mod.tables[table_idx].type == valtype::funcref, "type mismatch");
 
     auto &type = mod.types[type_idx];
+    stack.pop(valtype::i32);
     stack.apply(type);
 
-    auto info = runtime::CallIndirectInfo(1 + mod.functions.size() + table_idx,
-                                          runtime::FunctionType(type));
-    auto [temp1, temp2] = std::bit_cast<std::array<uint64_t, 2>>(info);
-
-    Target::put_temp1(code, temp1);
-    Target::put_temp2(code, temp2);
-    Target::put_call(code, runtime::call_indirect);
+    _(call_indirect, 1 + mod.functions.size() + table_idx, type);
     nextop();
 }
 HANDLER(drop) {
@@ -1251,38 +1163,36 @@ HANDLER(localget) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
 
-    Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx]));
-    Target::put_call(code, runtime::localget);
-
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array<valtype, 0>(), std::array{local_ty});
+
+    _(localget, fn, local_idx);
     nextop();
 }
 HANDLER(localset) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
 
-    Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx]));
-    Target::put_call(code, runtime::localset);
-
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array{local_ty}, std::array<valtype, 0>());
+
+    _(localset, fn, local_idx);
     nextop();
 }
 HANDLER(localtee) {
     auto local_idx = safe_read_leb128<uint32_t>(iter);
     ensure(local_idx < fn.locals.size(), "unknown local");
 
-    Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx]));
-    Target::put_call(code, runtime::localtee);
-
     auto local_ty = fn.locals[local_idx];
     stack.apply(std::array{local_ty}, std::array{local_ty});
+
+    _(localtee, fn, local_idx);
     nextop();
 }
 HANDLER(tableget) {
     auto table_idx = safe_read_leb128<uint32_t>(iter);
     ensure(table_idx < mod.tables.size(), "unknown table");
+
     auto table_ty = mod.tables[table_idx].type;
     stack.apply(std::array{valtype::i32}, std::array{table_ty});
 
@@ -1292,6 +1202,7 @@ HANDLER(tableget) {
 HANDLER(tableset) {
     auto table_idx = safe_read_leb128<uint32_t>(iter);
     ensure(table_idx < mod.tables.size(), "unknown table");
+
     auto table_ty = mod.tables[table_idx].type;
     stack.apply(std::array{valtype::i32, table_ty}, std::array<valtype, 0>());
 
@@ -1301,6 +1212,7 @@ HANDLER(tableset) {
 HANDLER(globalget) {
     auto global_idx = safe_read_leb128<uint32_t>(iter);
     ensure(global_idx < mod.globals.size(), "unknown global");
+
     auto global_ty = mod.globals[global_idx].type;
     stack.apply(std::array<valtype, 0>(), std::array{global_ty});
 
@@ -1312,6 +1224,7 @@ HANDLER(globalset) {
     ensure(global_idx < mod.globals.size(), "unknown global");
     ensure(mod.globals[global_idx].mutability == mut::var,
            "global is immutable");
+
     auto global_ty = mod.globals[global_idx].type;
     stack.apply(std::array{global_ty}, std::array<valtype, 0>());
 
@@ -1322,6 +1235,7 @@ HANDLER(memorysize) {
     if (*iter++ != 0)
         error<malformed_error>("zero byte expected");
     ensure(mod.memory.exists, "unknown memory");
+
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
 
     _(memorysize);
@@ -1331,40 +1245,41 @@ HANDLER(memorygrow) {
     if (*iter++ != 0)
         error<malformed_error>("zero byte expected");
     ensure(mod.memory.exists, "unknown memory");
+
     stack.apply(std::array{valtype::i32}, std::array{valtype::i32});
 
     _(memorygrow);
     nextop();
 }
 HANDLER(i32const) {
-    auto v = safe_read_sleb128<uint32_t>(iter);
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
 
+    auto v = safe_read_sleb128<uint32_t>(iter);
     _(i32const, v);
     nextop();
 }
 HANDLER(i64const) {
-    auto v = safe_read_sleb128<uint64_t>(iter);
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i64});
 
+    auto v = safe_read_sleb128<uint64_t>(iter);
     _(i64const, v);
     nextop();
 }
 HANDLER(f32const) {
+    stack.apply(std::array<valtype, 0>(), std::array{valtype::f32});
+
     float v;
     std::memcpy(&v, iter.get_with_at_least(sizeof(float)), sizeof(float));
     iter += sizeof(float);
-    stack.apply(std::array<valtype, 0>(), std::array{valtype::f32});
-
     _(f32const, v);
     nextop();
 }
 HANDLER(f64const) {
+    stack.apply(std::array<valtype, 0>(), std::array{valtype::f64});
+
     double v;
     std::memcpy(&v, iter.get_with_at_least(sizeof(double)), sizeof(double));
     iter += sizeof(double);
-    stack.apply(std::array<valtype, 0>(), std::array{valtype::f64});
-
     _(f64const, v);
     nextop();
 }
@@ -1524,14 +1439,17 @@ HANDLER(i64extend32_s) { stack.apply(std::array{valtype::i64}, std::array{valtyp
 HANDLER(ref_null) {
     auto type_idx = safe_read_leb128<uint32_t>(iter);
     ensure(is_reftype(type_idx), "type mismatch");
+
     stack.apply(std::array<valtype, 0>(),
                 std::array{static_cast<valtype>(type_idx)});
+
     _(ref_null);
     nextop();
 }
 HANDLER(ref_is_null) {
     auto peek = stack.back();
     ensure(peek == valtype::any || is_reftype(peek), "type mismatch");
+
     stack.apply(std::array{peek}, std::array{valtype::i32});
 
     _(ref_is_null);
@@ -1542,6 +1460,7 @@ HANDLER(ref_func) {
     ensure(func_idx < mod.functions.size(), "invalid function index");
     ensure(mod.functions[func_idx].is_declared,
            "undeclared function reference");
+
     stack.apply(std::array<valtype, 0>(), std::array{valtype::funcref});
 
     _(ref_func, 1 + func_idx);
@@ -1550,6 +1469,7 @@ HANDLER(ref_func) {
 HANDLER(ref_eq) {
     auto peek = stack.back();
     ensure(peek == valtype::any || is_reftype(peek), "type mismatch");
+
     stack.apply(std::array{peek, peek}, std::array{valtype::i32});
 
     _(ref_eq);
@@ -1569,29 +1489,24 @@ HANDLER(memory_init) {
     auto seg_idx = safe_read_leb128<uint32_t>(iter);
     if (*iter++ != 0)
         error<malformed_error>("zero byte expected");
-
     ensure(mod.memory.exists, "unknown memory 0");
-    if (mod.n_data == std::numeric_limits<uint32_t>::max()) {
+    if (mod.n_data == std::numeric_limits<uint32_t>::max())
         error<malformed_error>("data count section required");
-    }
     ensure(seg_idx < mod.n_data, "unknown data segment");
 
     stack.apply(std::array{valtype::i32, valtype::i32, valtype::i32},
                 std::array<valtype, 0>());
 
-    // todo: in theory this could be optimized to directly give address
-    // since data segments are shared and known at this point,
-    // but data section comes after code section so stuff would have to move
     _(memory_init, 1 + mod.functions.size() + mod.tables.size() +
                        mod.globals.size() + mod.elements.size() + seg_idx);
     nextop();
 }
 HANDLER(data_drop) {
     auto seg_idx = safe_read_leb128<uint32_t>(iter);
-    if (mod.n_data == std::numeric_limits<uint32_t>::max()) {
+    if (mod.n_data == std::numeric_limits<uint32_t>::max())
         error<malformed_error>("data count section required");
-    }
     ensure(seg_idx < mod.n_data, "unknown data segment");
+
     _(data_drop, code,
       1 + mod.functions.size() + mod.tables.size() + mod.globals.size() +
           mod.elements.size() + seg_idx);
@@ -1624,7 +1539,6 @@ HANDLER(memory_fill) {
 HANDLER(table_init) {
     auto seg_idx = safe_read_leb128<uint32_t>(iter);
     auto table_idx = safe_read_leb128<uint32_t>(iter);
-
     ensure(table_idx < mod.tables.size(), "unknown table");
     ensure(seg_idx < mod.elements.size(), "unknown data segment");
     ensure(mod.tables[table_idx].type == mod.elements[seg_idx].type,
@@ -1717,18 +1631,16 @@ template <typename Pager, typename Target>
 std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
                                         std::byte *code, FunctionShell &fn) {
     auto stack = WasmStack();
+    auto extra = typename Target::extra{};
+
+    _(start_function, fn);
 
     auto control_stack = std::vector<ControlFlow>(
         {ControlFlow(fn.type.results, {}, {}, fn.type, false, 0, Function())});
 
-    auto locals_bytes = fn.locals.bytesize() - fn.type.params.bytesize();
-
-    Target::put_prelude(code);
-    Target::put_temp1(code, locals_bytes);
-    Target::put_call(code, runtime::clear_locals);
-
     auto byte = *iter++;
-    return funcs<Target>[byte](*this, iter, fn, stack, control_stack, code);
+    return funcs<Target>[byte](*this, iter, fn, stack, control_stack, code,
+                               extra);
 }
 
 #undef LOAD

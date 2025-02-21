@@ -5,7 +5,7 @@
 
 namespace mitey {
 
-#define SHARED_PARAMS std::byte *&code, int _extra
+#define SHARED_PARAMS std::byte *&code, extra _extra
 
 template <typename Target> class Composer {
     // unused
@@ -40,19 +40,44 @@ template <typename Target> class Composer {
     }
 
   public:
-    static void enter_function(SHARED_PARAMS, FunctionShell &fn) {
+    static void start_function(SHARED_PARAMS, FunctionShell &fn) {
+        auto locals_bytes = fn.locals.bytesize() - fn.type.params.bytesize();
+
         Target::put_prelude(code);
+        Target::put_temp1(code, locals_bytes);
+        Target::put_call(code, runtime::clear_locals);
     }
     static void exit_function(SHARED_PARAMS, FunctionShell &fn) {
+        // move results past locals
+        Target::put_temp1(code, -fn.locals.bytesize());
+        auto byte_results = fn.type.results.bytesize();
+        if (byte_results == 0) {
+            Target::put_call(code, runtime::move_0_results);
+        } else if (byte_results == 8) {
+            Target::put_call(code, runtime::move_8_results);
+        } else {
+            Target::put_temp2(code, -byte_results);
+            Target::put_call(code, runtime::move_n_results);
+        }
+
         Target::put_postlude(code);
     }
 
     static auto unreachable = nilary<runtime::unreachable>;
     static void nop(SHARED_PARAMS) {}
-    static void block(SHARED_PARAMS) { Target::put_call(code, runtime::block); }
-    static void loop(SHARED_PARAMS) { Target::put_call(code, runtime::loop); }
-    static void if_(SHARED_PARAMS) { Target::put_call(code, runtime::if_); }
-    static void else_(SHARED_PARAMS) { Target::put_call(code, runtime::else_); }
+    static void block(SHARED_PARAMS, WasmSignature &sig) {
+        Target::put_call(code, runtime::block);
+    }
+    static void loop(SHARED_PARAMS, WasmSignature &sig) {
+        Target::put_call(code, runtime::loop);
+    }
+    static void if_(SHARED_PARAMS, WasmSignature &sig) {
+        Target::put_call(code, runtime::if_);
+    }
+    static void else_(SHARED_PARAMS, WasmSignature &sig,
+                      std::byte *if_location) {
+        Target::put_call(code, runtime::else_);
+    }
     static void end(SHARED_PARAMS) { Target::put_call(code, runtime::end); }
     static void br(SHARED_PARAMS) { Target::put_call(code, runtime::br); }
     static void br_if(SHARED_PARAMS) { Target::put_call(code, runtime::br_if); }
@@ -63,7 +88,14 @@ template <typename Target> class Composer {
         Target::put_call(code, runtime::return_);
     }
     static void call(SHARED_PARAMS) { Target::put_call(code, runtime::call); }
-    static void call_indirect(SHARED_PARAMS) {
+    static void call_indirect(SHARED_PARAMS, uint32_t table_offset,
+                              WasmSignature &type) {
+        auto info = runtime::CallIndirectInfo(table_offset,
+                                              runtime::FunctionType(type));
+        auto [temp1, temp2] = std::bit_cast<std::array<uint64_t, 2>>(info);
+
+        Target::put_temp1(code, temp1);
+        Target::put_temp2(code, temp2);
         Target::put_call(code, runtime::call_indirect);
     }
     static void drop(SHARED_PARAMS) { Target::put_call(code, runtime::drop); }
