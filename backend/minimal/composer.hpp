@@ -1,14 +1,20 @@
+#include "../../module.hpp"
 #include "../../runtime.hpp"
 #include <cstdint>
 #include <cstring>
 
 namespace mitey {
 
-#define SHARED_PARAMS uint8_t *&code
+#define SHARED_PARAMS std::byte *&code, int _extra
 
 template <typename Target> class Composer {
     // unused
     using extra = int;
+
+    static constexpr size_t function_overhead =
+        Target::max_prelude_size + Target::max_postlude_size;
+    static constexpr size_t max_instruction =
+        Target::max_call_size + Target::max_temp1_size + Target::max_temp2_size;
 
     template <runtime::Signature func> static void nilary(SHARED_PARAMS) {
         Target::put_call(code, func);
@@ -34,8 +40,12 @@ template <typename Target> class Composer {
     }
 
   public:
-    static void enter_function(SHARED_PARAMS) { Target::put_prelude(code); }
-    static void exit_function(SHARED_PARAMS) { Target::put_postlude(code); }
+    static void enter_function(SHARED_PARAMS, FunctionShell &fn) {
+        Target::put_prelude(code);
+    }
+    static void exit_function(SHARED_PARAMS, FunctionShell &fn) {
+        Target::put_postlude(code);
+    }
 
     static auto unreachable = nilary<runtime::unreachable>;
     static void nop(SHARED_PARAMS) {}

@@ -1,10 +1,10 @@
 #pragma once
 
-#include "./backend/shared.hpp"
 #include "./instance.hpp"
 #include "pager/shared.hpp"
 #include "runtime.hpp"
 #include "spec.hpp"
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <span>
@@ -52,7 +52,7 @@ static inline bool is_imexdesc(uint8_t byte) {
 using ImportSpecifier = std::pair<std::string, std::string>;
 
 struct FunctionShell {
-    runtime::TemplessSignature *start;
+    std::byte *start;
     WasmSignature type;
     valtype_vector locals;
     std::vector<uint32_t> local_bytes;
@@ -95,23 +95,23 @@ struct Function {};
 struct Block {};
 
 struct Loop {
-    uint8_t *start;
+    std::byte *start;
 };
 
 struct If {
-    Immediate else_jump;
+    std::byte *else_jump;
 };
 
 struct IfElse {};
 
 struct PendingBrTable {
-    uint8_t *table;
-    uint8_t *target;
+    std::byte *table;
+    std::byte *target;
 };
 
 struct ControlFlow {
     valtype_vector &expected;
-    std::vector<Immediate> pending_br;
+    std::vector<std::byte *> pending_br;
     std::vector<PendingBrTable> pending_br_tables;
     WasmSignature &sig;
     bool polymorphized;
@@ -172,10 +172,10 @@ class WasmStack {
 class Module;
 
 template <typename Target>
-using CompilationHandler = uint8_t *(Module &, safe_byte_iterator &,
-                                     FunctionShell &, WasmStack &,
-                                     std::vector<ControlFlow> &, uint8_t *,
-                                     typename Target::extra);
+using CompilationHandler = std::byte *(Module &, safe_byte_iterator &,
+                                       FunctionShell &, WasmStack &,
+                                       std::vector<ControlFlow> &, std::byte *,
+                                       typename Target::extra &);
 
 class Module {
     friend class Instance;
@@ -205,11 +205,11 @@ class Module {
     uint32_t n_data;
     std::vector<runtime::Segment> data_segments;
 
-    std::vector<std::pair<uint8_t *, uint32_t>> pending_calls;
+    std::vector<std::pair<std::byte *, uint32_t>> pending_calls;
 
     template <typename Pager, typename Target>
-    uint8_t *validate_and_compile(safe_byte_iterator &iter, uint8_t *code,
-                                  FunctionShell &fn);
+    std::byte *validate_and_compile(safe_byte_iterator &iter, std::byte *code,
+                                    FunctionShell &fn);
 
     void validate_const(safe_byte_iterator &iter, valtype expected);
 

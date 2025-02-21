@@ -1,11 +1,11 @@
 #pragma once
 
-#include <cstdint>
+#include <cstddef>
 #include <memory>
 
 namespace mitey {
 
-using Allocation = std::unique_ptr<uint8_t[], void (*)(uint8_t[])>;
+using Allocation = std::unique_ptr<std::byte[], void (*)(std::byte[])>;
 
 enum class AllocationKind {
     Heap,

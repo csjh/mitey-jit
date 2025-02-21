@@ -96,9 +96,10 @@ void Instance::initialize(const runtime::Imports &imports) {
         } else {
             auto memory = this->memory.get()->memory.get();
             auto misc = this->misc.get();
-            functions[i] =
-                runtime::FunctionInfo(runtime::FunctionType(fn.type), memory,
-                                      misc, fn.start, self.lock());
+            functions[i] = runtime::FunctionInfo(
+                runtime::FunctionType(fn.type), memory, misc,
+                reinterpret_cast<runtime::TemplessSignature *>(fn.start),
+                self.lock());
         }
         misc_functions[i] = &functions[i];
     }

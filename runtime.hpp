@@ -149,13 +149,13 @@ struct __attribute__((packed)) FunctionType {
 };
 static_assert(sizeof(FunctionType) == sizeof(uint32_t) + sizeof(uint64_t));
 
-using Signature = void(uint8_t *memory, void **misc, WasmValue *stack,
+using Signature = void(std::byte *memory, void **misc, WasmValue *stack,
                        uint64_t tmp1, uint64_t tmp2);
-using TemplessSignature = void(uint8_t *, void **, WasmValue *);
+using TemplessSignature = void(std::byte *, void **, WasmValue *);
 
 struct FunctionInfo {
     FunctionType type;
-    uint8_t *memory;
+    std::byte *memory;
     void **misc;
     TemplessSignature *signature;
     // this creates a circular dependency
