@@ -12,7 +12,7 @@
 extern std::vector<std::string> names;
 #endif
 
-#define _(name, ...) Target::name(code, extra __VA_OPT__(, ) __VA_ARGS__)
+#define _(name, ...) Target::name(code, stack, extra __VA_OPT__(, ) __VA_ARGS__)
 
 namespace mitey {
 
@@ -687,8 +687,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 }
 
                 for (auto [call, func_idx] : pending_calls) {
-                    Target::put_temp1(call, reinterpret_cast<uint64_t>(
-                                                functions[func_idx].start));
+                    // Target::put_temp1(call, reinterpret_cast<uint64_t>(
+                    //                             functions[func_idx].start));
                 }
 
                 return code - executable.get();
@@ -915,8 +915,8 @@ FOREACH_INSTRUCTION(V)
 #define nextop()                                                               \
     do {                                                                       \
         auto byte = *iter++;                                                   \
-        [[clang::musttail]] return funcs<Target>[byte](mod, iter, fn, stack,   \
-                                                       control_stack, code);   \
+        [[clang::musttail]] return funcs<Target>[byte](                        \
+            mod, iter, fn, stack, control_stack, code, extra);                 \
     } while (0)
 #endif
 
@@ -1016,15 +1016,11 @@ HANDLER(end) {
 
     if (std::holds_alternative<If>(construct)) {
         ensure(sig.params == sig.results, "type mismatch params vs. results");
-        _(end_if, control_stack.back(), std::get<If>(construct).else_jump);
-    } else if (std::holds_alternative<IfElse>(construct)) {
-        _(end_ifelse, control_stack.back());
-    } else if (std::holds_alternative<Block>(construct)) {
-        _(end_block, control_stack.back());
-    } else if (std::holds_alternative<Loop>(construct)) {
-        _(end_loop, control_stack.back(), std::get<Loop>(construct).start);
-    } else if (std::holds_alternative<Function>(construct)) {
-        _(end_function, control_stack.back(), fn);
+    }
+
+    _(end, control_stack.back());
+
+    if (std::holds_alternative<Function>(construct)) {
         return code;
     }
 
@@ -1507,9 +1503,8 @@ HANDLER(data_drop) {
         error<malformed_error>("data count section required");
     ensure(seg_idx < mod.n_data, "unknown data segment");
 
-    _(data_drop, code,
-      1 + mod.functions.size() + mod.tables.size() + mod.globals.size() +
-          mod.elements.size() + seg_idx);
+    _(data_drop, 1 + mod.functions.size() + mod.tables.size() +
+                     mod.globals.size() + mod.elements.size() + seg_idx);
     nextop();
 }
 HANDLER(memory_copy) {
@@ -1624,7 +1619,7 @@ HANDLER(multibyte) {
 
     auto byte = safe_read_leb128<uint8_t, 32>(iter);
     [[clang::musttail]] return fc_funcs[byte](mod, iter, fn, stack,
-                                              control_stack, code);
+                                              control_stack, code, extra);
 }
 
 template <typename Pager, typename Target>
@@ -1635,8 +1630,8 @@ std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
 
     _(start_function, fn);
 
-    auto control_stack = std::vector<ControlFlow>(
-        {ControlFlow(fn.type.results, {}, {}, fn.type, false, 0, Function())});
+    auto control_stack = std::vector<ControlFlow>({ControlFlow(
+        fn.type.results, {}, {}, fn.type, false, 0, Function(fn))});
 
     auto byte = *iter++;
     return funcs<Target>[byte](*this, iter, fn, stack, control_stack, code,

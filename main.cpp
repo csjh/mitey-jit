@@ -1,5 +1,6 @@
 #include "./backend/arm64/minimal.hpp"
-#include "./wasi.h"
+#include "./backend/minimal/composer.hpp"
+#include "./wasi.hpp"
 #include "interfacing.hpp"
 #include "module.hpp"
 #include "pager/mac.hpp"
@@ -36,7 +37,7 @@ int main(int argc, const char **argv) {
     fclose(file);
 
     auto start = std::chrono::high_resolution_clock::now();
-    auto mod = Module::compile<Mac, Arm64>(bytes);
+    auto mod = Module::compile<Mac, Composer<Arm64>>(bytes);
     auto end = std::chrono::high_resolution_clock::now();
     printf("Compilation/validation took %fms\n",
            std::chrono::duration<float, std::milli>(end - start).count());

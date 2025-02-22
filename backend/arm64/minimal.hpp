@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../../runtime.hpp"
-#include "../shared.hpp"
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <libkern/OSCacheControl.h>
 #include <sys/mman.h>
@@ -20,7 +20,7 @@ class Arm64 {
     static constexpr reg_t tmp2 = 4;
 
   public:
-    template <typename F> static void placehold(uint8_t *&code, F func) {
+    template <typename F> static void placehold(std::byte *&code, F func) {
         size_t size = 0;
         if ((void *)func == (void *)put_prelude) {
             size = max_prelude_size;
@@ -43,7 +43,7 @@ class Arm64 {
         code += size;
     }
 
-    static void put_prelude(uint8_t *&code) {
+    static void put_prelude(std::byte *&code) {
         put(code, std::array<uint32_t, 2>{
                       0xa9bf7bfd, // stp     x29, x30, [sp, #-0x10]!
                       0x910003fd  // mov     x29, sp
@@ -51,7 +51,7 @@ class Arm64 {
     }
     static constexpr size_t max_prelude_size = sizeof(uint32_t) * 2;
 
-    static void put_postlude(uint8_t *&code) {
+    static void put_postlude(std::byte *&code) {
         put(code, std::array<uint32_t, 2>{
                       0xa8c17bfd, // ldp     x29, x30, [sp], #0x10
                       0xd65f03c0  // ret
@@ -59,7 +59,7 @@ class Arm64 {
     }
     static constexpr size_t max_postlude_size = sizeof(uint32_t) * 2;
 
-    static void put_call(uint8_t *&code, runtime::Signature *addr) {
+    static void put_call(std::byte *&code, runtime::Signature *addr) {
         constexpr reg_t x6 = 6;
         // todo: test pc-relative ldr instead (smaller, maybe more perf?)
         put_mov64(code, reinterpret_cast<uint64_t>(addr), x6);
@@ -67,20 +67,20 @@ class Arm64 {
     }
     static constexpr size_t max_call_size = sizeof(uint32_t) * 5;
 
-    static void put_temp1(uint8_t *&code, uint64_t value) {
+    static void put_temp1(std::byte *&code, uint64_t value) {
         constexpr reg_t x3 = 3;
         put_mov64(code, value, x3);
     }
     static constexpr size_t max_temp1_size = sizeof(uint32_t) * 4;
 
-    static void put_temp2(uint8_t *&code, uint64_t value) {
+    static void put_temp2(std::byte *&code, uint64_t value) {
         constexpr reg_t x4 = 4;
         put_mov64(code, value, x4);
     }
     static constexpr size_t max_temp2_size = sizeof(uint32_t) * 4;
 
-    static Immediate put_br(uint8_t *&code, uint32_t arity,
-                            uint32_t stack_offset) {
+    static std::byte *put_br(std::byte *&code, uint32_t arity,
+                             uint32_t stack_offset) {
         constexpr reg_t x6 = 6;
 
         // move values
@@ -96,33 +96,56 @@ class Arm64 {
             put(code, sub(false, -(stack_offset + arity), stackptr, stackptr));
         }
 
-        auto imm = Immediate((uint32_t *)code, 19, 8, sizeof(uint32_t));
+        auto imm = code;
         put(code, (0b01010100u << 24) | (0 << 5) | AL); // b 0x0
         return imm;
     }
 
-    static Immediate put_br_if(uint8_t *&code, uint32_t arity,
-                               uint32_t stack_offset) {
+    static std::byte *put_br_if(std::byte *&code, uint32_t arity,
+                                uint32_t stack_offset) {
         constexpr reg_t w8 = 8;
 
         put(code, 0xb85f8c48u); // ldr	w8, [x2, #-0x8]!
-        auto imm = Immediate((uint32_t *)code, 19, 8, sizeof(uint32_t));
+        auto imm = code;
         put(code, (0b00110100u << 24) | (0 << 5) | w8); // cbz w8, 0x0
         auto dest = put_br(code, arity, stack_offset);
-        imm.set(code);
+        put_immediate(imm, code);
         return dest;
     }
 
-    static Immediate put_if(uint8_t *&code) {
+    static std::byte *put_if(std::byte *&code) {
         constexpr reg_t w8 = 8;
 
         put(code, 0xb85f8c48u); // ldr	w8, [x2, #-0x8]!
-        auto imm = Immediate((uint32_t *)code, 19, 8, sizeof(uint32_t));
+        auto imm = code;
         put(code, (0b00110100u << 24) | (0 << 5) | w8); // cbz w8, 0x0
         return imm;
     }
 
-    // else is just a br(0, 0)?
+    static inline void put_immediate(std::byte *base, std::byte *to) {
+        constexpr auto bits = 19;
+        constexpr auto offset = 8;
+        constexpr auto align = sizeof(uint32_t);
+
+        auto diff = to - base;
+        auto value = diff / align;
+
+        // sign lower int32_t to intBits_t
+        auto imm = static_cast<uint32_t>(value);
+        imm = imm << (32 - bits) >> (32 - bits);
+
+        uint32_t v;
+        std::memcpy(&v, base, sizeof(v));
+
+        auto high_len = offset;
+        auto low_len = 32 - high_len - bits;
+
+        auto low = (v << (high_len + bits)) >> (high_len + bits);
+        auto high = (v >> (low_len + bits)) << (low_len + bits);
+
+        uint32_t result = high | (imm << low_len) | low;
+        std::memcpy(base, &result, sizeof(result));
+    }
 
   private:
     enum Condition {
@@ -136,7 +159,7 @@ class Arm64 {
         LOAD = 1 << 22,
     };
 
-    static void put_mov64(uint8_t *&code, uint64_t value, reg_t reg) {
+    static void put_mov64(std::byte *&code, uint64_t value, reg_t reg) {
         constexpr uint32_t nop = 0xd503201f;
         const uint32_t movz = 0xd2800000 | reg;
 
@@ -218,7 +241,7 @@ class Arm64 {
         return base | (op << 30) | op | (imm << 12) | (rn << 5) | rt;
     }
 
-    template <typename T> static void put(uint8_t *&code, const T &value) {
+    template <typename T> static void put(std::byte *&code, const T &value) {
         std::memcpy(code, &value, sizeof(T));
         code += sizeof(T);
     }

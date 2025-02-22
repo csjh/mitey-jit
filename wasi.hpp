@@ -1,6 +1,7 @@
+#include <cstddef>
 #include <stdint.h>
 
-#define __WASM_MEMORY uint8_t *memory
+#define __WASM_MEMORY std::byte *memory
 
 typedef uint32_t wasm_size_t;
 

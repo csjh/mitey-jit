@@ -1,4 +1,4 @@
-#include "./wasi.h"
+#include "./wasi.hpp"
 
 #include <dirent.h>
 #include <errno.h>

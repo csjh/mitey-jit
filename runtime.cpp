@@ -38,7 +38,7 @@ static inline void gas(auto call) {
 }
 
 #define HANDLER(name)                                                          \
-    void name(uint8_t *memory, void **misc, WasmValue *stack, uint64_t tmp1,   \
+    void name(std::byte *memory, void **misc, WasmValue *stack, uint64_t tmp1, \
               uint64_t tmp2)
 #define TEMPLESS_PARAMS memory, misc, stack
 #define PARAMS TEMPLESS_PARAMS, tmp1, tmp2
@@ -49,7 +49,7 @@ static inline void gas(auto call) {
     reinterpret_cast<decltype(ptr)>(reinterpret_cast<uint64_t>(ptr) +          \
                                     static_cast<uint64_t>(n))
 
-__attribute__((noinline)) void dummy(uint8_t *memory, void **misc,
+__attribute__((noinline)) void dummy(std::byte *memory, void **misc,
                                      WasmValue *stack, uint64_t, uint64_t) {
     // assumption: compiler doesn't move memory/stack/misc from arg registers
     asm volatile("" ::"r"(memory), "r"(misc), "r"(stack));

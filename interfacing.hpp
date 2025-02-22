@@ -11,7 +11,7 @@ void push_tuple_to_wasm(const Tuple &t, runtime::WasmValue *out,
     ((out[I] = std::get<I>(t)), ...);
 }
 
-template <typename T> T normalize(uint8_t *memory, runtime::WasmValue value) {
+template <typename T> T normalize(std::byte *memory, runtime::WasmValue value) {
     if constexpr (std::is_pointer_v<T>) {
         return T(memory + value.u32);
     } else {
@@ -157,7 +157,7 @@ template <auto func> runtime::TemplessSignature *wasm_functionify() {
         std::make_index_sequence<std::tuple_size_v<BaseArgs>>{});
     if constexpr (has_nontrivial_args) {
         static_assert(
-            std::is_same_v<std::tuple_element_t<0, BaseArgs>, uint8_t *>,
+            std::is_same_v<std::tuple_element_t<0, BaseArgs>, std::byte *>,
             "functions with non-trivial arguments must take the wasm "
             "memory pointer as their first argument");
     }

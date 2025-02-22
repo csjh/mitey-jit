@@ -15,16 +15,16 @@ namespace mitey {
 static constexpr size_t stack_size = 5 * 1024 * 1024; // 5MB
 static constexpr size_t guard_size = stack_size;
 static constexpr size_t total_size = stack_size + guard_size;
-static uint8_t *guard_page = nullptr;
+static std::byte *guard_page = nullptr;
 
 // follows the implementation described by
 // https://docs.google.com/document/d/17y4kxuHFrVxAiuCP_FFtFA2HP5sNPsCD10KEx17Hz6M/edit?tab=t.0#heading=h.tbi7hpbheoai
 // end - start == 16gb
 struct HeapAllocation {
-    uint8_t *start;
-    uint8_t *heap_start;
-    uint8_t *heap_end;
-    uint8_t *end;
+    std::byte *start;
+    std::byte *heap_start;
+    std::byte *heap_end;
+    std::byte *end;
 };
 // |-------------- allocation --------------|
 // |--- guard ---|--- heap ---|--- guard ---|
@@ -78,7 +78,7 @@ class Mac {
             if (size == 0)
                 return null();
 
-            auto ptr = reinterpret_cast<uint8_t *>(
+            auto ptr = reinterpret_cast<std::byte *>(
                 mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0));
 
@@ -86,7 +86,7 @@ class Mac {
                 throw std::bad_alloc();
             }
 
-            auto alloc = Allocation(ptr + sizeof(uint32_t), [](uint8_t *ptr) {
+            auto alloc = Allocation(ptr + sizeof(uint32_t), [](std::byte *ptr) {
                 ptr -= sizeof(uint32_t);
                 auto size = *reinterpret_cast<uint32_t *>(ptr);
                 munmap(ptr, size);
@@ -107,7 +107,7 @@ class Mac {
                 throw std::runtime_error("stack already allocated");
             }
 
-            auto memory = reinterpret_cast<uint8_t *>(
+            auto memory = reinterpret_cast<std::byte *>(
                 mmap(nullptr, total_size, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
 
@@ -138,7 +138,7 @@ class Mac {
             constexpr size_t heap_size = 16ull * 1024 * 1024 * 1024; // 16GB
 
             // initially, size = 0
-            auto memory = reinterpret_cast<uint8_t *>(
+            auto memory = reinterpret_cast<std::byte *>(
                 mmap(nullptr, heap_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS,
                      -1, 0));
 
