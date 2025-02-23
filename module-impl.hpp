@@ -687,8 +687,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 }
 
                 for (auto [call, func_idx] : pending_calls) {
-                    // Target::put_temp1(call, reinterpret_cast<uint64_t>(
-                    //                             functions[func_idx].start));
+                    Target::put_call_address(call, functions[func_idx].start);
                 }
 
                 return code - executable.get();
@@ -1062,14 +1061,13 @@ HANDLER(br_table) {
     auto targets = std::span(
         (uint32_t *)alloca(sizeof(uint32_t) * (n_targets + 1)), n_targets + 1);
     for (auto &depth : targets) {
-        auto target = safe_read_leb128<uint32_t>(iter);
-        ensure(target < control_stack.size(), "unknown label");
-        depth = target;
+        depth = safe_read_leb128<uint32_t>(iter);
+        ensure(depth < control_stack.size(), "unknown label");
     }
     auto base = control_stack.size() - 1;
     auto &default_target = control_stack[base - targets.back()].expected;
 
-    for (auto &depth : targets) {
+    for (auto depth : targets) {
         auto &target = control_stack[base - depth].expected;
         if (stack.can_be_anything()) {
             ensure(stack.check(target), "type mismatch");

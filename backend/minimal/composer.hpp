@@ -43,6 +43,10 @@ template <typename Target> class Composer {
     static constexpr size_t max_instruction =
         Target::max_call_size + Target::max_temp1_size + Target::max_temp2_size;
 
+    static void put_call_address(std::byte *&code, std::byte *func) {
+        Target::put_temp1(code, reinterpret_cast<uint64_t>(func));
+    }
+
     static void start_function(SHARED_PARAMS, FunctionShell &fn) {
         auto locals_bytes = fn.locals.bytesize() - fn.type.params.bytesize();
 
@@ -155,7 +159,8 @@ template <typename Target> class Composer {
         auto base = control_stack.size() - 1;
         auto &default_target = control_stack[base - targets.back()].expected;
 
-        auto info = runtime::BrInfo(targets.size(), default_target.bytesize());
+        auto info =
+            runtime::BrInfo(targets.size() - 1, default_target.bytesize());
         if (info.arity == 0) {
             Target::put_call(call_addr, runtime::br_table_0);
         } else if (info.arity == 8) {
@@ -169,7 +174,7 @@ template <typename Target> class Composer {
             auto &target = control_stack[base - depth].expected;
 
             auto &flow = control_stack[base - depth];
-            auto offset = flow.stack_offset - stack.sp();
+            auto offset = static_cast<int32_t>(flow.stack_offset - stack.sp());
             if (std::holds_alternative<Loop>(flow.construct)) {
                 auto target = runtime::BrTableTarget(
                     std::get<Loop>(flow.construct).start - table_addr, offset);
@@ -182,8 +187,6 @@ template <typename Target> class Composer {
                 std::memcpy(code, &offset, sizeof(offset));
                 code += sizeof(offset);
             }
-
-            ensure(default_target == target, "type mismatch");
         }
     }
     static void return_(SHARED_PARAMS,
@@ -223,11 +226,13 @@ template <typename Target> class Composer {
         Target::put_call(code, runtime::select_t);
     }
     static void localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-        Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx]));
+        Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx] -
+                                  valtype_size(fn.locals[local_idx])));
         Target::put_call(code, runtime::localget);
     }
     static void localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-        Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx]));
+        Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx] +
+                                  valtype_size(fn.locals[local_idx])));
         Target::put_call(code, runtime::localset);
     }
     static void localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
@@ -242,25 +247,25 @@ template <typename Target> class Composer {
     static constexpr auto memorygrow = nilary<runtime::memorygrow>;
     static void i32const(SHARED_PARAMS, uint32_t cons) {
         runtime::WasmValue v;
-        std::memcpy(&v.i32, &cons, sizeof(uint32_t));
+        std::memcpy(&v.i32, &cons, sizeof(cons));
         Target::put_temp1(code, v.u64);
         Target::put_call(code, runtime::ifXXconst);
     }
     static void i64const(SHARED_PARAMS, uint64_t cons) {
         runtime::WasmValue v;
-        std::memcpy(&v.i64, &cons, sizeof(uint32_t));
+        std::memcpy(&v.i64, &cons, sizeof(cons));
         Target::put_temp1(code, v.u64);
         Target::put_call(code, runtime::ifXXconst);
     }
     static void f32const(SHARED_PARAMS, float cons) {
         runtime::WasmValue v;
-        std::memcpy(&v.f32, &cons, sizeof(uint32_t));
+        std::memcpy(&v.f32, &cons, sizeof(cons));
         Target::put_temp1(code, v.u64);
         Target::put_call(code, runtime::ifXXconst);
     }
     static void f64const(SHARED_PARAMS, double cons) {
         runtime::WasmValue v;
-        std::memcpy(&v.f64, &cons, sizeof(uint32_t));
+        std::memcpy(&v.f64, &cons, sizeof(cons));
         Target::put_temp1(code, v.u64);
         Target::put_call(code, runtime::ifXXconst);
     }
