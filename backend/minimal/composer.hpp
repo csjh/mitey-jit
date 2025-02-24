@@ -2,7 +2,6 @@
 #include "../../runtime.hpp"
 #include <cstdint>
 #include <cstring>
-#include <vector>
 
 namespace mitey {
 
@@ -118,7 +117,7 @@ template <typename Target> class Composer {
             Target::put_postlude(code);
         }
     }
-    static void br(SHARED_PARAMS, std::vector<ControlFlow> &control_stack,
+    static void br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                    uint32_t depth) {
         auto &flow = control_stack[control_stack.size() - depth - 1];
 
@@ -131,7 +130,7 @@ template <typename Target> class Composer {
             flow.pending_br.push_back(imm);
         }
     }
-    static void br_if(SHARED_PARAMS, std::vector<ControlFlow> &control_stack,
+    static void br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                       uint32_t depth) {
         auto &flow = control_stack[control_stack.size() - depth - 1];
 
@@ -144,7 +143,7 @@ template <typename Target> class Composer {
             flow.pending_br.push_back(imm);
         }
     }
-    static void br_table(SHARED_PARAMS, std::vector<ControlFlow> &control_stack,
+    static void br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                          std::span<uint32_t> targets) {
         auto t1_addr = code;
         Target::placehold(code, Target::put_temp1);
@@ -189,8 +188,7 @@ template <typename Target> class Composer {
             }
         }
     }
-    static void return_(SHARED_PARAMS,
-                        std::vector<ControlFlow> &control_stack) {
+    static void return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
         br(code, stack, _extra, control_stack, control_stack.size() - 1);
     }
     static void call_extern(SHARED_PARAMS, FunctionShell &fn,
@@ -450,7 +448,6 @@ template <typename Target> class Composer {
     static constexpr auto table_grow = unary<runtime::table_grow>;
     static constexpr auto table_size = unary<runtime::table_size>;
     static constexpr auto table_fill = unary<runtime::table_fill>;
-    static constexpr void multibyte(SHARED_PARAMS) {}
 };
 
 } // namespace mitey
