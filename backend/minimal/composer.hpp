@@ -98,24 +98,6 @@ template <typename Target> class Composer {
                 std::memcpy(target, &idiff, sizeof(idiff));
             }
         }
-
-        if (std::holds_alternative<Function>(flow.construct)) {
-            auto &fn = std::get<Function>(flow.construct).fn;
-
-            // move results past locals
-            Target::put_temp1(code, -fn.locals.bytesize());
-            auto byte_results = flow.sig.results.bytesize();
-            if (byte_results == 0) {
-                Target::put_call(code, runtime::move_0_results);
-            } else if (byte_results == 8) {
-                Target::put_call(code, runtime::move_8_results);
-            } else {
-                Target::put_temp2(code, -byte_results);
-                Target::put_call(code, runtime::move_n_results);
-            }
-
-            Target::put_postlude(code);
-        }
     }
     static void br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                    uint32_t depth) {

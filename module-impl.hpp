@@ -1628,12 +1628,16 @@ std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
 
     _(start_function, fn);
 
-    auto control_stack = std::vector<ControlFlow>({ControlFlow(
-        fn.type.results, {}, {}, fn.type, false, 0, Function(fn))});
+    auto control_stack = std::vector<ControlFlow>(
+        {ControlFlow(fn.type.results, {}, {}, fn.type, false, 0, Function())});
 
     auto byte = *iter++;
-    return funcs<Target>[byte](*this, iter, fn, stack, control_stack, code,
-                               extra);
+    auto code_end =
+        funcs<Target>[byte](*this, iter, fn, stack, control_stack, code, extra);
+
+    _(exit_function, fn);
+
+    return code_end;
 }
 
 #undef LOAD
