@@ -8,7 +8,7 @@
             __builtin_unreachable();                                           \
     } while (0)
 
-class RegLRU {
+class reg_lru {
     static constexpr auto Bits = 4;
     static constexpr auto Max = (1 << Bits) - 1;
 
@@ -62,4 +62,18 @@ class RegLRU {
         bump(n);
         store = std::rotl(store, Bits);
     }
+};
+
+class reg_manager {
+    struct metadata {
+        // when a register is inactive, this is a null pointer
+        // when a register is given a value, this is set to a noop
+        // when a register is stolen, this is set to a spill
+        uint32_t *dumpaddr;
+    };
+
+    reg_lru regs;
+    metadata data[16];
+
+  public:
 };
