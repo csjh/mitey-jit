@@ -1,4 +1,6 @@
 #include "../../module.hpp"
+#include "../../runtime.hpp"
+#include "./reg_manager.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -9,8 +11,8 @@ namespace arm64 {
 
 // clang-format off
 enum class ireg {
-    x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
-    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, /* x29, x30, x31, */
+    x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16,
+    x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, /* x29, x30, */ xzr = 0b11111 
 };
 
 enum class freg {
@@ -18,25 +20,176 @@ enum class freg {
     d16, d17, d18, d19, d20, d21, d22, d23, d24, d25, d26, d27, d28, d29, d30, d31,
 };
 
-constexpr auto callee_saved = std::to_array({
+constexpr auto icallee_saved = std::to_array({
     ireg::x19, ireg::x20, ireg::x21, ireg::x22, ireg::x23,
     ireg::x24, ireg::x25, ireg::x26, ireg::x27, ireg::x28});
 
-constexpr auto caller_saved = std::to_array({
+constexpr auto fcallee_saved = std::to_array({
+    freg::d8, freg::d9, freg::d10, freg::d11, freg::d12, freg::d13, freg::d14, freg::d15,
+    freg::d16, freg::d17, freg::d18, freg::d19, freg::d20, freg::d21, freg::d22, freg::d23,
+    freg::d24, freg::d25, freg::d26, freg::d27, freg::d28, freg::d29, freg::d30, freg::d31});
+
+constexpr auto icaller_saved = std::to_array({
     ireg::x0, ireg::x1, ireg::x2, ireg::x3, ireg::x4, ireg::x5, ireg::x6, ireg::x7,
     ireg::x8, ireg::x9, ireg::x10, ireg::x11, ireg::x12, ireg::x13, ireg::x14, ireg::x15,
-    ireg::x16, ireg::x17, ireg::x18});
-// clang-format on
+    ireg::x16, ireg::x17});
+
+constexpr auto fcaller_saved = std::to_array({
+    freg::d0, freg::d1, freg::d2, freg::d3, freg::d4, freg::d5, freg::d6, freg::d7});
 
 // todo: maybe put in callee saved? can bench
 constexpr auto memreg = ireg::x0;
 constexpr auto miscreg = ireg::x1;
+constexpr auto stackreg = ireg::x2;
+
+// clang-format on
+
+enum class cond {
+    eq = 0b0000, // Equal.
+    ne = 0b0001, // Not equal.
+    cs = 0b0010, // Unsigned higher or same (or carry set).
+    cc = 0b0011, // Unsigned lower (or carry clear).
+    mi = 0b0100, // Negative.
+    pl = 0b0101, // Positive or zero.
+    vs = 0b0110, // Signed overflow.
+    vc = 0b0111, // No signed overflow.
+    hi = 0b1000, // Unsigned higher.
+    ls = 0b1001, // Unsigned lower or same.
+    ge = 0b1010, // Signed greater than or equal.
+    lt = 0b1011, // Signed less than.
+    gt = 0b1100, // Signed greater than.
+    le = 0b1101, // Signed less than or equal.
+    al = 0b1110, // Always executed.
+    nv = 0b1111, // Never executed.
+};
+
+enum class shifttype {
+    lsl = 0b00, // Logical shift left.
+    lsr = 0b01, // Logical shift right.
+    asr = 0b10, // Arithmetic shift right.
+    ror = 0b11, // Rotate right.
+};
+
+class value {
+    enum class location { reg, stack, imm, flag };
+
+    location loc;
+    uint32_t val;
+
+    value(location loc, uint32_t val) : loc(loc), val(val) {}
+
+  public:
+    value() = default;
+
+    static value reg(ireg reg) {
+        return value(location::reg, static_cast<uint32_t>(reg));
+    }
+    static value reg(freg reg) {
+        return value(location::reg, static_cast<uint32_t>(reg));
+    }
+    static value stack(uint32_t offset) {
+        return value(location::stack, offset);
+    }
+    static value imm(uint32_t val) { return value(location::imm, val); }
+    static value flag(cond c) {
+        return value(location::flag, static_cast<uint32_t>(c));
+    }
+};
 
 #define SHARED_PARAMS std::byte *&code, WasmStack &stack, extra &_extra
 
 class Arm64 {
+    template <typename T> static void put(std::byte *&code, const T &val) {
+        std::memcpy(code, &val, sizeof(T));
+        code += sizeof(T);
+    }
+
+    template <runtime::TrapKind kind> static void trap(std::byte *&code) {
+        // put address of runtime::trap in x1
+        // put kind in x0
+        // br x1
+    }
+
+    using inst = uint32_t;
+
+    static constexpr inst noop = 0xd503201f;
+
+    static void orr(std::byte *&code, bool sf, shifttype shift, ireg rm,
+                    uint8_t shift_imm, ireg rn, ireg rd) {
+        put(code, 0b00101010000000000000000000000000 |
+                      (static_cast<uint32_t>(sf) << 31) |
+                      (static_cast<uint32_t>(shift) << 22) |
+                      (static_cast<uint32_t>(rm) << 16) |
+                      (static_cast<uint32_t>(shift_imm) << 10) |
+                      (static_cast<uint32_t>(rn) << 5) |
+                      (static_cast<uint32_t>(rd) << 0));
+    }
+
+    static void movreg(std::byte *&code, ireg dst, ireg src) {
+        orr(code, true, shifttype::lsl, src, 0, ireg::xzr, dst);
+    }
+    static void movreg(std::byte *&code, freg dst, ireg src) {
+        put(code, 0b10011110011001110000000000000000 |
+                      (static_cast<uint32_t>(src) << 5) |
+                      (static_cast<uint32_t>(dst) << 0));
+    }
+    static void movreg(std::byte *&code, ireg dst, freg src) {
+        put(code, 0b10011110011001100000000000000000 |
+                      (static_cast<uint32_t>(src) << 5) |
+                      (static_cast<uint32_t>(dst) << 0));
+    }
+    static void movreg(std::byte *&code, freg dst, freg src) {
+        put(code, 0b10011110011001110000000000000000 |
+                      (static_cast<uint32_t>(src) << 5) |
+                      (static_cast<uint32_t>(dst) << 0));
+    }
+
+    static void storereg_offset(std::byte *&code, uint16_t offset, ireg rn,
+                                ireg rt) {
+        put(code, 0b11111001000000000000000000000000 |
+                      (static_cast<uint32_t>(offset) << 10) |
+                      (static_cast<uint32_t>(rn) << 5) |
+                      (static_cast<uint32_t>(rt) << 0));
+    }
+    static void storereg_offset(std::byte *&code, uint16_t offset, ireg rn,
+                                freg rt) {
+        put(code, 0b11111101000000000000000000000000 |
+                      (static_cast<uint32_t>(offset) << 10) |
+                      (static_cast<uint32_t>(rn) << 5) |
+                      (static_cast<uint32_t>(rt) << 0));
+    }
+
+    static void loadreg_offset(std::byte *&code, uint16_t offset, ireg rn,
+                               ireg rt) {
+        constexpr auto imm12 = (1 << 12) - 1;
+        offset &= 0x3ff;
+        put(code, 0b11111001010000000000000000000000 |
+                      (static_cast<uint32_t>(offset) << 10) |
+                      (static_cast<uint32_t>(rn) << 5) |
+                      (static_cast<uint32_t>(rt) << 0));
+    }
+    static void loadreg_offset(std::byte *&code, uint16_t offset, ireg rn,
+                               freg rt) {
+        put(code, 0b11111101010000000000000000000000 |
+                      (static_cast<uint32_t>(offset) << 10) |
+                      (static_cast<uint32_t>(rn) << 5) |
+                      (static_cast<uint32_t>(rt) << 0));
+    }
+
   public:
-    using extra = int;
+    struct extra {
+        // callee saved registers
+        std::span<value> locals;
+        // caller saved registers
+        reg_manager intregs;
+        reg_manager floatregs;
+
+        void init(value *locals, size_t n) {
+            this->locals = std::span<value>(locals, n);
+        }
+
+        ~extra() { delete[] locals.data(); }
+    };
 
     // todo: figure out what values for these
     static constexpr size_t function_overhead = 100 * sizeof(uint32_t);
@@ -44,11 +197,65 @@ class Arm64 {
 
     static void put_call_address(std::byte *&code, std::byte *func);
 
-    static void start_function(SHARED_PARAMS, FunctionShell &fn);
-    static void exit_function(SHARED_PARAMS, FunctionShell &fn);
+    static void start_function(SHARED_PARAMS, FunctionShell &fn) {
+        // stp     x29, x30, [sp, #-0x10]!
+        // mov     x29, sp
+        put(code, std::array<uint32_t, 2>{0xa9bf7bfd, 0x910003fd});
 
-    static void unreachable(SHARED_PARAMS);
-    static void nop(SHARED_PARAMS);
+        auto locals = new value[fn.locals.size()];
+
+        auto ireg_alloc = icallee_saved.begin();
+        auto freg_alloc = fcallee_saved.begin();
+
+        for (auto i = 0; i < fn.locals.size(); i++) {
+            auto local = fn.locals[i];
+            auto adjusted = i - fn.type.params.size();
+            auto offset = adjusted < 0
+                              ? 0x10 - adjusted * sizeof(runtime::WasmValue)
+                              : adjusted * sizeof(runtime::WasmValue);
+
+            if ((local == valtype::i32 || local == valtype::i64 ||
+                 local == valtype::funcref || local == valtype::externref) &&
+                ireg_alloc != icallee_saved.end()) {
+                // save current value
+                movreg(code, ireg::x0, *ireg_alloc);
+                loadreg_offset(code, offset, stackreg, *ireg_alloc);
+                storereg_offset(code, offset, stackreg, ireg::x0);
+
+                locals[i] = value::reg(*ireg_alloc++);
+            } else if ((local == valtype::f32 || local == valtype::f64) &&
+                       freg_alloc != fcallee_saved.end()) {
+                // save current value
+                movreg(code, freg::d0, *freg_alloc);
+                loadreg_offset(code, offset, stackreg, *freg_alloc);
+                storereg_offset(code, offset, stackreg, freg::d0);
+
+                locals[i] = value::reg(*freg_alloc++);
+            } else {
+                locals[i] = value::stack(offset);
+            }
+        }
+
+        // ...my stack | non-parameter locals | link/stack | parameters
+        //                               sp --^
+        // at call site:
+        // decrement sp past parameters
+        // call
+        // increment sp back to after link/stack
+
+        _extra.init(locals, fn.locals.size());
+    }
+    static void exit_function(SHARED_PARAMS, FunctionShell &fn) {
+        // patch stack decrement
+        // increment stack pointer by number of locals
+
+        delete[] _extra.locals.data();
+    }
+
+    static void unreachable(SHARED_PARAMS) {
+        trap<runtime::TrapKind::unreachable>(code);
+    }
+    static void nop(SHARED_PARAMS) { put(code, noop); }
     static void block(SHARED_PARAMS, WasmSignature &sig);
     static void loop(SHARED_PARAMS, WasmSignature &sig);
     static std::byte *if_(SHARED_PARAMS, WasmSignature &sig);
