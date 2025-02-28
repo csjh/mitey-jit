@@ -96,7 +96,7 @@ class value {
     }
 };
 
-#define SHARED_PARAMS std::byte *&code, WasmStack &stack, extra &_extra
+#define SHARED_PARAMS std::byte *&code, WasmStack &stack, extra &state
 
 class Arm64 {
     template <typename T> static void put(std::byte *&code, const T &val) {
@@ -183,9 +183,16 @@ class Arm64 {
         // caller saved registers
         reg_manager intregs;
         reg_manager floatregs;
+        // pointer into values pointing to flag value (or null)
+        value *flag;
+
+        uint32_t stack_size;
+        value *values;
+        value values_start[65536];
 
         void init(value *locals, size_t n) {
             this->locals = std::span<value>(locals, n);
+            this->values = values_start;
         }
 
         ~extra() { delete[] locals.data(); }
@@ -243,13 +250,14 @@ class Arm64 {
         // call
         // increment sp back to after link/stack
 
-        _extra.init(locals, fn.locals.size());
+        state.init(locals, fn.locals.size());
     }
     static void exit_function(SHARED_PARAMS, FunctionShell &fn) {
-        // patch stack decrement
-        // increment stack pointer by number of locals
+        // ldp     x29, x30, [sp], #0x10
+        // ret
+        put(code, std::array<uint32_t, 2>{0xa8c17bfd, 0xd65f03c0});
 
-        delete[] _extra.locals.data();
+        delete[] state.locals.data();
     }
 
     static void unreachable(SHARED_PARAMS) {
