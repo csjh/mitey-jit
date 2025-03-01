@@ -187,12 +187,10 @@ class Arm64 {
         value *flag;
 
         uint32_t stack_size;
-        value *values;
-        value values_start[65536];
+        std::unique_ptr<value[]> values = std::make_unique<value[]>(65536);
 
         void init(value *locals, size_t n) {
             this->locals = std::span<value>(locals, n);
-            this->values = values_start;
         }
 
         ~extra() { delete[] locals.data(); }
