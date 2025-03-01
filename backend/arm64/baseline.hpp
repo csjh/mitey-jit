@@ -10,8 +10,10 @@ namespace mitey {
 namespace arm64 {
 
 class value {
+  public:
     enum class location { reg, stack, imm, flag };
 
+  private:
     location loc;
     uint32_t val;
 
@@ -33,6 +35,9 @@ class value {
     static value flag(cond c) {
         return value(location::flag, static_cast<uint32_t>(c));
     }
+
+    template <typename T> T as() const { return static_cast<T>(val); }
+    template <location loc> bool is() const { return this->loc == loc; }
 };
 
 #define SHARED_PARAMS std::byte *&code, WasmStack &stack, extra &state
@@ -64,76 +69,172 @@ class Arm64 {
                       (static_cast<uint32_t>(rd) << 0));
     }
 
-    static void movreg(std::byte *&code, ireg dst, ireg src) {
+    static void csinc(std::byte *&code, bool sf, ireg rm, cond c, ireg rn,
+                      ireg rd) {
+        put(code, 0b00011010100000000000010000000000 |
+                      (static_cast<uint32_t>(sf) << 31) |
+                      (static_cast<uint32_t>(rm) << 16) |
+                      (static_cast<uint32_t>(c) << 12) |
+                      (static_cast<uint32_t>(rn) << 5) |
+                      (static_cast<uint32_t>(rd) << 0));
+    }
+
+    static void cset(std::byte *&code, bool sf, cond c, ireg rd) {
+        csinc(code, sf, ireg::xzr, c, ireg::xzr, rd);
+    }
+
+    static void mov(std::byte *&code, ireg dst, ireg src) {
         orr(code, true, shifttype::lsl, src, 0, ireg::xzr, dst);
     }
-    static void movreg(std::byte *&code, freg dst, ireg src) {
+    static void mov(std::byte *&code, freg dst, ireg src) {
         put(code, 0b10011110011001110000000000000000 |
                       (static_cast<uint32_t>(src) << 5) |
                       (static_cast<uint32_t>(dst) << 0));
     }
-    static void movreg(std::byte *&code, ireg dst, freg src) {
+    static void mov(std::byte *&code, ireg dst, freg src) {
         put(code, 0b10011110011001100000000000000000 |
                       (static_cast<uint32_t>(src) << 5) |
                       (static_cast<uint32_t>(dst) << 0));
     }
-    static void movreg(std::byte *&code, freg dst, freg src) {
+    static void mov(std::byte *&code, freg dst, freg src) {
         put(code, 0b10011110011001110000000000000000 |
                       (static_cast<uint32_t>(src) << 5) |
                       (static_cast<uint32_t>(dst) << 0));
     }
 
-    static void storereg_offset(std::byte *&code, uint16_t offset, ireg rn,
-                                ireg rt) {
+    static void mov(std::byte *&code, bool sf, bool notneg, bool keep,
+                    uint8_t hw, uint16_t imm, ireg rd) {
+        put(code, 0b00010010100000000000000000000000 |
+                      (static_cast<uint32_t>(sf) << 31) |
+                      (static_cast<uint32_t>(notneg) << 30) |
+                      (static_cast<uint32_t>(keep) << 29) |
+                      (static_cast<uint32_t>(hw) << 21) |
+                      (static_cast<uint32_t>(imm) << 5) |
+                      (static_cast<uint8_t>(rd) << 0));
+    }
+
+    static void mov(std::byte *&code, ireg dst, uint64_t imm) {
+        // todo: should this have a fast path for 0?
+        // i think that should be handled elsewhere
+        bool keep = false;
+        for (size_t i = 0; i < sizeof(uint32_t) && imm; i++) {
+            auto literal = imm & 0xffff;
+            imm >>= 16;
+            mov(code, true, true, keep, literal, i, dst);
+            keep = true;
+        }
+        return;
+    }
+
+    // todo: secure these to allow for arbitrary offsets (slow case them)
+    static void str_offset(std::byte *&code, uint16_t offset, ireg rn,
+                           ireg rt) {
         put(code, 0b11111001000000000000000000000000 |
                       (static_cast<uint32_t>(offset) << 10) |
                       (static_cast<uint32_t>(rn) << 5) |
                       (static_cast<uint32_t>(rt) << 0));
     }
-    static void storereg_offset(std::byte *&code, uint16_t offset, ireg rn,
-                                freg rt) {
+    static void str_offset(std::byte *&code, uint16_t offset, ireg rn,
+                           freg rt) {
         put(code, 0b11111101000000000000000000000000 |
                       (static_cast<uint32_t>(offset) << 10) |
                       (static_cast<uint32_t>(rn) << 5) |
                       (static_cast<uint32_t>(rt) << 0));
     }
 
-    static void loadreg_offset(std::byte *&code, uint16_t offset, ireg rn,
-                               ireg rt) {
-        constexpr auto imm12 = (1 << 12) - 1;
-        offset &= 0x3ff;
+    static void ldr_offset(std::byte *&code, uint16_t offset, ireg rn,
+                           ireg rt) {
         put(code, 0b11111001010000000000000000000000 |
                       (static_cast<uint32_t>(offset) << 10) |
                       (static_cast<uint32_t>(rn) << 5) |
                       (static_cast<uint32_t>(rt) << 0));
     }
-    static void loadreg_offset(std::byte *&code, uint16_t offset, ireg rn,
-                               freg rt) {
+    static void ldr_offset(std::byte *&code, uint16_t offset, ireg rn,
+                           freg rt) {
         put(code, 0b11111101010000000000000000000000 |
                       (static_cast<uint32_t>(offset) << 10) |
                       (static_cast<uint32_t>(rn) << 5) |
                       (static_cast<uint32_t>(rt) << 0));
     }
 
-  public:
+    template <typename RegType, size_t First, size_t Last> class reg_manager {
+      public:
+        struct metadata {
+            // when a register is inactive, this is a null pointer
+            // when a register is given a value, this is set to a noop
+            // when a register is stolen, this is set to a spill
+            std::byte *spilladdr = dummy;
+            uint32_t stack_offset = 0;
+            std::byte dummy[4];
+        };
+
+      private:
+        reg_lru regs;
+        metadata data[Last - First];
+
+        void spill(uint8_t reg) {
+            auto [addr, offset] = data[reg - First];
+            str_offset(addr, offset, stackreg, reg);
+        }
+
+      public:
+        std::pair<RegType, metadata *> steal(std::byte *&code);
+    };
+
     struct extra {
+        struct flags {
+            // offset to spill into
+            uint32_t stack_offset;
+            // pointer into values pointing to flag value (or nil)
+            value *val;
+        };
+
         // callee saved registers
         std::span<value> locals;
         // caller saved registers
-        reg_manager intregs;
-        reg_manager floatregs;
+        reg_manager<ireg, 3, icaller_saved.size()> intregs;
+        reg_manager<freg, 0, fcaller_saved.size()> floatregs;
         // pointer into values pointing to flag value (or null)
-        value *flag;
+        flags flag;
 
         uint32_t stack_size;
-        std::unique_ptr<value[]> values = std::make_unique<value[]>(65536);
+        value *values = values_start.get();
+
+        std::unique_ptr<value[]> values_start =
+            std::make_unique<value[]>(65536);
 
         void init(value *locals, size_t n) {
             this->locals = std::span<value>(locals, n);
         }
 
-        ~extra() { delete[] locals.data(); }
+        void clobber_flags(std::byte *&code) {
+            if (!flag.val)
+                return;
+
+            // step 1. claim a register, spilling if necessary
+            auto [spill, metadata] = intregs.steal(code);
+            // step 2. spill into claimed register
+            cset(code, true, flag.val->as<cond>(), spill);
+            // step 3. set register metadata (for spilling)
+            *metadata = decltype(intregs)::metadata(code, flag.stack_offset);
+
+            *flag.val = value::reg(spill);
+            flag.val = nullptr;
+        }
     };
+
+    static void push(extra &state, value v) {
+        *state.values++ = v;
+        // consts don't occupy stack space
+        if (!v.is<value::location::imm>()) {
+            state.stack_size += sizeof(runtime::WasmValue);
+        }
+    }
+
+    static void pop(extra &state);
+
+  public:
+    using extra = extra;
 
     // todo: figure out what values for these
     static constexpr size_t function_overhead = 100 * sizeof(uint32_t);
@@ -162,17 +263,17 @@ class Arm64 {
                  local == valtype::funcref || local == valtype::externref) &&
                 ireg_alloc != icallee_saved.end()) {
                 // save current value
-                movreg(code, ireg::x0, *ireg_alloc);
-                loadreg_offset(code, offset, stackreg, *ireg_alloc);
-                storereg_offset(code, offset, stackreg, ireg::x0);
+                mov(code, ireg::x3, *ireg_alloc);
+                ldr_offset(code, offset, stackreg, *ireg_alloc);
+                str_offset(code, offset, stackreg, ireg::x3);
 
                 locals[i] = value::reg(*ireg_alloc++);
             } else if ((local == valtype::f32 || local == valtype::f64) &&
                        freg_alloc != fcallee_saved.end()) {
                 // save current value
-                movreg(code, freg::d0, *freg_alloc);
-                loadreg_offset(code, offset, stackreg, *freg_alloc);
-                storereg_offset(code, offset, stackreg, freg::d0);
+                mov(code, freg::d0, *freg_alloc);
+                ldr_offset(code, offset, stackreg, *freg_alloc);
+                str_offset(code, offset, stackreg, freg::d0);
 
                 locals[i] = value::reg(*freg_alloc++);
             } else {
@@ -222,7 +323,9 @@ class Arm64 {
     static void drop(SHARED_PARAMS);
     static void select(SHARED_PARAMS);
     static void select_t(SHARED_PARAMS);
-    static void localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
+    static void localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
+        push(state, state.locals[local_idx]);
+    }
     static void localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
     static void localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
     static void tableget(SHARED_PARAMS, uint64_t misc_offset);
@@ -231,10 +334,24 @@ class Arm64 {
     static void globalset(SHARED_PARAMS, uint64_t misc_offset);
     static void memorysize(SHARED_PARAMS);
     static void memorygrow(SHARED_PARAMS);
-    static void i32const(SHARED_PARAMS, uint32_t cons);
-    static void i64const(SHARED_PARAMS, uint64_t cons);
-    static void f32const(SHARED_PARAMS, float cons);
-    static void f64const(SHARED_PARAMS, double cons);
+    static void i32const(SHARED_PARAMS, uint32_t cons) {
+        push(state, value::imm(cons));
+    }
+    static void i64const(SHARED_PARAMS, uint64_t cons) {
+        if (cons <= std::numeric_limits<uint32_t>::max()) {
+            mov(code, ireg::x0, cons);
+        } else {
+            push(state, value::imm(cons));
+        }
+    }
+    static void f32const(SHARED_PARAMS, float cons) {
+        mov(code, ireg::x0, std::bit_cast<uint32_t>(cons));
+        mov(code, freg::d0, ireg::x0);
+    }
+    static void f64const(SHARED_PARAMS, double cons) {
+        mov(code, ireg::x0, std::bit_cast<uint64_t>(cons));
+        mov(code, freg::d0, ireg::x0);
+    }
     static void i32load(SHARED_PARAMS, uint64_t offset, uint64_t align);
     static void i64load(SHARED_PARAMS, uint64_t offset, uint64_t align);
     static void f32load(SHARED_PARAMS, uint64_t offset, uint64_t align);
