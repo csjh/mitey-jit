@@ -1,3 +1,5 @@
+#pragma once
+
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -7,6 +9,9 @@
         if (!(cond))                                                           \
             __builtin_unreachable();                                           \
     } while (0)
+
+namespace mitey {
+namespace arm64 {
 
 class reg_lru {
     static constexpr auto Bits = 4;
@@ -64,16 +69,5 @@ class reg_lru {
     }
 };
 
-class reg_manager {
-    struct metadata {
-        // when a register is inactive, this is a null pointer
-        // when a register is given a value, this is set to a noop
-        // when a register is stolen, this is set to a spill
-        uint32_t *dumpaddr;
-    };
-
-    reg_lru regs;
-    metadata data[16];
-
-  public:
-};
+} // namespace arm64
+} // namespace mitey
