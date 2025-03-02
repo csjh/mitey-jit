@@ -1,3 +1,5 @@
+#pragma once
+
 #include "../module.hpp"
 
 #define SHARED_PARAMS std::byte *&, WasmStack &
