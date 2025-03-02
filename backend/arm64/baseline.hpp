@@ -179,13 +179,7 @@ class Arm64 {
 
       public:
         std::pair<RegType, metadata *> steal(std::byte *&code);
-    };
-
-    struct flags {
-        // offset to spill into
-        uint32_t stack_offset;
-        // pointer into values pointing to flag value (or nil)
-        value *val;
+        void surrender(RegType reg);
     };
 
     // callee saved registers
@@ -193,10 +187,16 @@ class Arm64 {
     // caller saved registers
     reg_manager<ireg, 3, icaller_saved.size()> intregs;
     reg_manager<freg, 0, fcaller_saved.size()> floatregs;
-    // pointer into values pointing to flag value (or null)
+
+    struct flags {
+        // offset to spill into
+        uint32_t stack_offset = 0;
+        // pointer into values pointing to flag value (or nil)
+        value *val = nullptr;
+    };
     flags flag;
 
-    uint32_t stack_size;
+    uint32_t stack_size = 0;
     value *values = values_start.get();
 
     std::unique_ptr<value[]> values_start = std::make_unique<value[]>(65536);
