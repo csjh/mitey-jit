@@ -40,7 +40,7 @@ class value {
     template <location loc> bool is() const { return this->loc == loc; }
 };
 
-#define SHARED_PARAMS std::byte *&code, WasmStack &stack, extra &state
+#define SHARED_PARAMS std::byte *&code, WasmStack &stack
 
 class Arm64 {
     template <typename T> static void put(std::byte *&code, const T &val) {
@@ -181,68 +181,61 @@ class Arm64 {
         std::pair<RegType, metadata *> steal(std::byte *&code);
     };
 
-    struct extra {
-        struct flags {
-            // offset to spill into
-            uint32_t stack_offset;
-            // pointer into values pointing to flag value (or nil)
-            value *val;
-        };
-
-        // callee saved registers
-        std::span<value> locals;
-        // caller saved registers
-        reg_manager<ireg, 3, icaller_saved.size()> intregs;
-        reg_manager<freg, 0, fcaller_saved.size()> floatregs;
-        // pointer into values pointing to flag value (or null)
-        flags flag;
-
-        uint32_t stack_size;
-        value *values = values_start.get();
-
-        std::unique_ptr<value[]> values_start =
-            std::make_unique<value[]>(65536);
-
-        void init(value *locals, size_t n) {
-            this->locals = std::span<value>(locals, n);
-        }
-
-        void clobber_flags(std::byte *&code) {
-            if (!flag.val)
-                return;
-
-            // step 1. claim a register, spilling if necessary
-            auto [spill, metadata] = intregs.steal(code);
-            // step 2. spill into claimed register
-            cset(code, true, flag.val->as<cond>(), spill);
-            // step 3. set register metadata (for spilling)
-            *metadata = decltype(intregs)::metadata(code, flag.stack_offset);
-
-            *flag.val = value::reg(spill);
-            flag.val = nullptr;
-        }
+    struct flags {
+        // offset to spill into
+        uint32_t stack_offset;
+        // pointer into values pointing to flag value (or nil)
+        value *val;
     };
 
-    static void push(extra &state, value v) {
-        *state.values++ = v;
+    // callee saved registers
+    std::span<value> locals;
+    // caller saved registers
+    reg_manager<ireg, 3, icaller_saved.size()> intregs;
+    reg_manager<freg, 0, fcaller_saved.size()> floatregs;
+    // pointer into values pointing to flag value (or null)
+    flags flag;
+
+    uint32_t stack_size;
+    value *values = values_start.get();
+
+    std::unique_ptr<value[]> values_start = std::make_unique<value[]>(65536);
+
+    void init(value *locals, size_t n) {
+        this->locals = std::span<value>(locals, n);
+    }
+
+    void clobber_flags(std::byte *&code) {
+        if (!flag.val)
+            return;
+
+        // step 1. claim a register, spilling if necessary
+        auto [spill, metadata] = intregs.steal(code);
+        // step 2. spill into claimed register
+        cset(code, true, flag.val->as<cond>(), spill);
+        // step 3. set register metadata (for spilling)
+        *metadata = decltype(intregs)::metadata(code, flag.stack_offset);
+
+        *flag.val = value::reg(spill);
+        flag.val = nullptr;
+    }
+
+    void push(value v) {
+        *values++ = v;
         // consts don't occupy stack space
         if (!v.is<value::location::imm>()) {
-            state.stack_size += sizeof(runtime::WasmValue);
+            stack_size += sizeof(runtime::WasmValue);
         }
     }
 
-    static void pop(extra &state);
+    void pop();
 
   public:
-    using extra = extra;
-
     // todo: figure out what values for these
     static constexpr size_t function_overhead = 100 * sizeof(uint32_t);
     static constexpr size_t max_instruction = 100 * sizeof(uint32_t);
 
-    static void put_call_address(std::byte *&code, std::byte *func);
-
-    static void start_function(SHARED_PARAMS, FunctionShell &fn) {
+    void start_function(SHARED_PARAMS, FunctionShell &fn) {
         // stp     x29, x30, [sp, #-0x10]!
         // mov     x29, sp
         put(code, std::array<uint32_t, 2>{0xa9bf7bfd, 0x910003fd});
@@ -288,245 +281,238 @@ class Arm64 {
         // call
         // increment sp back to after link/stack
 
-        state.init(locals, fn.locals.size());
+        init(locals, fn.locals.size());
     }
-    static void exit_function(SHARED_PARAMS, FunctionShell &fn) {
+    void exit_function(SHARED_PARAMS, FunctionShell &fn) {
         // ldp     x29, x30, [sp], #0x10
         // ret
         put(code, std::array<uint32_t, 2>{0xa8c17bfd, 0xd65f03c0});
 
-        delete[] state.locals.data();
+        delete[] locals.data();
     }
 
-    static void unreachable(SHARED_PARAMS) {
+    void unreachable(SHARED_PARAMS) {
         trap<runtime::TrapKind::unreachable>(code);
     }
-    static void nop(SHARED_PARAMS) { put(code, noop); }
-    static void block(SHARED_PARAMS, WasmSignature &sig);
-    static void loop(SHARED_PARAMS, WasmSignature &sig);
-    static std::byte *if_(SHARED_PARAMS, WasmSignature &sig);
-    static std::byte *else_(SHARED_PARAMS, WasmSignature &sig,
-                            std::byte *if_location);
-    static void end(SHARED_PARAMS, ControlFlow &flow);
-    static void br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
-                   uint32_t depth);
-    static void br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
-                      uint32_t depth);
-    static void br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
-                         std::span<uint32_t> targets);
-    static void return_(SHARED_PARAMS, std::span<ControlFlow> control_stack);
-    static void call_extern(SHARED_PARAMS, FunctionShell &fn,
-                            uint32_t func_offset);
-    static std::byte *call(SHARED_PARAMS, FunctionShell &fn);
-    static void call_indirect(SHARED_PARAMS, uint32_t table_offset,
-                              WasmSignature &type);
-    static void drop(SHARED_PARAMS);
-    static void select(SHARED_PARAMS);
-    static void select_t(SHARED_PARAMS);
-    static void localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-        push(state, state.locals[local_idx]);
+    void nop(SHARED_PARAMS) { put(code, noop); }
+    void block(SHARED_PARAMS, WasmSignature &sig);
+    void loop(SHARED_PARAMS, WasmSignature &sig);
+    std::byte *if_(SHARED_PARAMS, WasmSignature &sig);
+    std::byte *else_(SHARED_PARAMS, WasmSignature &sig, std::byte *if_location);
+    void end(SHARED_PARAMS, ControlFlow &flow);
+    void br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
+            uint32_t depth);
+    void br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
+               uint32_t depth);
+    void br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
+                  std::span<uint32_t> targets);
+    void return_(SHARED_PARAMS, std::span<ControlFlow> control_stack);
+    void call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset);
+    void call_indirect(SHARED_PARAMS, uint32_t table_offset,
+                       WasmSignature &type);
+    void drop(SHARED_PARAMS);
+    void select(SHARED_PARAMS);
+    void select_t(SHARED_PARAMS);
+    void localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
+        push(locals[local_idx]);
     }
-    static void localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
-    static void localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
-    static void tableget(SHARED_PARAMS, uint64_t misc_offset);
-    static void tableset(SHARED_PARAMS, uint64_t misc_offset);
-    static void globalget(SHARED_PARAMS, uint64_t misc_offset);
-    static void globalset(SHARED_PARAMS, uint64_t misc_offset);
-    static void memorysize(SHARED_PARAMS);
-    static void memorygrow(SHARED_PARAMS);
-    static void i32const(SHARED_PARAMS, uint32_t cons) {
-        push(state, value::imm(cons));
-    }
-    static void i64const(SHARED_PARAMS, uint64_t cons) {
+    void localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
+    void localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
+    void tableget(SHARED_PARAMS, uint64_t misc_offset);
+    void tableset(SHARED_PARAMS, uint64_t misc_offset);
+    void globalget(SHARED_PARAMS, uint64_t misc_offset);
+    void globalset(SHARED_PARAMS, uint64_t misc_offset);
+    void memorysize(SHARED_PARAMS);
+    void memorygrow(SHARED_PARAMS);
+    void i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
+    void i64const(SHARED_PARAMS, uint64_t cons) {
         if (cons <= std::numeric_limits<uint32_t>::max()) {
             mov(code, ireg::x0, cons);
         } else {
-            push(state, value::imm(cons));
+            push(value::imm(cons));
         }
     }
-    static void f32const(SHARED_PARAMS, float cons) {
+    void f32const(SHARED_PARAMS, float cons) {
         mov(code, ireg::x0, std::bit_cast<uint32_t>(cons));
         mov(code, freg::d0, ireg::x0);
     }
-    static void f64const(SHARED_PARAMS, double cons) {
+    void f64const(SHARED_PARAMS, double cons) {
         mov(code, ireg::x0, std::bit_cast<uint64_t>(cons));
         mov(code, freg::d0, ireg::x0);
     }
-    static void i32load(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64load(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void f32load(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void f64load(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i32load8_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i32load8_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i32load16_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i32load16_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64load8_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64load8_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64load16_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64load16_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64load32_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64load32_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i32store(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64store(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void f32store(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void f64store(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i32store8(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i32store16(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64store8(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64store16(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i64store32(SHARED_PARAMS, uint64_t offset, uint64_t align);
-    static void i32eqz(SHARED_PARAMS);
-    static void i64eqz(SHARED_PARAMS);
-    static void i32eq(SHARED_PARAMS);
-    static void i64eq(SHARED_PARAMS);
-    static void i32ne(SHARED_PARAMS);
-    static void i64ne(SHARED_PARAMS);
-    static void i32lt_s(SHARED_PARAMS);
-    static void i64lt_s(SHARED_PARAMS);
-    static void i32lt_u(SHARED_PARAMS);
-    static void i64lt_u(SHARED_PARAMS);
-    static void i32gt_s(SHARED_PARAMS);
-    static void i64gt_s(SHARED_PARAMS);
-    static void i32gt_u(SHARED_PARAMS);
-    static void i64gt_u(SHARED_PARAMS);
-    static void i32le_s(SHARED_PARAMS);
-    static void i64le_s(SHARED_PARAMS);
-    static void i32le_u(SHARED_PARAMS);
-    static void i64le_u(SHARED_PARAMS);
-    static void i32ge_s(SHARED_PARAMS);
-    static void i64ge_s(SHARED_PARAMS);
-    static void i32ge_u(SHARED_PARAMS);
-    static void i64ge_u(SHARED_PARAMS);
-    static void f32eq(SHARED_PARAMS);
-    static void f64eq(SHARED_PARAMS);
-    static void f32ne(SHARED_PARAMS);
-    static void f64ne(SHARED_PARAMS);
-    static void f32lt(SHARED_PARAMS);
-    static void f64lt(SHARED_PARAMS);
-    static void f32gt(SHARED_PARAMS);
-    static void f64gt(SHARED_PARAMS);
-    static void f32le(SHARED_PARAMS);
-    static void f64le(SHARED_PARAMS);
-    static void f32ge(SHARED_PARAMS);
-    static void f64ge(SHARED_PARAMS);
-    static void i32clz(SHARED_PARAMS);
-    static void i64clz(SHARED_PARAMS);
-    static void i32ctz(SHARED_PARAMS);
-    static void i64ctz(SHARED_PARAMS);
-    static void i32popcnt(SHARED_PARAMS);
-    static void i64popcnt(SHARED_PARAMS);
-    static void i32add(SHARED_PARAMS);
-    static void i64add(SHARED_PARAMS);
-    static void i32sub(SHARED_PARAMS);
-    static void i64sub(SHARED_PARAMS);
-    static void i32mul(SHARED_PARAMS);
-    static void i64mul(SHARED_PARAMS);
-    static void i32div_s(SHARED_PARAMS);
-    static void i64div_s(SHARED_PARAMS);
-    static void i32div_u(SHARED_PARAMS);
-    static void i64div_u(SHARED_PARAMS);
-    static void i32rem_s(SHARED_PARAMS);
-    static void i64rem_s(SHARED_PARAMS);
-    static void i32rem_u(SHARED_PARAMS);
-    static void i64rem_u(SHARED_PARAMS);
-    static void i32and(SHARED_PARAMS);
-    static void i64and(SHARED_PARAMS);
-    static void i32or(SHARED_PARAMS);
-    static void i64or(SHARED_PARAMS);
-    static void i32xor(SHARED_PARAMS);
-    static void i64xor(SHARED_PARAMS);
-    static void i32shl(SHARED_PARAMS);
-    static void i64shl(SHARED_PARAMS);
-    static void i32shr_s(SHARED_PARAMS);
-    static void i64shr_s(SHARED_PARAMS);
-    static void i32shr_u(SHARED_PARAMS);
-    static void i64shr_u(SHARED_PARAMS);
-    static void i32rotl(SHARED_PARAMS);
-    static void i64rotl(SHARED_PARAMS);
-    static void i32rotr(SHARED_PARAMS);
-    static void i64rotr(SHARED_PARAMS);
-    static void f32abs(SHARED_PARAMS);
-    static void f64abs(SHARED_PARAMS);
-    static void f32neg(SHARED_PARAMS);
-    static void f64neg(SHARED_PARAMS);
-    static void f32ceil(SHARED_PARAMS);
-    static void f64ceil(SHARED_PARAMS);
-    static void f32floor(SHARED_PARAMS);
-    static void f64floor(SHARED_PARAMS);
-    static void f32trunc(SHARED_PARAMS);
-    static void f64trunc(SHARED_PARAMS);
-    static void f32nearest(SHARED_PARAMS);
-    static void f64nearest(SHARED_PARAMS);
-    static void f32sqrt(SHARED_PARAMS);
-    static void f64sqrt(SHARED_PARAMS);
-    static void f32add(SHARED_PARAMS);
-    static void f64add(SHARED_PARAMS);
-    static void f32sub(SHARED_PARAMS);
-    static void f64sub(SHARED_PARAMS);
-    static void f32mul(SHARED_PARAMS);
-    static void f64mul(SHARED_PARAMS);
-    static void f32div(SHARED_PARAMS);
-    static void f64div(SHARED_PARAMS);
-    static void f32min(SHARED_PARAMS);
-    static void f64min(SHARED_PARAMS);
-    static void f32max(SHARED_PARAMS);
-    static void f64max(SHARED_PARAMS);
-    static void f32copysign(SHARED_PARAMS);
-    static void f64copysign(SHARED_PARAMS);
-    static void i32wrap_i64(SHARED_PARAMS);
-    static void i64extend_i32_s(SHARED_PARAMS);
-    static void i64extend_i32_u(SHARED_PARAMS);
-    static void i32trunc_f32_s(SHARED_PARAMS);
-    static void i64trunc_f32_s(SHARED_PARAMS);
-    static void i32trunc_f32_u(SHARED_PARAMS);
-    static void i64trunc_f32_u(SHARED_PARAMS);
-    static void i32trunc_f64_s(SHARED_PARAMS);
-    static void i64trunc_f64_s(SHARED_PARAMS);
-    static void i32trunc_f64_u(SHARED_PARAMS);
-    static void i64trunc_f64_u(SHARED_PARAMS);
-    static void f32convert_i32_s(SHARED_PARAMS);
-    static void f64convert_i32_s(SHARED_PARAMS);
-    static void f32convert_i32_u(SHARED_PARAMS);
-    static void f64convert_i32_u(SHARED_PARAMS);
-    static void f32convert_i64_s(SHARED_PARAMS);
-    static void f64convert_i64_s(SHARED_PARAMS);
-    static void f32convert_i64_u(SHARED_PARAMS);
-    static void f64convert_i64_u(SHARED_PARAMS);
-    static void f32demote_f64(SHARED_PARAMS);
-    static void f64promote_f32(SHARED_PARAMS);
-    static void i32reinterpret_f32(SHARED_PARAMS);
-    static void f32reinterpret_i32(SHARED_PARAMS);
-    static void i64reinterpret_f64(SHARED_PARAMS);
-    static void f64reinterpret_i64(SHARED_PARAMS);
-    static void i32extend8_s(SHARED_PARAMS);
-    static void i32extend16_s(SHARED_PARAMS);
-    static void i64extend8_s(SHARED_PARAMS);
-    static void i64extend16_s(SHARED_PARAMS);
-    static void i64extend32_s(SHARED_PARAMS);
-    static void ref_null(SHARED_PARAMS);
-    static void ref_is_null(SHARED_PARAMS);
-    static void ref_func(SHARED_PARAMS, uint64_t misc_offset);
-    static void ref_eq(SHARED_PARAMS);
-    static void i32_trunc_sat_f32_s(SHARED_PARAMS);
-    static void i32_trunc_sat_f32_u(SHARED_PARAMS);
-    static void i32_trunc_sat_f64_s(SHARED_PARAMS);
-    static void i32_trunc_sat_f64_u(SHARED_PARAMS);
-    static void i64_trunc_sat_f32_s(SHARED_PARAMS);
-    static void i64_trunc_sat_f32_u(SHARED_PARAMS);
-    static void i64_trunc_sat_f64_s(SHARED_PARAMS);
-    static void i64_trunc_sat_f64_u(SHARED_PARAMS);
-    static void memory_init(SHARED_PARAMS, uint64_t misc_offset);
-    static void data_drop(SHARED_PARAMS, uint64_t misc_offset);
-    static void memory_copy(SHARED_PARAMS);
-    static void memory_fill(SHARED_PARAMS);
-    static void table_init(SHARED_PARAMS, uint64_t seg_offset,
-                           uint64_t table_offset);
-    static void elem_drop(SHARED_PARAMS, uint64_t misc_offset);
-    static void table_copy(SHARED_PARAMS, uint64_t dst_offset,
-                           uint64_t src_offset);
-    static void table_grow(SHARED_PARAMS, uint64_t misc_offset);
-    static void table_size(SHARED_PARAMS, uint64_t misc_offset);
-    static void table_fill(SHARED_PARAMS, uint64_t misc_offset);
+    void i32load(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64load(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void f32load(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void f64load(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i32load8_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i32load8_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i32load16_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i32load16_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64load8_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64load8_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64load16_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64load16_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64load32_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64load32_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i32store(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64store(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void f32store(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void f64store(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i32store8(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i32store16(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64store8(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64store16(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i64store32(SHARED_PARAMS, uint64_t offset, uint64_t align);
+    void i32eqz(SHARED_PARAMS);
+    void i64eqz(SHARED_PARAMS);
+    void i32eq(SHARED_PARAMS);
+    void i64eq(SHARED_PARAMS);
+    void i32ne(SHARED_PARAMS);
+    void i64ne(SHARED_PARAMS);
+    void i32lt_s(SHARED_PARAMS);
+    void i64lt_s(SHARED_PARAMS);
+    void i32lt_u(SHARED_PARAMS);
+    void i64lt_u(SHARED_PARAMS);
+    void i32gt_s(SHARED_PARAMS);
+    void i64gt_s(SHARED_PARAMS);
+    void i32gt_u(SHARED_PARAMS);
+    void i64gt_u(SHARED_PARAMS);
+    void i32le_s(SHARED_PARAMS);
+    void i64le_s(SHARED_PARAMS);
+    void i32le_u(SHARED_PARAMS);
+    void i64le_u(SHARED_PARAMS);
+    void i32ge_s(SHARED_PARAMS);
+    void i64ge_s(SHARED_PARAMS);
+    void i32ge_u(SHARED_PARAMS);
+    void i64ge_u(SHARED_PARAMS);
+    void f32eq(SHARED_PARAMS);
+    void f64eq(SHARED_PARAMS);
+    void f32ne(SHARED_PARAMS);
+    void f64ne(SHARED_PARAMS);
+    void f32lt(SHARED_PARAMS);
+    void f64lt(SHARED_PARAMS);
+    void f32gt(SHARED_PARAMS);
+    void f64gt(SHARED_PARAMS);
+    void f32le(SHARED_PARAMS);
+    void f64le(SHARED_PARAMS);
+    void f32ge(SHARED_PARAMS);
+    void f64ge(SHARED_PARAMS);
+    void i32clz(SHARED_PARAMS);
+    void i64clz(SHARED_PARAMS);
+    void i32ctz(SHARED_PARAMS);
+    void i64ctz(SHARED_PARAMS);
+    void i32popcnt(SHARED_PARAMS);
+    void i64popcnt(SHARED_PARAMS);
+    void i32add(SHARED_PARAMS);
+    void i64add(SHARED_PARAMS);
+    void i32sub(SHARED_PARAMS);
+    void i64sub(SHARED_PARAMS);
+    void i32mul(SHARED_PARAMS);
+    void i64mul(SHARED_PARAMS);
+    void i32div_s(SHARED_PARAMS);
+    void i64div_s(SHARED_PARAMS);
+    void i32div_u(SHARED_PARAMS);
+    void i64div_u(SHARED_PARAMS);
+    void i32rem_s(SHARED_PARAMS);
+    void i64rem_s(SHARED_PARAMS);
+    void i32rem_u(SHARED_PARAMS);
+    void i64rem_u(SHARED_PARAMS);
+    void i32and(SHARED_PARAMS);
+    void i64and(SHARED_PARAMS);
+    void i32or(SHARED_PARAMS);
+    void i64or(SHARED_PARAMS);
+    void i32xor(SHARED_PARAMS);
+    void i64xor(SHARED_PARAMS);
+    void i32shl(SHARED_PARAMS);
+    void i64shl(SHARED_PARAMS);
+    void i32shr_s(SHARED_PARAMS);
+    void i64shr_s(SHARED_PARAMS);
+    void i32shr_u(SHARED_PARAMS);
+    void i64shr_u(SHARED_PARAMS);
+    void i32rotl(SHARED_PARAMS);
+    void i64rotl(SHARED_PARAMS);
+    void i32rotr(SHARED_PARAMS);
+    void i64rotr(SHARED_PARAMS);
+    void f32abs(SHARED_PARAMS);
+    void f64abs(SHARED_PARAMS);
+    void f32neg(SHARED_PARAMS);
+    void f64neg(SHARED_PARAMS);
+    void f32ceil(SHARED_PARAMS);
+    void f64ceil(SHARED_PARAMS);
+    void f32floor(SHARED_PARAMS);
+    void f64floor(SHARED_PARAMS);
+    void f32trunc(SHARED_PARAMS);
+    void f64trunc(SHARED_PARAMS);
+    void f32nearest(SHARED_PARAMS);
+    void f64nearest(SHARED_PARAMS);
+    void f32sqrt(SHARED_PARAMS);
+    void f64sqrt(SHARED_PARAMS);
+    void f32add(SHARED_PARAMS);
+    void f64add(SHARED_PARAMS);
+    void f32sub(SHARED_PARAMS);
+    void f64sub(SHARED_PARAMS);
+    void f32mul(SHARED_PARAMS);
+    void f64mul(SHARED_PARAMS);
+    void f32div(SHARED_PARAMS);
+    void f64div(SHARED_PARAMS);
+    void f32min(SHARED_PARAMS);
+    void f64min(SHARED_PARAMS);
+    void f32max(SHARED_PARAMS);
+    void f64max(SHARED_PARAMS);
+    void f32copysign(SHARED_PARAMS);
+    void f64copysign(SHARED_PARAMS);
+    void i32wrap_i64(SHARED_PARAMS);
+    void i64extend_i32_s(SHARED_PARAMS);
+    void i64extend_i32_u(SHARED_PARAMS);
+    void i32trunc_f32_s(SHARED_PARAMS);
+    void i64trunc_f32_s(SHARED_PARAMS);
+    void i32trunc_f32_u(SHARED_PARAMS);
+    void i64trunc_f32_u(SHARED_PARAMS);
+    void i32trunc_f64_s(SHARED_PARAMS);
+    void i64trunc_f64_s(SHARED_PARAMS);
+    void i32trunc_f64_u(SHARED_PARAMS);
+    void i64trunc_f64_u(SHARED_PARAMS);
+    void f32convert_i32_s(SHARED_PARAMS);
+    void f64convert_i32_s(SHARED_PARAMS);
+    void f32convert_i32_u(SHARED_PARAMS);
+    void f64convert_i32_u(SHARED_PARAMS);
+    void f32convert_i64_s(SHARED_PARAMS);
+    void f64convert_i64_s(SHARED_PARAMS);
+    void f32convert_i64_u(SHARED_PARAMS);
+    void f64convert_i64_u(SHARED_PARAMS);
+    void f32demote_f64(SHARED_PARAMS);
+    void f64promote_f32(SHARED_PARAMS);
+    void i32reinterpret_f32(SHARED_PARAMS);
+    void f32reinterpret_i32(SHARED_PARAMS);
+    void i64reinterpret_f64(SHARED_PARAMS);
+    void f64reinterpret_i64(SHARED_PARAMS);
+    void i32extend8_s(SHARED_PARAMS);
+    void i32extend16_s(SHARED_PARAMS);
+    void i64extend8_s(SHARED_PARAMS);
+    void i64extend16_s(SHARED_PARAMS);
+    void i64extend32_s(SHARED_PARAMS);
+    void ref_null(SHARED_PARAMS);
+    void ref_is_null(SHARED_PARAMS);
+    void ref_func(SHARED_PARAMS, uint64_t misc_offset);
+    void ref_eq(SHARED_PARAMS);
+    void i32_trunc_sat_f32_s(SHARED_PARAMS);
+    void i32_trunc_sat_f32_u(SHARED_PARAMS);
+    void i32_trunc_sat_f64_s(SHARED_PARAMS);
+    void i32_trunc_sat_f64_u(SHARED_PARAMS);
+    void i64_trunc_sat_f32_s(SHARED_PARAMS);
+    void i64_trunc_sat_f32_u(SHARED_PARAMS);
+    void i64_trunc_sat_f64_s(SHARED_PARAMS);
+    void i64_trunc_sat_f64_u(SHARED_PARAMS);
+    void memory_init(SHARED_PARAMS, uint64_t misc_offset);
+    void data_drop(SHARED_PARAMS, uint64_t misc_offset);
+    void memory_copy(SHARED_PARAMS);
+    void memory_fill(SHARED_PARAMS);
+    void table_init(SHARED_PARAMS, uint64_t seg_offset, uint64_t table_offset);
+    void elem_drop(SHARED_PARAMS, uint64_t misc_offset);
+    void table_copy(SHARED_PARAMS, uint64_t dst_offset, uint64_t src_offset);
+    void table_grow(SHARED_PARAMS, uint64_t misc_offset);
+    void table_size(SHARED_PARAMS, uint64_t misc_offset);
+    void table_fill(SHARED_PARAMS, uint64_t misc_offset);
 };
 
 // locals go in callee saved registers, because we don't want to save them

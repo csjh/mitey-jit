@@ -12,7 +12,7 @@
 extern std::vector<std::string> names;
 #endif
 
-#define _(name, ...) Target::name(code, stack, extra __VA_OPT__(, ) __VA_ARGS__)
+#define _(name, ...) jit.name(code, stack __VA_OPT__(, ) __VA_ARGS__)
 
 namespace mitey {
 
@@ -686,10 +686,6 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     iter = fn_iter;
                 }
 
-                for (auto [call, func_idx] : pending_calls) {
-                    Target::put_call_address(call, functions[func_idx].start);
-                }
-
                 return code - executable.get();
             });
         },
@@ -880,7 +876,7 @@ void WasmStack::apply(std::array<valtype, pc> params,
     std::byte *validate_##name(Module &mod, safe_byte_iterator &iter,          \
                                FunctionShell &fn, WasmStack &stack,            \
                                std::vector<ControlFlow> &control_stack,        \
-                               std::byte *code, typename Target::extra &extra)
+                               std::byte *code, Target &jit)
 
 #define V(name, _, byte) HANDLER(name);
 FOREACH_INSTRUCTION(V)
@@ -907,15 +903,15 @@ FOREACH_INSTRUCTION(V)
         }                                                                      \
         std::cerr << std::endl;                                                \
         std::cerr << std::endl;                                                \
-        [[clang::musttail]] return funcs<Target>[byte](mod, iter, fn, stack,   \
-                                                       control_stack, code);   \
+        [[clang::musttail]] return funcs<Target>[byte](                        \
+            mod, iter, fn, stack, control_stack, code, jit);                   \
     } while (0)
 #else
 #define nextop()                                                               \
     do {                                                                       \
         auto byte = *iter++;                                                   \
         [[clang::musttail]] return funcs<Target>[byte](                        \
-            mod, iter, fn, stack, control_stack, code, extra);                 \
+            mod, iter, fn, stack, control_stack, code, jit);                   \
     } while (0)
 #endif
 
@@ -1096,12 +1092,7 @@ HANDLER(call) {
     auto &func = mod.functions[fn_idx];
     stack.apply(func.type);
 
-    if (func.import) {
-        _(call_extern, func, 1 + fn_idx);
-    } else {
-        auto imm = _(call, func);
-        mod.pending_calls.push_back({imm, fn_idx});
-    }
+    _(call, func, 1 + fn_idx);
     nextop();
 }
 HANDLER(call_indirect) {
@@ -1617,27 +1608,26 @@ HANDLER(multibyte) {
 
     auto byte = safe_read_leb128<uint8_t, 32>(iter);
     [[clang::musttail]] return fc_funcs[byte](mod, iter, fn, stack,
-                                              control_stack, code, extra);
+                                              control_stack, code, jit);
 }
 
 template <typename Pager, typename Target>
 std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
                                         std::byte *code, FunctionShell &fn) {
     auto stack = WasmStack();
-    auto extra = typename Target::extra{};
-
-    _(start_function, fn);
-
+    auto jit = Target();
     auto control_stack = std::vector<ControlFlow>(
         {ControlFlow(fn.type.results, {}, {}, fn.type, false, 0, Function())});
 
+    _(start_function, fn);
+
     auto byte = *iter++;
-    auto code_end =
-        funcs<Target>[byte](*this, iter, fn, stack, control_stack, code, extra);
+    code =
+        funcs<Target>[byte](*this, iter, fn, stack, control_stack, code, jit);
 
     _(exit_function, fn);
 
-    return code_end;
+    return code;
 }
 
 #undef LOAD

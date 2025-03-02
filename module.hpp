@@ -175,7 +175,7 @@ template <typename Target>
 using CompilationHandler = std::byte *(Module &, safe_byte_iterator &,
                                        FunctionShell &, WasmStack &,
                                        std::vector<ControlFlow> &, std::byte *,
-                                       typename Target::extra &);
+                                       Target &);
 
 class Module {
     friend class Instance;
@@ -204,8 +204,6 @@ class Module {
     std::vector<FunctionShell> functions;
     uint32_t n_data;
     std::vector<runtime::Segment> data_segments;
-
-    std::vector<std::pair<std::byte *, uint32_t>> pending_calls;
 
     template <typename Pager, typename Target>
     std::byte *validate_and_compile(safe_byte_iterator &iter, std::byte *code,
