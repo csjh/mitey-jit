@@ -1,6 +1,8 @@
-#include "baseline.hpp"
+#include "./baseline.hpp"
+#include <cassert>
 #include <cstring>
 #include <limits>
+#include <optional>
 
 namespace mitey {
 namespace arm64 {
@@ -118,6 +120,44 @@ void ldr_offset(std::byte *&code, uint16_t offset, ireg rn, freg rt) {
                   (static_cast<uint32_t>(rt) << 0));
 }
 
+struct LogicalImm {
+    uint32_t prefix : 9;
+    uint32_t N : 1;
+    uint32_t immr : 6;
+    uint32_t imms : 6;
+    uint32_t postfix : 10;
+};
+static_assert(sizeof(LogicalImm) == sizeof(uint32_t));
+
+// based on
+// https://dougallj.wordpress.com/2021/10/30/bit-twiddling-optimising-aarch64-logical-immediate-encoding-and-decoding/
+std::optional<LogicalImm> tryLogicalImm(uint64_t val) {
+    if (val == 0 || ~val == 0)
+        return std::nullopt;
+
+    uint32_t rotation = std::countr_zero(val & (val + 1));
+    uint64_t normalized = std::rotr(val, rotation & 63);
+
+    uint32_t zeroes = std::countl_zero(normalized);
+    uint32_t ones = std::countr_one(normalized);
+    uint32_t size = zeroes + ones;
+
+    if (std::rotr(val, size & 63) != val)
+        return std::nullopt;
+
+    return LogicalImm{.N = (size >> 6),
+                      .immr = -rotation & (size - 1),
+                      .imms = (-(size << 1) | (ones - 1)) & 0x3f};
+}
+
+std::optional<LogicalImm> tryLogicalImm(uint32_t val) {
+    uint64_t val64 = ((uint64_t)val << 32) | val;
+    return tryLogicalImm(val64);
+}
+
+bool is_volatile(ireg reg) { return reg <= icaller_saved.back(); }
+bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
+
 }; // namespace
 
 void Arm64::init(value *locals, size_t n) {
@@ -129,13 +169,13 @@ void Arm64::clobber_flags(std::byte *&code) {
         return;
 
     // step 1. claim a register, spilling if necessary
-    auto [spill, metadata] = intregs.steal(code);
+    auto [reg, metadata] = intregs.steal(code);
     // step 2. spill into claimed register
-    cset(code, true, flag.val->as<cond>(), spill);
+    cset(code, true, flag.val->as<cond>(), reg);
     // step 3. set register metadata (for spilling)
     *metadata = decltype(intregs)::metadata(code, flag.stack_offset);
 
-    *flag.val = value::reg(spill);
+    *flag.val = value::reg(reg);
     flag.val = nullptr;
 }
 
@@ -147,9 +187,82 @@ void Arm64::push(value v) {
     }
 }
 
-void Arm64::pop() {
-    // Implementation left as stub - this would be implemented in a full
-    // refactoring
+template <size_t nparams>
+std::array<value, nparams + 1>
+Arm64::allocate_registers(std::byte *&code,
+                          std::array<poption::type, nparams> params,
+                          poption::type result) {
+
+    std::array<value, nparams + 1> ret;
+
+    values -= nparams;
+    for (int i = 0; i < nparams; i++) {
+        auto v = values[i];
+
+        switch (v.where()) {
+        case value::location::reg: {
+            // already in a register - good to go
+            ret[i] = v;
+            break;
+        }
+        case value::location::stack: {
+            auto offset = v.as<uint32_t>();
+            if (params[i] == poption::freg) {
+                auto [reg, _] = floatregs.steal(code);
+                ldr_offset(code, offset, stackreg, reg);
+                ret[i] = value::reg(reg);
+            } else {
+                auto [reg, _] = intregs.steal(code);
+                ldr_offset(code, offset, stackreg, reg);
+                ret[i] = value::reg(reg);
+            }
+            break;
+        }
+        case value::location::imm: {
+            assert(params[i] != poption::freg);
+
+            auto imm = v.as<uint32_t>();
+            if (params[i].fits(imm)) {
+                ret[i] = v;
+            } else if (auto mask = tryLogicalImm(imm);
+                       params[i] == poption::bitmask && mask) {
+                ret[i] = value::imm(std::bit_cast<uint32_t>(*mask));
+            } else {
+                auto [reg, _] = intregs.steal(code);
+                mov(code, reg, imm);
+                ret[i] = value::reg(reg);
+            }
+            break;
+        }
+        case value::location::flag: {
+            assert(params[i] != poption::freg);
+            if (params[i] == poption::flags) {
+                ret[i] = v;
+            } else {
+                auto [reg, _] = intregs.steal(code);
+                cset(code, true, v.as<cond>(), reg);
+                ret[i] = value::reg(reg);
+            }
+            break;
+        }
+        }
+
+        if (params[i] == result &&
+            ((result == poption::ireg && is_volatile(v.as<ireg>())) ||
+             (result == poption::freg && is_volatile(v.as<freg>())))) {
+            ret.back() = ret[i];
+        }
+    }
+
+    for (int i = 0; i < nparams; i++) {
+        if (params[i] == poption::freg) {
+            floatregs.surrender(ret[i].template as<freg>());
+        } else {
+            intregs.surrender(ret[i].template as<ireg>());
+        }
+    }
+
+    return ret;
 }
 
 void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {

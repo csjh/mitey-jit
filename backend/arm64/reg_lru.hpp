@@ -1,7 +1,5 @@
 #pragma once
 
-#include <bit>
-#include <cstddef>
 #include <cstdint>
 
 #define ASSUME(cond)                                                           \
@@ -13,59 +11,71 @@
 namespace mitey {
 namespace arm64 {
 
-class reg_lru {
-    static constexpr auto Bits = 4;
-    static constexpr auto Max = (1 << Bits) - 1;
+template <uint8_t N> class reg_lru {
+    static constexpr uint8_t dummy = 255;
 
-    uint64_t store = 0xfedcba9876543210;
-    static constexpr auto StoreBits = sizeof(store) * 8;
-
-    static constexpr auto LowBitsMask = 0x7777777777777777ull;
-    static constexpr auto OnesBitMask = 0x1111111111111111ull;
-
-    // returns the match with a single bit set, in the ones digit of the match
-    // adapted from stringzilla
-    size_t find(size_t n) {
-        ASSUME(n <= Max);
-
-        n *= OnesBitMask;
-        auto mask = ~(store ^ n);
-        // The match is valid, if every bit within each byte is set. For that,
-        // take the bottom 7 bits of each byte, add one to them, and if this
-        // sets the top bit to one, then all the 7 bits are ones as well.
-        mask = ((mask & LowBitsMask) + OnesBitMask) & ((mask & ~LowBitsMask));
-        return mask >> 3;
-    }
+    uint8_t prev[N];
+    uint8_t next[N];
+    uint8_t head;
+    uint8_t tail;
 
   public:
-    void bump(size_t n) {
-        ASSUME(n <= Max);
-
-        auto mask = find(n);
-        ASSUME(std::popcount(mask) == 1);
-
-        // elements (pos, 16) remain the same
-        // mask-1 because all bottom bits are below the single match bit
-        auto bottom_mask = mask - 1;
-        // elements [0, pos] are rotated 4 bits to the right
-        auto top_mask = ~bottom_mask;
-
-        auto top = (n << (StoreBits - Bits)) | ((store >> Bits) & top_mask);
-        auto bottom = store & bottom_mask;
-
-        store = top | bottom;
+    reg_lru() {
+        for (uint8_t i = 0; i < N; i++) {
+            prev[i] = (i == 0) ? dummy : i - 1;
+            next[i] = (i == N - 1) ? dummy : i + 1;
+        }
+        head = 0;
+        tail = N - 1;
     }
 
-    size_t claim() {
-        size_t last = store & Max;
-        // compiler not smart enough to figure out bump(last) is equivalent
-        store = std::rotr(store, Bits);
-        return last;
+    uint8_t steal() {
+        auto n = head;
+        access(n);
+        return n;
     }
 
-    void discard(size_t n) {
-        bump(n);
-        store = std::rotl(store, Bits);
+    void access(uint8_t n) {
+        if (n == tail) {
+            return;
+        }
+
+        if (prev[n] != dummy) {
+            next[prev[n]] = next[n];
+        }
+        if (next[n] != dummy) {
+            prev[next[n]] = prev[n];
+        }
+        if (n == head) {
+            head = next[n];
+        }
+
+        next[tail] = n;
+        prev[n] = tail;
+        next[n] = dummy;
+        tail = n;
+    }
+
+    void discard(uint8_t n) {
+        if (n == head) {
+            return;
+        }
+
+        if (prev[n] != dummy) {
+            next[prev[n]] = next[n];
+        }
+        if (next[n] != dummy) {
+            prev[next[n]] = prev[n];
+        }
+        if (n == tail) {
+            tail = prev[n];
+            next[tail] = dummy;
+        }
+
+        prev[head] = n;
+        next[n] = head;
+        prev[n] = dummy;
+        head = n;
     }
 };
 

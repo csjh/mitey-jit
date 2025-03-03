@@ -38,7 +38,8 @@ class value {
     }
 
     template <typename T> T as() const { return static_cast<T>(val); }
-    template <location loc> bool is() const { return this->loc == loc; }
+    location where() const { return loc; }
+    template <location loc> bool is() const { return where() == loc; }
 };
 
 #define SHARED_PARAMS std::byte *&code, WasmStack &stack
@@ -50,13 +51,12 @@ class Arm64 {
             // when a register is inactive, this is a null pointer
             // when a register is given a value, this is set to a noop
             // when a register is stolen, this is set to a spill
-            std::byte *spilladdr = dummy;
+            std::byte *spilladdr = nullptr;
             uint32_t stack_offset = 0;
-            std::byte dummy[4];
         };
 
       private:
-        reg_lru regs;
+        reg_lru<Last - First> regs;
         metadata data[Last - First];
 
         void spill(uint8_t reg) {
@@ -64,9 +64,33 @@ class Arm64 {
             str_offset(addr, offset, stackreg, reg);
         }
 
+        uint8_t to_index(RegType reg) {
+            return static_cast<uint8_t>(reg) - First;
+        }
+
+        RegType from_index(uint8_t idx) {
+            return static_cast<RegType>(idx + First);
+        }
+
       public:
-        std::pair<RegType, metadata *> steal(std::byte *&code);
-        void surrender(RegType reg);
+        std::pair<RegType, metadata *> steal(std::byte *&code) {
+            auto idx = regs.steal();
+            auto reg = static_cast<RegType>(idx + First);
+            return {reg, &data[idx]};
+        }
+
+        // assumes the register is dead
+        void claim(RegType reg, metadata meta) {
+            auto idx = to_index(reg);
+            regs.access(idx);
+            data[idx] = meta;
+        }
+
+        void surrender(RegType reg) {
+            auto idx = to_index(reg);
+            regs.discard(idx);
+            data[idx] = metadata(nullptr, 0);
+        }
     };
 
     // callee saved registers
@@ -88,9 +112,40 @@ class Arm64 {
     std::unique_ptr<value[]> values_start = std::make_unique<value[]>(65536);
 
     void init(value *locals, size_t n);
+
     void clobber_flags(std::byte *&code);
+    void clobber_registers(std::byte *&code);
+
     void push(value v);
-    void pop();
+
+    struct poption {
+      private:
+        // literal/bitmask/flags implicitly accept ireg
+        enum class canbe { ireg, freg, literal, bitmask, flags, none };
+
+      public:
+        struct type {
+            canbe val;
+            uint32_t threshold;
+
+            bool operator==(type c) const { return val == c.val; }
+            bool fits(uint32_t t) const { return t < threshold; }
+        };
+
+        static constexpr auto none = type(canbe::none, 0);
+        static constexpr auto ireg = type(canbe::ireg, 0);
+        static constexpr auto freg = type(canbe::freg, 0);
+        template <uint32_t t>
+        static constexpr auto literal = type(canbe::literal, t);
+        static constexpr auto bitmask = type(canbe::bitmask, 0);
+        static constexpr auto flags = type(canbe::flags, 0);
+    };
+    // eventually i'll have to support multivalue here
+    template <size_t nparams>
+    std::array<value, nparams + 1>
+    allocate_registers(std::byte *&code,
+                       std::array<poption::type, nparams> params,
+                       poption::type result);
 
   public:
     // todo: figure out what values for these
