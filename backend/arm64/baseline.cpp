@@ -34,6 +34,22 @@ void orr(std::byte *&code, bool sf, shifttype shift, ireg rm, uint8_t shift_imm,
                   (static_cast<uint32_t>(rd) << 0));
 }
 
+void add(std::byte *&code, bool sf, uint16_t imm12, ireg rn, ireg rd) {
+    put(code, 0b00010001000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(imm12) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void add(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+    put(code, 0b00001011000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
 void csinc(std::byte *&code, bool sf, ireg rm, cond c, ireg rn, ireg rd) {
     put(code, 0b00011010100000000000010000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
@@ -194,6 +210,7 @@ Arm64::allocate_registers(std::byte *&code,
                           poption::type result) {
 
     std::array<value, nparams + 1> ret;
+    bool return_set = false;
 
     values -= nparams;
     for (int i = 0; i < nparams; i++) {
@@ -201,11 +218,15 @@ Arm64::allocate_registers(std::byte *&code,
 
         switch (v.where()) {
         case value::location::reg: {
+            stack_size -= sizeof(runtime::WasmValue);
+
             // already in a register - good to go
             ret[i] = v;
             break;
         }
         case value::location::stack: {
+            stack_size -= sizeof(runtime::WasmValue);
+
             auto offset = v.as<uint32_t>();
             if (params[i] == poption::freg) {
                 auto [reg, _] = floatregs.steal(code);
@@ -235,7 +256,10 @@ Arm64::allocate_registers(std::byte *&code,
             break;
         }
         case value::location::flag: {
+            stack_size -= sizeof(runtime::WasmValue);
+
             assert(params[i] != poption::freg);
+
             if (params[i] == poption::flags) {
                 ret[i] = v;
             } else {
@@ -251,6 +275,7 @@ Arm64::allocate_registers(std::byte *&code,
             ((result == poption::ireg && is_volatile(v.as<ireg>())) ||
              (result == poption::freg && is_volatile(v.as<freg>())))) {
             ret.back() = ret[i];
+            return_set = true;
         }
     }
 
@@ -262,7 +287,35 @@ Arm64::allocate_registers(std::byte *&code,
         }
     }
 
+    if (result != poption::none && !return_set) {
+        if (result == poption::freg) {
+            auto [reg, _] = floatregs.steal(code);
+            ret.back() = value::reg(reg);
+        } else {
+            auto [reg, _] = intregs.steal(code);
+            ret.back() = value::reg(reg);
+        }
+    }
+
     return ret;
+}
+
+void Arm64::finalize(std::byte *&code, ireg result) {
+    intregs.claim(result, decltype(intregs)::metadata(code, stack_size));
+    // buffer area for spilling
+    code += sizeof(inst);
+    stack_size += sizeof(runtime::WasmValue);
+
+    *values++ = value::reg(result);
+}
+
+void Arm64::finalize(std::byte *&code, freg result) {
+    floatregs.claim(result, decltype(floatregs)::metadata(code, stack_size));
+    // buffer area for spilling
+    code += sizeof(inst);
+    stack_size += sizeof(runtime::WasmValue);
+
+    *values++ = value::reg(result);
 }
 
 void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
@@ -434,7 +487,19 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
 // void Arm64::i64ctz(SHARED_PARAMS);
 // void Arm64::i32popcnt(SHARED_PARAMS);
 // void Arm64::i64popcnt(SHARED_PARAMS);
-// void Arm64::i32add(SHARED_PARAMS);
+void Arm64::i32add(SHARED_PARAMS) {
+    auto [p1, p2, res] = allocate_registers(
+        code, std::array{poption::ireg, poption::literal<1 << 12>},
+        poption::ireg);
+
+    if (p2.is<value::location::imm>()) {
+        add(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        add(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
 // void Arm64::i64add(SHARED_PARAMS);
 // void Arm64::i32sub(SHARED_PARAMS);
 // void Arm64::i64sub(SHARED_PARAMS);

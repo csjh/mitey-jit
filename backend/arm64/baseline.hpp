@@ -147,6 +147,9 @@ class Arm64 {
                        std::array<poption::type, nparams> params,
                        poption::type result);
 
+    void finalize(std::byte *&code, ireg result);
+    void finalize(std::byte *&code, freg result);
+
   public:
     // todo: figure out what values for these
     static constexpr size_t function_overhead = 100 * sizeof(uint32_t);
