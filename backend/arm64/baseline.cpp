@@ -108,6 +108,7 @@ void mov(std::byte *&code, ireg dst, uint64_t imm) {
     }
 }
 
+void str_offset(std::byte *&code, uint32_t offset, ireg rn, ireg rt) {
     offset /= 8;
     put(code, 0b11111001000000000000000000000000 |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -115,6 +116,7 @@ void mov(std::byte *&code, ireg dst, uint64_t imm) {
                   (static_cast<uint32_t>(rt) << 0));
 }
 
+void str_offset(std::byte *&code, uint32_t offset, ireg rn, freg rt) {
     offset /= 8;
     put(code, 0b11111101000000000000000000000000 |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -122,6 +124,7 @@ void mov(std::byte *&code, ireg dst, uint64_t imm) {
                   (static_cast<uint32_t>(rt) << 0));
 }
 
+void ldr_offset(std::byte *&code, uint32_t offset, ireg rn, ireg rt) {
     offset /= 8;
     put(code, 0b11111001010000000000000000000000 |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -129,6 +132,7 @@ void mov(std::byte *&code, ireg dst, uint64_t imm) {
                   (static_cast<uint32_t>(rt) << 0));
 }
 
+void ldr_offset(std::byte *&code, uint32_t offset, ireg rn, freg rt) {
     offset /= 8;
     put(code, 0b11111101010000000000000000000000 |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -175,10 +179,6 @@ bool is_volatile(ireg reg) { return reg <= icaller_saved.back(); }
 bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
 
 }; // namespace
-
-void Arm64::init(value *locals, size_t n) {
-    this->locals = std::span<value>(locals, n);
-}
 
 void Arm64::clobber_flags(std::byte *&code) {
     if (!flag.val)
@@ -356,15 +356,6 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             locals[i] = value::stack(offset);
         }
     }
-
-    // ...my stack | non-parameter locals | link/stack | parameters
-    //                               sp --^
-    // at call site:
-    // decrement sp past parameters
-    // call
-    // increment sp back to after link/stack
-
-    init(locals, fn.locals.size());
 }
 void Arm64::exit_function(SHARED_PARAMS, FunctionShell &fn) {
     // ldp     x29, x30, [sp], #0x10

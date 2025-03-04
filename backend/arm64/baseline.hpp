@@ -111,8 +111,6 @@ class Arm64 {
     value *values = values_start.get();
     std::unique_ptr<value[]> values_start = std::make_unique<value[]>(65536);
 
-    void init(value *locals, size_t n);
-
     void clobber_flags(std::byte *&code);
     void clobber_registers(std::byte *&code);
 
