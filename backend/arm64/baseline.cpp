@@ -63,23 +63,23 @@ void cset(std::byte *&code, bool sf, cond c, ireg rd) {
     csinc(code, sf, ireg::xzr, c, ireg::xzr, rd);
 }
 
-void mov(std::byte *&code, ireg dst, ireg src) {
+void mov(std::byte *&code, ireg src, ireg dst) {
     orr(code, true, shifttype::lsl, src, 0, ireg::xzr, dst);
 }
 
-void mov(std::byte *&code, freg dst, ireg src) {
+void mov(std::byte *&code, ireg src, freg dst) {
     put(code, 0b10011110011001110000000000000000 |
                   (static_cast<uint32_t>(src) << 5) |
                   (static_cast<uint32_t>(dst) << 0));
 }
 
-void mov(std::byte *&code, ireg dst, freg src) {
+void mov(std::byte *&code, freg src, ireg dst) {
     put(code, 0b10011110011001100000000000000000 |
                   (static_cast<uint32_t>(src) << 5) |
                   (static_cast<uint32_t>(dst) << 0));
 }
 
-void mov(std::byte *&code, freg dst, freg src) {
+void mov(std::byte *&code, freg src, freg dst) {
     put(code, 0b10011110011001110000000000000000 |
                   (static_cast<uint32_t>(src) << 5) |
                   (static_cast<uint32_t>(dst) << 0));
@@ -96,7 +96,7 @@ void mov(std::byte *&code, bool sf, bool notneg, bool keep, uint8_t hw,
                   (static_cast<uint8_t>(rd) << 0));
 }
 
-void mov(std::byte *&code, ireg dst, uint64_t imm) {
+void mov(std::byte *&code, uint64_t imm, ireg dst) {
     // todo: should this have a fast path for 0?
     // i think that should be handled elsewhere
     bool keep = false;
@@ -250,7 +250,7 @@ Arm64::allocate_registers(std::byte *&code,
                 ret[i] = value::imm(std::bit_cast<uint32_t>(*mask));
             } else {
                 auto [reg, _] = intregs.steal(code);
-                mov(code, reg, imm);
+                mov(code, imm, reg);
                 ret[i] = value::reg(reg);
             }
             break;
@@ -323,36 +323,47 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
     // mov     x29, sp
     put(code, std::array<uint32_t, 2>{0xa9bf7bfd, 0x910003fd});
 
-    auto locals = new value[fn.locals.size()];
+    locals = std::span(new value[fn.locals.size()], fn.locals.size());
 
     auto ireg_alloc = icallee_saved.begin();
     auto freg_alloc = fcallee_saved.begin();
 
     for (auto i = 0; i < fn.locals.size(); i++) {
         auto local = fn.locals[i];
-        auto adjusted = i - fn.type.params.size();
-        auto offset = adjusted < 0
-                          ? 0x10 - adjusted * sizeof(runtime::WasmValue)
-                          : adjusted * sizeof(runtime::WasmValue);
+        auto offset = i * sizeof(runtime::WasmValue);
+        auto is_param = i < fn.type.params.size();
 
         if ((local == valtype::i32 || local == valtype::i64 ||
              local == valtype::funcref || local == valtype::externref) &&
             ireg_alloc != icallee_saved.end()) {
+            auto reg = *ireg_alloc++;
             // save current value
-            mov(code, ireg::x3, *ireg_alloc);
-            ldr_offset(code, offset, stackreg, *ireg_alloc);
-            str_offset(code, offset, stackreg, ireg::x3);
+            if (is_param) {
+                mov(code, reg, ireg::x3);
+                ldr_offset(code, offset, stackreg, reg);
+                str_offset(code, offset, stackreg, ireg::x3);
+            } else {
+                str_offset(code, offset, stackreg, reg);
+                mov(code, ireg::xzr, reg);
+            }
 
-            locals[i] = value::reg(*ireg_alloc++);
+            locals[i] = value::reg(reg);
         } else if ((local == valtype::f32 || local == valtype::f64) &&
                    freg_alloc != fcallee_saved.end()) {
+            auto reg = *freg_alloc++;
             // save current value
-            mov(code, freg::d0, *freg_alloc);
-            ldr_offset(code, offset, stackreg, *freg_alloc);
-            str_offset(code, offset, stackreg, freg::d0);
+            if (is_param) {
+                mov(code, reg, freg::d0);
+                ldr_offset(code, offset, stackreg, reg);
+                str_offset(code, offset, stackreg, freg::d0);
+            } else {
+                str_offset(code, offset, stackreg, reg);
+                mov(code, ireg::xzr, reg);
+            }
 
-            locals[i] = value::reg(*freg_alloc++);
+            locals[i] = value::reg(reg);
         } else {
+            str_offset(code, offset, stackreg, ireg::xzr);
             locals[i] = value::stack(offset);
         }
     }
@@ -361,6 +372,22 @@ void Arm64::exit_function(SHARED_PARAMS, FunctionShell &fn) {
     // ldp     x29, x30, [sp], #0x10
     // ret
     put(code, std::array<uint32_t, 2>{0xa8c17bfd, 0xd65f03c0});
+
+    // restore saved values
+    for (auto i = 0; i < fn.type.params.size(); i++) {
+        if (!locals[i].is<value::location::reg>())
+            continue;
+
+        auto local = fn.locals[i];
+        auto offset = i * sizeof(runtime::WasmValue);
+
+        if (local == valtype::i32 || local == valtype::i64 ||
+            local == valtype::funcref || local == valtype::externref) {
+            ldr_offset(code, offset, stackreg, locals[i].as<ireg>());
+        } else if (local == valtype::f32 || local == valtype::f64) {
+            ldr_offset(code, offset, stackreg, locals[i].as<freg>());
+        }
+    }
 
     delete[] locals.data();
 }
@@ -402,18 +429,18 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 void Arm64::i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
 void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
     if (cons <= std::numeric_limits<uint32_t>::max()) {
-        mov(code, ireg::x0, cons);
+        // mov(code, cons, ireg::x0);
     } else {
         push(value::imm(cons));
     }
 }
 void Arm64::f32const(SHARED_PARAMS, float cons) {
-    mov(code, ireg::x0, std::bit_cast<uint32_t>(cons));
-    mov(code, freg::d0, ireg::x0);
+    // mov(code, ireg::x0, std::bit_cast<uint32_t>(cons));
+    // mov(code, freg::d0, ireg::x0);
 }
 void Arm64::f64const(SHARED_PARAMS, double cons) {
-    mov(code, ireg::x0, std::bit_cast<uint64_t>(cons));
-    mov(code, freg::d0, ireg::x0);
+    // mov(code, ireg::x0, std::bit_cast<uint64_t>(cons));
+    // mov(code, freg::d0, ireg::x0);
 }
 // void Arm64::i32load(SHARED_PARAMS, uint64_t offset, uint64_t align);
 // void Arm64::i64load(SHARED_PARAMS, uint64_t offset, uint64_t align);
