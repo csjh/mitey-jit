@@ -108,28 +108,28 @@ void mov(std::byte *&code, ireg dst, uint64_t imm) {
     }
 }
 
-void str_offset(std::byte *&code, uint16_t offset, ireg rn, ireg rt) {
+    offset /= 8;
     put(code, 0b11111001000000000000000000000000 |
                   (static_cast<uint32_t>(offset) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
 }
 
-void str_offset(std::byte *&code, uint16_t offset, ireg rn, freg rt) {
+    offset /= 8;
     put(code, 0b11111101000000000000000000000000 |
                   (static_cast<uint32_t>(offset) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
 }
 
-void ldr_offset(std::byte *&code, uint16_t offset, ireg rn, ireg rt) {
+    offset /= 8;
     put(code, 0b11111001010000000000000000000000 |
                   (static_cast<uint32_t>(offset) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
 }
 
-void ldr_offset(std::byte *&code, uint16_t offset, ireg rn, freg rt) {
+    offset /= 8;
     put(code, 0b11111101010000000000000000000000 |
                   (static_cast<uint32_t>(offset) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
