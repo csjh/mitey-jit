@@ -369,10 +369,6 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
     }
 }
 void Arm64::exit_function(SHARED_PARAMS, FunctionShell &fn) {
-    // ldp     x29, x30, [sp], #0x10
-    // ret
-    put(code, std::array<uint32_t, 2>{0xa8c17bfd, 0xd65f03c0});
-
     // restore saved values
     for (auto i = 0; i < fn.type.params.size(); i++) {
         if (!locals[i].is<value::location::reg>())
@@ -388,6 +384,10 @@ void Arm64::exit_function(SHARED_PARAMS, FunctionShell &fn) {
             ldr_offset(code, offset, stackreg, locals[i].as<freg>());
         }
     }
+
+    // ldp     x29, x30, [sp], #0x10
+    // ret
+    put(code, std::array<uint32_t, 2>{0xa8c17bfd, 0xd65f03c0});
 
     delete[] locals.data();
 }
