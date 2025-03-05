@@ -148,6 +148,11 @@ class Arm64 {
     void finalize(std::byte *&code, ireg result);
     void finalize(std::byte *&code, freg result);
 
+    void dump(ireg regs...);
+    void dump(freg regs...);
+    void preserve(ireg regs...);
+    void preserve(freg regs...);
+
   public:
     // todo: figure out what values for these
     static constexpr size_t function_overhead = 100 * sizeof(uint32_t);
