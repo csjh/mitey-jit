@@ -108,7 +108,7 @@ class Arm64 {
 
     void push(value v);
 
-    class param {
+    class iwant {
         struct thresholdless {
             static constexpr uint32_t threshold = 0;
         };
@@ -131,7 +131,7 @@ class Arm64 {
     // 🤞 but there's no multivalue instructions (yet)
     template <typename Params, typename Result>
     std::array<value,
-               std::tuple_size_v<Params> + !std::is_same_v<Result, param::none>>
+               std::tuple_size_v<Params> + !std::is_same_v<Result, iwant::none>>
     allocate_registers(std::byte *&code);
 
     template <typename... Args>

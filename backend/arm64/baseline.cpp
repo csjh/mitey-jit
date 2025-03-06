@@ -268,7 +268,7 @@ void Arm64::push(value v) {
 
 template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
     using RegType =
-        std::conditional_t<std::is_same_v<To, param::freg>, freg, ireg>;
+        std::conditional_t<std::is_same_v<To, iwant::freg>, freg, ireg>;
 
     switch (v.where()) {
     case value::location::reg: {
@@ -276,7 +276,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
 
         if (is_volatile(v.as<RegType>())) {
             RegType reg;
-            if constexpr (std::is_same_v<To, param::freg>)
+            if constexpr (std::is_same_v<To, iwant::freg>)
                 reg = floatregs.temporary(code);
             else
                 reg = intregs.temporary(code);
@@ -291,7 +291,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
 
         auto offset = v.as<uint32_t>();
         RegType reg;
-        if constexpr (std::is_same_v<To, param::freg>)
+        if constexpr (std::is_same_v<To, iwant::freg>)
             reg = floatregs.temporary(code);
         else
             reg = intregs.temporary(code);
@@ -299,14 +299,14 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
         return value::reg(reg);
     }
     case value::location::imm: {
-        auto better_not = !std::is_same_v<To, param::freg>;
+        auto better_not = !std::is_same_v<To, iwant::freg>;
         assert(better_not);
 
         auto imm = v.as<uint32_t>();
         if (imm < To::threshold) {
             return v;
         } else if (auto mask = tryLogicalImm(imm);
-                   std::is_same_v<To, param::bitmask> && mask) {
+                   std::is_same_v<To, iwant::bitmask> && mask) {
             return value::imm(std::bit_cast<uint32_t>(*mask));
         } else {
             auto reg = intregs.temporary(code);
@@ -315,12 +315,12 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
         }
     }
     case value::location::flag: {
-        auto better_not = !std::is_same_v<To, param::freg>;
+        auto better_not = !std::is_same_v<To, iwant::freg>;
         assert(better_not);
 
         stack_size -= sizeof(runtime::WasmValue);
 
-        if (std::is_same_v<To, param::flags>) {
+        if (std::is_same_v<To, iwant::flags>) {
             return v;
         } else {
             auto reg = intregs.temporary(code);
@@ -333,12 +333,12 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
     assert(false);
 }
 
-template <typename Params, typename Result = Arm64::param::none>
+template <typename Params, typename Result = Arm64::iwant::none>
 std::array<value, std::tuple_size_v<Params> +
-                      !std::is_same_v<Result, Arm64::param::none>>
+                      !std::is_same_v<Result, Arm64::iwant::none>>
 Arm64::allocate_registers(std::byte *&code) {
     constexpr auto nparams = std::tuple_size_v<Params>;
-    std::array<value, nparams + !std::is_same_v<Result, Arm64::param::none>>
+    std::array<value, nparams + !std::is_same_v<Result, Arm64::iwant::none>>
         ret;
 
     intregs.begin();
@@ -352,12 +352,12 @@ Arm64::allocate_registers(std::byte *&code) {
          ...);
     }(std::make_index_sequence<nparams>{});
 
-    if constexpr (std::is_same_v<Result, param::ireg>) {
+    if constexpr (std::is_same_v<Result, iwant::ireg>) {
         ret.back() = value::reg(intregs.result(code));
-    } else if constexpr (std::is_same_v<Result, param::freg>) {
+    } else if constexpr (std::is_same_v<Result, iwant::freg>) {
         ret.back() = value::reg(floatregs.result(code));
     } else {
-        static_assert(std::is_same_v<Result, param::none>);
+        static_assert(std::is_same_v<Result, iwant::none>);
     }
 
     return ret;
@@ -495,7 +495,7 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 void Arm64::i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
 void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
     if (cons <= std::numeric_limits<uint32_t>::max()) {
-        auto [res] = allocate_registers<std::tuple<>, param::freg>(code);
+        auto [res] = allocate_registers<std::tuple<>, iwant::freg>(code);
         mov(code, cons, res.as<ireg>());
         finalize(code, res.as<ireg>());
     } else {
@@ -503,7 +503,7 @@ void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
     }
 }
 void Arm64::f32const(SHARED_PARAMS, float cons) {
-    auto [res] = allocate_registers<std::tuple<>, param::freg>(code);
+    auto [res] = allocate_registers<std::tuple<>, iwant::freg>(code);
     auto temp = intregs.temporary(code);
 
     mov(code, std::bit_cast<uint32_t>(cons), temp);
@@ -512,7 +512,7 @@ void Arm64::f32const(SHARED_PARAMS, float cons) {
     finalize(code, res.as<freg>());
 }
 void Arm64::f64const(SHARED_PARAMS, double cons) {
-    auto [res] = allocate_registers<std::tuple<>, param::freg>(code);
+    auto [res] = allocate_registers<std::tuple<>, iwant::freg>(code);
     auto temp = intregs.temporary(code);
 
     mov(code, std::bit_cast<uint64_t>(cons), temp);
@@ -579,7 +579,7 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
 // void Arm64::f64ge(SHARED_PARAMS);
 void Arm64::i32clz(SHARED_PARAMS) {
     auto [p1, res] =
-        allocate_registers<std::tuple<param::ireg>, param::ireg>(code);
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
 
     clz(code, false, p1.as<ireg>(), res.as<ireg>());
 
@@ -592,8 +592,8 @@ void Arm64::i32clz(SHARED_PARAMS) {
 // void Arm64::i64popcnt(SHARED_PARAMS);
 void Arm64::i32add(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<param::ireg, param::literal<1 << 12>>,
-                           param::ireg>(code);
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
+                           iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
         add(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
