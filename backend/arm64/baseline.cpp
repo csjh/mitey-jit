@@ -51,6 +51,13 @@ void add(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
                   (static_cast<uint32_t>(rd) << 0));
 }
 
+void clz(std::byte *&code, bool sf, ireg rn, ireg rd) {
+    put(code, 0b0101101011000000000100000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
 void csinc(std::byte *&code, bool sf, ireg rm, cond c, ireg rn, ireg rd) {
     put(code, 0b00011010100000000000010000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
@@ -263,9 +270,9 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
     using RegType =
         std::conditional_t<std::is_same_v<To, param::freg>, freg, ireg>;
 
-        switch (v.where()) {
-        case value::location::reg: {
-            stack_size -= sizeof(runtime::WasmValue);
+    switch (v.where()) {
+    case value::location::reg: {
+        stack_size -= sizeof(runtime::WasmValue);
 
         if (is_volatile(v.as<RegType>())) {
             RegType reg;
@@ -278,53 +285,53 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
         } else {
             return v;
         }
-        }
-        case value::location::stack: {
-            stack_size -= sizeof(runtime::WasmValue);
+    }
+    case value::location::stack: {
+        stack_size -= sizeof(runtime::WasmValue);
 
-            auto offset = v.as<uint32_t>();
+        auto offset = v.as<uint32_t>();
         RegType reg;
         if constexpr (std::is_same_v<To, param::freg>)
             reg = floatregs.temporary(code);
         else
             reg = intregs.temporary(code);
-                ldr_offset(code, offset, stackreg, reg);
+        ldr_offset(code, offset, stackreg, reg);
         return value::reg(reg);
-        }
-        case value::location::imm: {
+    }
+    case value::location::imm: {
         auto better_not = !std::is_same_v<To, param::freg>;
         assert(better_not);
 
-            auto imm = v.as<uint32_t>();
+        auto imm = v.as<uint32_t>();
         if (imm < To::threshold) {
             return v;
-            } else if (auto mask = tryLogicalImm(imm);
+        } else if (auto mask = tryLogicalImm(imm);
                    std::is_same_v<To, param::bitmask> && mask) {
             return value::imm(std::bit_cast<uint32_t>(*mask));
-            } else {
+        } else {
             auto reg = intregs.temporary(code);
-                mov(code, imm, reg);
+            mov(code, imm, reg);
             return value::reg(reg);
-            }
         }
-        case value::location::flag: {
+    }
+    case value::location::flag: {
         auto better_not = !std::is_same_v<To, param::freg>;
         assert(better_not);
 
-            stack_size -= sizeof(runtime::WasmValue);
+        stack_size -= sizeof(runtime::WasmValue);
 
         if (std::is_same_v<To, param::flags>) {
             return v;
-            } else {
+        } else {
             auto reg = intregs.temporary(code);
-                cset(code, true, v.as<cond>(), reg);
+            cset(code, true, v.as<cond>(), reg);
             return value::reg(reg);
-            }
+        }
     }
     }
 
     assert(false);
-        }
+}
 
 template <typename Params, typename Result = Arm64::param::none>
 std::array<value, std::tuple_size_v<Params> +
@@ -349,7 +356,7 @@ Arm64::allocate_registers(std::byte *&code) {
         ret.back() = value::reg(intregs.result(code));
     } else if constexpr (std::is_same_v<Result, param::freg>) {
         ret.back() = value::reg(floatregs.result(code));
-        } else {
+    } else {
         static_assert(std::is_same_v<Result, param::none>);
     }
 
@@ -365,7 +372,7 @@ void Arm64::finalize(std::byte *&code, Args... results) {
         else
             floatregs.claim(result,
                             decltype(floatregs)::metadata(code, stack_size));
-    // buffer area for spilling
+        // buffer area for spilling
         put(code, noop);
 
         push(value::reg(result));
@@ -488,18 +495,30 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 void Arm64::i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
 void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
     if (cons <= std::numeric_limits<uint32_t>::max()) {
-        // mov(code, cons, ireg::x0);
+        auto [res] = allocate_registers<std::tuple<>, param::freg>(code);
+        mov(code, cons, res.as<ireg>());
+        finalize(code, res.as<ireg>());
     } else {
         push(value::imm(cons));
     }
 }
 void Arm64::f32const(SHARED_PARAMS, float cons) {
-    // mov(code, ireg::x0, std::bit_cast<uint32_t>(cons));
-    // mov(code, freg::d0, ireg::x0);
+    auto [res] = allocate_registers<std::tuple<>, param::freg>(code);
+    auto temp = intregs.temporary(code);
+
+    mov(code, std::bit_cast<uint32_t>(cons), temp);
+    mov(code, temp, res.as<freg>());
+
+    finalize(code, res.as<freg>());
 }
 void Arm64::f64const(SHARED_PARAMS, double cons) {
-    // mov(code, ireg::x0, std::bit_cast<uint64_t>(cons));
-    // mov(code, freg::d0, ireg::x0);
+    auto [res] = allocate_registers<std::tuple<>, param::freg>(code);
+    auto temp = intregs.temporary(code);
+
+    mov(code, std::bit_cast<uint64_t>(cons), temp);
+    mov(code, temp, res.as<freg>());
+
+    finalize(code, res.as<freg>());
 }
 // void Arm64::i32load(SHARED_PARAMS, uint64_t offset, uint64_t align);
 // void Arm64::i64load(SHARED_PARAMS, uint64_t offset, uint64_t align);
@@ -558,7 +577,14 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
 // void Arm64::f64le(SHARED_PARAMS);
 // void Arm64::f32ge(SHARED_PARAMS);
 // void Arm64::f64ge(SHARED_PARAMS);
-// void Arm64::i32clz(SHARED_PARAMS);
+void Arm64::i32clz(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<param::ireg>, param::ireg>(code);
+
+    clz(code, false, p1.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
 // void Arm64::i64clz(SHARED_PARAMS);
 // void Arm64::i32ctz(SHARED_PARAMS);
 // void Arm64::i64ctz(SHARED_PARAMS);
