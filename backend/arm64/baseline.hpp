@@ -59,38 +59,30 @@ class Arm64 {
         reg_lru<Last - First> regs;
         metadata data[Last - First];
 
-        void spill(uint8_t reg) {
-            auto [addr, offset] = data[reg - First];
-            str_offset(addr, offset, stackreg, reg);
-        }
-
-        uint8_t to_index(RegType reg) {
-            return static_cast<uint8_t>(reg) - First;
-        }
-
-        RegType from_index(uint8_t idx) {
-            return static_cast<RegType>(idx + First);
-        }
+        void spill(RegType reg);
+        uint8_t to_index(RegType reg);
+        RegType from_index(uint8_t idx);
 
       public:
-        std::pair<RegType, metadata *> steal(std::byte *&code) {
-            auto idx = regs.steal();
-            auto reg = static_cast<RegType>(idx + First);
-            return {reg, &data[idx]};
-        }
-
-        // assumes the register is dead
-        void claim(RegType reg, metadata meta) {
-            auto idx = to_index(reg);
-            regs.access(idx);
-            data[idx] = meta;
-        }
-
-        void surrender(RegType reg) {
-            auto idx = to_index(reg);
-            regs.discard(idx);
-            data[idx] = metadata(nullptr, 0);
-        }
+        // starts a transaction
+        void begin();
+        // takes the least recently used non-claimed register
+        // spills the register if necessary
+        // result should only used after all temporaries are consumed
+        // i.e. <result> = <temp1> + <temp2> (good)
+        // <result> = <temp1> + <temp2>
+        // <result> = <result> + <temp1> (bad)
+        // because <result> might alias temp1
+        RegType result(std::byte *&code);
+        // adds the spill metadata for a given (result) register
+        void claim(RegType, metadata);
+        // takes the least recently used register
+        // spills the register if necessary
+        RegType temporary(std::byte *&code);
+        // dumps a register, throws away the metadata
+        void surrender(RegType reg);
+        // ends a transaction
+        void commit();
     };
 
     // callee saved registers

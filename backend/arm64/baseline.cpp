@@ -180,16 +180,71 @@ bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
 
 }; // namespace
 
+template <typename RegType, size_t First, size_t Last>
+void Arm64::reg_manager<RegType, First, Last>::spill(RegType reg) {
+    auto [addr, offset] = data[to_index(reg)];
+    str_offset(addr, offset, stackreg, reg);
+}
+
+template <typename RegType, size_t First, size_t Last>
+uint8_t Arm64::reg_manager<RegType, First, Last>::to_index(RegType reg) {
+    return static_cast<uint8_t>(reg) - First;
+}
+
+template <typename RegType, size_t First, size_t Last>
+RegType Arm64::reg_manager<RegType, First, Last>::from_index(uint8_t idx) {
+    return static_cast<RegType>(idx + First);
+}
+
+template <typename RegType, size_t First, size_t Last>
+void Arm64::reg_manager<RegType, First, Last>::begin() {
+    regs.begin();
+}
+
+template <typename RegType, size_t First, size_t Last>
+RegType Arm64::reg_manager<RegType, First, Last>::result(std::byte *&code) {
+    auto idx = regs.result();
+    spill(from_index(idx));
+    return from_index(idx);
+}
+
+template <typename RegType, size_t First, size_t Last>
+void Arm64::reg_manager<RegType, First, Last>::claim(RegType reg, metadata md) {
+    auto idx = to_index(reg);
+    data[idx] = md;
+}
+
+template <typename RegType, size_t First, size_t Last>
+RegType Arm64::reg_manager<RegType, First, Last>::temporary(std::byte *&code) {
+    auto idx = regs.temporary();
+    spill(from_index(idx));
+    data[idx] = metadata(nullptr, 0);
+    return from_index(idx);
+}
+
+template <typename RegType, size_t First, size_t Last>
+void Arm64::reg_manager<RegType, First, Last>::surrender(RegType reg) {
+    auto idx = to_index(reg);
+    regs.surrender(idx);
+    data[idx] = metadata(nullptr, 0);
+}
+
+template <typename RegType, size_t First, size_t Last>
+void Arm64::reg_manager<RegType, First, Last>::commit() {
+    regs.commit();
+}
+
 void Arm64::clobber_flags(std::byte *&code) {
     if (!flag.val)
         return;
 
     // step 1. claim a register, spilling if necessary
-    auto [reg, metadata] = intregs.steal(code);
+    auto reg = intregs.result(code);
     // step 2. spill into claimed register
     cset(code, true, flag.val->as<cond>(), reg);
     // step 3. set register metadata (for spilling)
-    *metadata = decltype(intregs)::metadata(code, flag.stack_offset);
+    intregs.claim(reg, decltype(intregs)::metadata(code, flag.stack_offset));
+    put(code, noop);
 
     *flag.val = value::reg(reg);
     flag.val = nullptr;
