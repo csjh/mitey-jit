@@ -3,6 +3,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <tuple>
 
 namespace mitey {
 namespace arm64 {
@@ -258,119 +259,122 @@ void Arm64::push(value v) {
     }
 }
 
-template <size_t nparams>
-std::array<value, nparams + 1>
-Arm64::allocate_registers(std::byte *&code,
-                          std::array<poption::type, nparams> params,
-                          poption::type result) {
-
-    std::array<value, nparams + 1> ret;
-    bool return_set = false;
-
-    values -= nparams;
-    for (int i = 0; i < nparams; i++) {
-        auto v = values[i];
+template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
+    using RegType =
+        std::conditional_t<std::is_same_v<To, param::freg>, freg, ireg>;
 
         switch (v.where()) {
         case value::location::reg: {
             stack_size -= sizeof(runtime::WasmValue);
 
-            // already in a register - good to go
-            ret[i] = v;
-            break;
+        if (is_volatile(v.as<RegType>())) {
+            RegType reg;
+            if constexpr (std::is_same_v<To, param::freg>)
+                reg = floatregs.temporary(code);
+            else
+                reg = intregs.temporary(code);
+            mov(code, v.as<RegType>(), reg);
+            return value::reg(reg);
+        } else {
+            return v;
+        }
         }
         case value::location::stack: {
             stack_size -= sizeof(runtime::WasmValue);
 
             auto offset = v.as<uint32_t>();
-            if (params[i] == poption::freg) {
-                auto [reg, _] = floatregs.steal(code);
+        RegType reg;
+        if constexpr (std::is_same_v<To, param::freg>)
+            reg = floatregs.temporary(code);
+        else
+            reg = intregs.temporary(code);
                 ldr_offset(code, offset, stackreg, reg);
-                ret[i] = value::reg(reg);
-            } else {
-                auto [reg, _] = intregs.steal(code);
-                ldr_offset(code, offset, stackreg, reg);
-                ret[i] = value::reg(reg);
-            }
-            break;
+        return value::reg(reg);
         }
         case value::location::imm: {
-            assert(params[i] != poption::freg);
+        auto better_not = !std::is_same_v<To, param::freg>;
+        assert(better_not);
 
             auto imm = v.as<uint32_t>();
-            if (params[i].fits(imm)) {
-                ret[i] = v;
+        if (imm < To::threshold) {
+            return v;
             } else if (auto mask = tryLogicalImm(imm);
-                       params[i] == poption::bitmask && mask) {
-                ret[i] = value::imm(std::bit_cast<uint32_t>(*mask));
+                   std::is_same_v<To, param::bitmask> && mask) {
+            return value::imm(std::bit_cast<uint32_t>(*mask));
             } else {
-                auto [reg, _] = intregs.steal(code);
+            auto reg = intregs.temporary(code);
                 mov(code, imm, reg);
-                ret[i] = value::reg(reg);
+            return value::reg(reg);
             }
-            break;
         }
         case value::location::flag: {
+        auto better_not = !std::is_same_v<To, param::freg>;
+        assert(better_not);
+
             stack_size -= sizeof(runtime::WasmValue);
 
-            assert(params[i] != poption::freg);
-
-            if (params[i] == poption::flags) {
-                ret[i] = v;
+        if (std::is_same_v<To, param::flags>) {
+            return v;
             } else {
-                auto [reg, _] = intregs.steal(code);
+            auto reg = intregs.temporary(code);
                 cset(code, true, v.as<cond>(), reg);
-                ret[i] = value::reg(reg);
+            return value::reg(reg);
             }
-            break;
-        }
-        }
-
-        if (params[i] == result &&
-            ((result == poption::ireg && is_volatile(v.as<ireg>())) ||
-             (result == poption::freg && is_volatile(v.as<freg>())))) {
-            ret.back() = ret[i];
-            return_set = true;
-        }
+    }
     }
 
-    for (int i = 0; i < nparams; i++) {
-        if (params[i] == poption::freg) {
-            floatregs.surrender(ret[i].template as<freg>());
-        } else {
-            intregs.surrender(ret[i].template as<ireg>());
+    assert(false);
         }
-    }
 
-    if (result != poption::none && !return_set) {
-        if (result == poption::freg) {
-            auto [reg, _] = floatregs.steal(code);
-            ret.back() = value::reg(reg);
+template <typename Params, typename Result = Arm64::param::none>
+std::array<value, std::tuple_size_v<Params> +
+                      !std::is_same_v<Result, Arm64::param::none>>
+Arm64::allocate_registers(std::byte *&code) {
+    constexpr auto nparams = std::tuple_size_v<Params>;
+    std::array<value, nparams + !std::is_same_v<Result, Arm64::param::none>>
+        ret;
+
+    intregs.begin();
+    floatregs.begin();
+
+    values -= nparams;
+
+    [&]<std::size_t... I>(std::index_sequence<I...>) {
+        ((ret[I] =
+              adapt_value<std::tuple_element_t<I, Params>>(code, values[I])),
+         ...);
+    }(std::make_index_sequence<nparams>{});
+
+    if constexpr (std::is_same_v<Result, param::ireg>) {
+        ret.back() = value::reg(intregs.result(code));
+    } else if constexpr (std::is_same_v<Result, param::freg>) {
+        ret.back() = value::reg(floatregs.result(code));
         } else {
-            auto [reg, _] = intregs.steal(code);
-            ret.back() = value::reg(reg);
-        }
+        static_assert(std::is_same_v<Result, param::none>);
     }
 
     return ret;
 }
 
-void Arm64::finalize(std::byte *&code, ireg result) {
-    intregs.claim(result, decltype(intregs)::metadata(code, stack_size));
+template <typename... Args>
+void Arm64::finalize(std::byte *&code, Args... results) {
+    auto finalize = [&](auto result) {
+        if constexpr (std::is_same_v<decltype(result), ireg>)
+            intregs.claim(result,
+                          decltype(intregs)::metadata(code, stack_size));
+        else
+            floatregs.claim(result,
+                            decltype(floatregs)::metadata(code, stack_size));
     // buffer area for spilling
-    code += sizeof(inst);
-    stack_size += sizeof(runtime::WasmValue);
+        put(code, noop);
 
-    *values++ = value::reg(result);
-}
+        push(value::reg(result));
+    };
 
-void Arm64::finalize(std::byte *&code, freg result) {
-    floatregs.claim(result, decltype(floatregs)::metadata(code, stack_size));
-    // buffer area for spilling
-    code += sizeof(inst);
-    stack_size += sizeof(runtime::WasmValue);
+    (finalize(results), ...);
 
-    *values++ = value::reg(result);
+    intregs.commit();
+    floatregs.commit();
 }
 
 void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
@@ -561,9 +565,9 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
 // void Arm64::i32popcnt(SHARED_PARAMS);
 // void Arm64::i64popcnt(SHARED_PARAMS);
 void Arm64::i32add(SHARED_PARAMS) {
-    auto [p1, p2, res] = allocate_registers(
-        code, std::array{poption::ireg, poption::literal<1 << 12>},
-        poption::ireg);
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<param::ireg, param::literal<1 << 12>>,
+                           param::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
         add(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());

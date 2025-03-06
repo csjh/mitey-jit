@@ -108,42 +108,34 @@ class Arm64 {
 
     void push(value v);
 
-    struct poption {
-      private:
-        // literal/bitmask/flags implicitly accept ireg
-        enum class canbe { ireg, freg, literal, bitmask, flags, none };
-
-      public:
-        struct type {
-            canbe val;
-            uint32_t threshold;
-
-            bool operator==(type c) const { return val == c.val; }
-            bool fits(uint32_t t) const { return t < threshold; }
+    class param {
+        struct thresholdless {
+            static constexpr uint32_t threshold = 0;
         };
 
-        static constexpr auto none = type(canbe::none, 0);
-        static constexpr auto ireg = type(canbe::ireg, 0);
-        static constexpr auto freg = type(canbe::freg, 0);
-        template <uint32_t t>
-        static constexpr auto literal = type(canbe::literal, t);
-        static constexpr auto bitmask = type(canbe::bitmask, 0);
-        static constexpr auto flags = type(canbe::flags, 0);
+      public:
+        struct none : thresholdless {};
+        struct ireg : thresholdless {};
+        struct freg : thresholdless {};
+        template <uint32_t t> struct literal {
+            static constexpr uint32_t threshold = t;
+        };
+        struct bitmask : thresholdless {};
+        struct flags : thresholdless {};
     };
+
+    template <typename To> value adapt_value(std::byte *&code, value v);
+
     // eventually i'll have to support multivalue here
-    template <size_t nparams>
-    std::array<value, nparams + 1>
-    allocate_registers(std::byte *&code,
-                       std::array<poption::type, nparams> params,
-                       poption::type result);
+    // honestly i don't think it'll even be that difficult (single digit lines)
+    // 🤞 but there's no multivalue instructions (yet)
+    template <typename Params, typename Result>
+    std::array<value,
+               std::tuple_size_v<Params> + !std::is_same_v<Result, param::none>>
+    allocate_registers(std::byte *&code);
 
-    void finalize(std::byte *&code, ireg result);
-    void finalize(std::byte *&code, freg result);
-
-    void dump(ireg regs...);
-    void dump(freg regs...);
-    void preserve(ireg regs...);
-    void preserve(freg regs...);
+    template <typename... Args>
+    void finalize(std::byte *&code, Args... results);
 
   public:
     // todo: figure out what values for these
