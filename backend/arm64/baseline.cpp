@@ -111,7 +111,7 @@ void mov(std::byte *&code, uint64_t imm, ireg dst) {
     for (size_t i = 0; i < sizeof(uint32_t) && imm; i++) {
         auto literal = imm & 0xffff;
         imm >>= 16;
-        mov(code, true, true, keep, literal, i, dst);
+        mov(code, true, true, keep, i, literal, dst);
         keep = true;
     }
 }
