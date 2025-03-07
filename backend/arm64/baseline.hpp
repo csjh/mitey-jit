@@ -83,6 +83,8 @@ class Arm64 {
         void surrender(RegType reg);
         // ends a transaction
         void commit();
+
+        void clobber_all(std::byte *&code);
     };
 
     // callee saved registers

@@ -243,6 +243,13 @@ void Arm64::reg_manager<RegType, First, Last>::commit() {
     regs.commit();
 }
 
+template <typename RegType, size_t First, size_t Last>
+void Arm64::reg_manager<RegType, First, Last>::clobber_all(std::byte *&code) {
+    for (int i = 0; i < Last - First; i++) {
+        spill(from_index(i));
+    }
+}
+
 void Arm64::clobber_flags(std::byte *&code) {
     if (!flag.val)
         return;
@@ -257,6 +264,11 @@ void Arm64::clobber_flags(std::byte *&code) {
 
     *flag.val = value::reg(reg);
     flag.val = nullptr;
+}
+
+void Arm64::clobber_registers(std::byte *&code) {
+    intregs.clobber_all(code);
+    floatregs.clobber_all(code);
 }
 
 void Arm64::push(value v) {
