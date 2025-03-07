@@ -102,8 +102,8 @@ class Arm64 {
     flags flag;
 
     uint32_t stack_size = 0;
-    value *values = values_start.get();
     std::unique_ptr<value[]> values_start = std::make_unique<value[]>(65536);
+    value *values = values_start.get();
 
     void clobber_flags(std::byte *&code);
     void clobber_registers(std::byte *&code);

@@ -19,15 +19,6 @@ template <uint8_t N> class reg_lru {
     uint8_t head;
     uint8_t tail;
 
-    reg_lru() {
-        for (uint8_t i = 0; i < N; i++) {
-            prev[i] = (i == 0) ? dummy : i - 1;
-            next[i] = (i == N - 1) ? dummy : i + 1;
-        }
-        head = 0;
-        tail = N - 1;
-    }
-
     void access(uint8_t n) {
         if (n == tail) {
             return;
@@ -75,6 +66,15 @@ template <uint8_t N> class reg_lru {
     uint8_t current_lasting;
 
   public:
+    reg_lru() {
+        for (uint8_t i = 0; i < N; i++) {
+            prev[i] = (i == 0) ? dummy : i - 1;
+            next[i] = (i == N - 1) ? dummy : i + 1;
+        }
+        head = 0;
+        tail = N - 1;
+    }
+
     void begin() {
         current_temporary = head;
         current_lasting = head;
