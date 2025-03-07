@@ -446,6 +446,8 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             locals[i] = value::stack(offset);
         }
     }
+
+    stack_size = fn.locals.size() * sizeof(runtime::WasmValue);
 }
 void Arm64::exit_function(SHARED_PARAMS, FunctionShell &fn) {
     // note: this has to be fixed to not potentially overwrite locals

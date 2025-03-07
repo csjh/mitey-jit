@@ -82,14 +82,14 @@ template <uint8_t N> class reg_lru {
     // takes the least recently used non-claimed register
     uint8_t temporary() {
         auto ret = current_temporary;
-        current_temporary = prev[ret];
+        current_temporary = next[ret];
         return ret;
     }
     // takes the least recently used non-lasting register
     // bumped up when committed
     uint8_t result() {
         auto ret = current_lasting;
-        current_lasting = prev[ret];
+        current_lasting = next[ret];
         return ret;
     }
     // demotes given register to a temporary
