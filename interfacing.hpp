@@ -43,7 +43,7 @@ std::function<FunctionType> externalize(const runtime::FunctionInfo &fn) {
             error<trap_error>(runtime::trap_kind_to_string(result));
         }
 
-        fn.signature(fn.memory, fn.misc, stack + Traits::parameter_arity);
+        fn.signature(fn.memory, fn.misc, stack);
 
         runtime::trap_buf = prev_buf;
         runtime::call_stack_depth = prev_depth;
@@ -87,7 +87,7 @@ externalize(const runtime::FunctionInfo &fn) {
             error<trap_error>(runtime::trap_kind_to_string(result));
         }
 
-        fn.signature(fn.memory, fn.misc, stack + args.size());
+        fn.signature(fn.memory, fn.misc, stack);
 
         runtime::trap_buf = prev_buf;
         runtime::call_stack_depth = prev_depth;

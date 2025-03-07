@@ -61,10 +61,12 @@ __attribute__((noinline)) void dummy(std::byte *memory, void **misc,
 
 // non-instruction handlers
 HANDLER(clear_locals) {
-    // tmp1 = non-parameter local bytes
+    // tmp1 = parameter local bytes
+    // tmp2 = non-parameter local bytes
     PRELUDE;
-    std::memset(stack, 0, tmp1);
     stack = byteadd(stack, tmp1);
+    std::memset(stack, 0, tmp2);
+    stack = byteadd(stack, tmp2);
     POSTLUDE;
 }
 template <ssize_t N = -1> HANDLER(base_move_results) {
@@ -164,10 +166,12 @@ HANDLER(br_table_n) { [[clang::musttail]] return br_table<>(PARAMS); }
 
 HANDLER(call) {
     // tmp1 = function start
+    // tmp2 = function params / results
     PRELUDE;
     gas([&] {
+        stack -= tmp2 & 0xffffffff;
         reinterpret_cast<TemplessSignature *>(tmp1)(TEMPLESS_PARAMS);
-        stack = byteadd(stack, tmp2);
+        stack += tmp2 >> 32;
     });
     POSTLUDE;
 }
@@ -176,8 +180,9 @@ HANDLER(call_extern) {
     PRELUDE;
     gas([&] {
         auto &func = MISC_GET(FunctionInfo, tmp1);
+        stack -= func.type.params;
         func.signature(func.memory, func.misc, stack);
-        stack = byteadd(stack, tmp2);
+        stack += func.type.results;
     });
     POSTLUDE;
 }
@@ -203,10 +208,9 @@ HANDLER(call_indirect) {
     }
 
     gas([&] {
+        stack -= info.type.params;
         funcref->signature(funcref->memory, funcref->misc, stack);
-        stack =
-            byteadd(stack, sizeof(runtime::WasmValue) *
-                               (funcref->type.results - funcref->type.params));
+        stack += info.type.results;
     });
 
     POSTLUDE;

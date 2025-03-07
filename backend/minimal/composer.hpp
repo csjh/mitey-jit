@@ -40,7 +40,8 @@ template <typename Target> class Composer {
         auto locals_bytes = fn.locals.bytesize() - fn.type.params.bytesize();
 
         Target::put_prelude(code);
-        Target::put_temp1(code, locals_bytes);
+        Target::put_temp1(code, fn.type.params.bytesize());
+        Target::put_temp2(code, locals_bytes);
         Target::put_call(code, runtime::clear_locals);
     }
     void exit_function(SHARED_PARAMS, FunctionShell &fn) {
@@ -165,8 +166,8 @@ template <typename Target> class Composer {
     }
     void call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
         Target::put_temp1(code, func_offset);
-        Target::put_temp2(code, fn.type.results.bytesize() -
-                                    fn.type.params.bytesize());
+        Target::put_temp2(code, (fn.type.params.size() << 32) |
+                                    fn.type.results.size());
         Target::put_call(code, runtime::call_extern);
     }
     void call_indirect(SHARED_PARAMS, uint32_t table_offset,
