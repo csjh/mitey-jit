@@ -191,6 +191,7 @@ bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
 template <typename RegType, size_t First, size_t Last>
 void Arm64::reg_manager<RegType, First, Last>::spill(RegType reg) {
     auto [addr, offset] = data[to_index(reg)];
+    if (addr)
     str_offset(addr, offset, stackreg, reg);
 }
 
