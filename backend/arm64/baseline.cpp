@@ -35,20 +35,67 @@ void orr(std::byte *&code, bool sf, shifttype shift, ireg rm, uint8_t shift_imm,
                   (static_cast<uint32_t>(rd) << 0));
 }
 
-void add(std::byte *&code, bool sf, uint16_t imm12, ireg rn, ireg rd) {
+void addsub(std::byte *&code, bool sf, bool sub, bool setflags, bool shift,
+            uint16_t imm12, ireg rn, ireg rd) {
     put(code, 0b00010001000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(sub) << 30) |
+                  (static_cast<uint32_t>(setflags) << 29) |
+                  (static_cast<uint32_t>(shift) << 22) |
                   (static_cast<uint32_t>(imm12) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rd) << 0));
 }
 
-void add(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+void addsub(std::byte *&code, bool sf, bool sub, bool setflags, shifttype shift,
+            ireg rm, uint8_t shift_n, ireg rn, ireg rd) {
     put(code, 0b00001011000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(sub) << 30) |
+                  (static_cast<uint32_t>(setflags) << 29) |
                   (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(shift_n) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rd) << 0));
+}
+
+void add(std::byte *&code, bool sf, bool shift, uint16_t imm12, ireg rn,
+         ireg rd) {
+    addsub(code, sf, false, false, shift, imm12, rn, rd);
+}
+
+void add(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd,
+         shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
+    addsub(code, sf, false, false, shift, rm, shift_n, rn, rd);
+}
+
+void sub(std::byte *&code, bool sf, bool shift, uint16_t imm12, ireg rn,
+         ireg rd) {
+    addsub(code, sf, true, false, shift, imm12, rn, rd);
+}
+
+void subs(std::byte *&code, bool sf, bool shift, uint16_t imm12, ireg rn,
+          ireg rd) {
+    addsub(code, sf, true, true, shift, imm12, rn, rd);
+}
+
+void sub(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd,
+         shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
+    addsub(code, sf, true, false, shift, rm, shift_n, rn, rd);
+}
+
+void subs(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd,
+          shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
+    addsub(code, sf, true, true, shift, rm, shift_n, rn, rd);
+}
+
+void cmp(std::byte *&code, bool sf, ireg rm, ireg rn,
+         shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
+    subs(code, sf, rm, rn, ireg::xzr, shift, shift_n);
+}
+
+void cmp(std::byte *&code, bool sf, bool shift, uint16_t imm12, ireg rn) {
+    subs(code, sf, shift, imm12, rn, ireg::xzr);
 }
 
 void clz(std::byte *&code, bool sf, ireg rn, ireg rd) {
@@ -192,7 +239,7 @@ template <typename RegType, size_t First, size_t Last>
 void Arm64::reg_manager<RegType, First, Last>::spill(RegType reg) {
     auto [addr, offset] = data[to_index(reg)];
     if (addr)
-    str_offset(addr, offset, stackreg, reg);
+        str_offset(addr, offset, stackreg, reg);
 }
 
 template <typename RegType, size_t First, size_t Last>
@@ -632,7 +679,8 @@ void Arm64::i32add(SHARED_PARAMS) {
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        add(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+        add(code, false, false, p2.as<uint32_t>(), p1.as<ireg>(),
+            res.as<ireg>());
     } else {
         add(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
