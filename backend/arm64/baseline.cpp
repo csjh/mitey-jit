@@ -59,47 +59,54 @@ void addsub(std::byte *&code, bool sf, bool sub, bool setflags, shifttype shift,
                   (static_cast<uint32_t>(rd) << 0));
 }
 
-void add(std::byte *&code, bool sf, bool shift, uint16_t imm12, ireg rn,
-         ireg rd) {
+void add(std::byte *&code, bool sf, ireg rd, ireg rn, uint16_t imm12,
+         bool shift = false) {
     addsub(code, sf, false, false, shift, imm12, rn, rd);
 }
 
-void add(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd,
+void add(std::byte *&code, bool sf, ireg rd, ireg rm, ireg rn,
          shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
     addsub(code, sf, false, false, shift, rm, shift_n, rn, rd);
 }
 
-void sub(std::byte *&code, bool sf, bool shift, uint16_t imm12, ireg rn,
-         ireg rd) {
+void sub(std::byte *&code, bool sf, ireg rd, ireg rn, uint16_t imm12,
+         bool shift = false) {
     addsub(code, sf, true, false, shift, imm12, rn, rd);
 }
 
-void subs(std::byte *&code, bool sf, bool shift, uint16_t imm12, ireg rn,
-          ireg rd) {
+void subs(std::byte *&code, bool sf, ireg rd, ireg rn, uint16_t imm12,
+          bool shift = false) {
     addsub(code, sf, true, true, shift, imm12, rn, rd);
 }
 
-void sub(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd,
+void sub(std::byte *&code, bool sf, ireg rd, ireg rn, ireg rm,
          shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
     addsub(code, sf, true, false, shift, rm, shift_n, rn, rd);
 }
 
-void subs(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd,
+void subs(std::byte *&code, bool sf, ireg rd, ireg rn, ireg rm,
           shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
     addsub(code, sf, true, true, shift, rm, shift_n, rn, rd);
 }
 
-void cmp(std::byte *&code, bool sf, ireg rm, ireg rn,
+void cmp(std::byte *&code, bool sf, ireg rn, ireg rm,
          shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
-    subs(code, sf, rm, rn, ireg::xzr, shift, shift_n);
+    subs(code, sf, ireg::xzr, rn, rm, shift, shift_n);
 }
 
-void cmp(std::byte *&code, bool sf, bool shift, uint16_t imm12, ireg rn) {
-    subs(code, sf, shift, imm12, rn, ireg::xzr);
+void cmp(std::byte *&code, bool sf, bool shift, ireg rn, uint16_t imm12) {
+    subs(code, sf, ireg::xzr, rn, imm12, shift);
+}
+
+void fcmp(std::byte *&code, bool is_double, freg rn, freg rm) {
+    put(code, 0b00011110001000000010000000010000 |
+                  (static_cast<uint32_t>(is_double) << 22) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5));
 }
 
 void clz(std::byte *&code, bool sf, ireg rn, ireg rd) {
-    put(code, 0b0101101011000000000100000000000 |
+    put(code, 0b01011010110000000001000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rd) << 0));
@@ -603,63 +610,72 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
 
     finalize(code, res.as<freg>());
 }
-// void Arm64::i32load(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64load(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::f32load(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::f64load(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i32load8_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i32load8_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i32load16_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i32load16_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64load8_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64load8_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64load16_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64load16_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64load32_s(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64load32_u(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i32store(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64store(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::f32store(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::f64store(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i32store8(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i32store16(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64store8(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64store16(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i64store32(SHARED_PARAMS, uint64_t offset, uint64_t align);
-// void Arm64::i32eqz(SHARED_PARAMS);
-// void Arm64::i64eqz(SHARED_PARAMS);
-// void Arm64::i32eq(SHARED_PARAMS);
-// void Arm64::i64eq(SHARED_PARAMS);
-// void Arm64::i32ne(SHARED_PARAMS);
-// void Arm64::i64ne(SHARED_PARAMS);
-// void Arm64::i32lt_s(SHARED_PARAMS);
-// void Arm64::i64lt_s(SHARED_PARAMS);
-// void Arm64::i32lt_u(SHARED_PARAMS);
-// void Arm64::i64lt_u(SHARED_PARAMS);
-// void Arm64::i32gt_s(SHARED_PARAMS);
-// void Arm64::i64gt_s(SHARED_PARAMS);
-// void Arm64::i32gt_u(SHARED_PARAMS);
-// void Arm64::i64gt_u(SHARED_PARAMS);
-// void Arm64::i32le_s(SHARED_PARAMS);
-// void Arm64::i64le_s(SHARED_PARAMS);
-// void Arm64::i32le_u(SHARED_PARAMS);
-// void Arm64::i64le_u(SHARED_PARAMS);
-// void Arm64::i32ge_s(SHARED_PARAMS);
-// void Arm64::i64ge_s(SHARED_PARAMS);
-// void Arm64::i32ge_u(SHARED_PARAMS);
-// void Arm64::i64ge_u(SHARED_PARAMS);
-// void Arm64::f32eq(SHARED_PARAMS);
-// void Arm64::f64eq(SHARED_PARAMS);
-// void Arm64::f32ne(SHARED_PARAMS);
-// void Arm64::f64ne(SHARED_PARAMS);
-// void Arm64::f32lt(SHARED_PARAMS);
-// void Arm64::f64lt(SHARED_PARAMS);
-// void Arm64::f32gt(SHARED_PARAMS);
-// void Arm64::f64gt(SHARED_PARAMS);
-// void Arm64::f32le(SHARED_PARAMS);
-// void Arm64::f64le(SHARED_PARAMS);
-// void Arm64::f32ge(SHARED_PARAMS);
-// void Arm64::f64ge(SHARED_PARAMS);
+void Arm64::i32eqz(SHARED_PARAMS) {
+    auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
+    cmp(code, false, p.as<ireg>(), ireg::xzr);
+    push(value::flag(cond::eq));
+}
+void Arm64::i64eqz(SHARED_PARAMS) {
+    auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
+    cmp(code, true, p.as<ireg>(), ireg::xzr);
+    push(value::flag(cond::eq));
+}
+
+#define COMPARISON(is_64, op)                                                  \
+    do {                                                                       \
+        auto [p1, p2] = allocate_registers<                                    \
+            std::tuple<iwant::ireg, iwant::literal<1 << 12>>>(code);           \
+        if (p2.is<value::location::imm>()) {                                   \
+            cmp(code, is_64, false, p1.as<ireg>(), p2.as<uint32_t>());         \
+        } else {                                                               \
+            cmp(code, is_64, p1.as<ireg>(), p2.as<ireg>());                    \
+        }                                                                      \
+        push(value::flag(cond::op));                                           \
+    } while (0)
+
+void Arm64::i32eq(SHARED_PARAMS) { COMPARISON(false, eq); }
+void Arm64::i64eq(SHARED_PARAMS) { COMPARISON(true, eq); }
+void Arm64::i32ne(SHARED_PARAMS) { COMPARISON(false, ne); }
+void Arm64::i64ne(SHARED_PARAMS) { COMPARISON(true, ne); }
+void Arm64::i32lt_s(SHARED_PARAMS) { COMPARISON(false, lt); }
+void Arm64::i64lt_s(SHARED_PARAMS) { COMPARISON(true, lt); }
+void Arm64::i32lt_u(SHARED_PARAMS) { COMPARISON(false, cc); }
+void Arm64::i64lt_u(SHARED_PARAMS) { COMPARISON(true, cc); }
+void Arm64::i32gt_s(SHARED_PARAMS) { COMPARISON(false, gt); }
+void Arm64::i64gt_s(SHARED_PARAMS) { COMPARISON(true, gt); }
+void Arm64::i32gt_u(SHARED_PARAMS) { COMPARISON(false, hi); }
+void Arm64::i64gt_u(SHARED_PARAMS) { COMPARISON(true, hi); }
+void Arm64::i32le_s(SHARED_PARAMS) { COMPARISON(false, le); }
+void Arm64::i64le_s(SHARED_PARAMS) { COMPARISON(true, le); }
+void Arm64::i32le_u(SHARED_PARAMS) { COMPARISON(false, ls); }
+void Arm64::i64le_u(SHARED_PARAMS) { COMPARISON(true, ls); }
+void Arm64::i32ge_s(SHARED_PARAMS) { COMPARISON(false, ge); }
+void Arm64::i64ge_s(SHARED_PARAMS) { COMPARISON(true, ge); }
+void Arm64::i32ge_u(SHARED_PARAMS) { COMPARISON(false, cs); }
+void Arm64::i64ge_u(SHARED_PARAMS) { COMPARISON(true, cs); }
+#undef COMPARISON
+#define COMPARISON(is_64, op)                                                  \
+    do {                                                                       \
+        auto [p1, p2] = allocate_registers<                                    \
+            std::tuple<iwant::freg, iwant::literal<1 << 12>>>(code);           \
+        fcmp(code, is_64, p1.as<freg>(), p2.as<freg>());                       \
+        push(value::flag(cond::op));                                           \
+    } while (0)
+void Arm64::f32eq(SHARED_PARAMS) { COMPARISON(false, eq); }
+void Arm64::f64eq(SHARED_PARAMS) { COMPARISON(true, eq); }
+void Arm64::f32ne(SHARED_PARAMS) { COMPARISON(false, ne); }
+void Arm64::f64ne(SHARED_PARAMS) { COMPARISON(true, ne); }
+// todo: test if this can just be lt instead of mi
+void Arm64::f32lt(SHARED_PARAMS) { COMPARISON(false, mi); }
+void Arm64::f64lt(SHARED_PARAMS) { COMPARISON(true, mi); }
+void Arm64::f32gt(SHARED_PARAMS) { COMPARISON(false, gt); }
+void Arm64::f64gt(SHARED_PARAMS) { COMPARISON(true, gt); }
+void Arm64::f32le(SHARED_PARAMS) { COMPARISON(false, ls); }
+void Arm64::f64le(SHARED_PARAMS) { COMPARISON(true, ls); }
+void Arm64::f32ge(SHARED_PARAMS) { COMPARISON(false, ge); }
+void Arm64::f64ge(SHARED_PARAMS) { COMPARISON(true, ge); }
+#undef COMPARISON
+
 void Arm64::i32clz(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
@@ -679,10 +695,9 @@ void Arm64::i32add(SHARED_PARAMS) {
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        add(code, false, false, p2.as<uint32_t>(), p1.as<ireg>(),
-            res.as<ireg>());
+        add(code, false, p1.as<ireg>(), res.as<ireg>(), p2.as<uint32_t>());
     } else {
-        add(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+        add(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
     }
 
     finalize(code, res.as<ireg>());
