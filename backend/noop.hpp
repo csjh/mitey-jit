@@ -29,9 +29,9 @@ class Noop {
     void return_(SHARED_PARAMS, std::span<ControlFlow>) {}
     std::byte *call(SHARED_PARAMS, FunctionShell &) { return nullptr; }
     void call_indirect(SHARED_PARAMS, uint32_t, WasmSignature &) {}
-    void drop(SHARED_PARAMS) {}
-    void select(SHARED_PARAMS) {}
-    void select_t(SHARED_PARAMS) {}
+    void drop(SHARED_PARAMS, valtype) {}
+    void select(SHARED_PARAMS, valtype) {}
+    void select_t(SHARED_PARAMS, valtype) {}
     void localget(SHARED_PARAMS, FunctionShell &, uint32_t) {}
     void localset(SHARED_PARAMS, FunctionShell &, uint32_t) {}
     void localtee(SHARED_PARAMS, FunctionShell &, uint32_t) {}

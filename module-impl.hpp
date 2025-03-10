@@ -1111,9 +1111,10 @@ HANDLER(call_indirect) {
     nextop();
 }
 HANDLER(drop) {
-    stack.pop(stack.back());
+    auto ty = stack.back();
+    stack.pop(ty);
 
-    _(drop);
+    _(drop, ty);
     nextop();
 }
 HANDLER(select) {
@@ -1126,7 +1127,7 @@ HANDLER(select) {
     // then apply the dynamic type
     stack.apply(std::array{ty, ty}, std::array{ty});
 
-    _(select);
+    _(select, ty);
     nextop();
 }
 HANDLER(select_t) {
@@ -1141,7 +1142,7 @@ HANDLER(select_t) {
     // then apply the dynamic type
     stack.apply(std::array{ty, ty}, std::array{ty});
 
-    _(select_t);
+    _(select_t, ty);
     nextop();
 }
 HANDLER(localget) {

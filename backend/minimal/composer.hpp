@@ -180,9 +180,13 @@ template <typename Target> class Composer {
         Target::put_temp2(code, temp2);
         Target::put_call(code, runtime::call_indirect);
     }
-    void drop(SHARED_PARAMS) { Target::put_call(code, runtime::drop); }
-    void select(SHARED_PARAMS) { Target::put_call(code, runtime::select); }
-    void select_t(SHARED_PARAMS) { Target::put_call(code, runtime::select_t); }
+    void drop(SHARED_PARAMS, valtype) { Target::put_call(code, runtime::drop); }
+    void select(SHARED_PARAMS, valtype) {
+        Target::put_call(code, runtime::select);
+    }
+    void select_t(SHARED_PARAMS, valtype) {
+        Target::put_call(code, runtime::select_t);
+    }
     void localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
         Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx] -
                                   valtype_size(fn.locals[local_idx])));

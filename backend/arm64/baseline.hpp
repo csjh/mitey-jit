@@ -164,9 +164,9 @@ class Arm64 {
     void call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset);
     void call_indirect(SHARED_PARAMS, uint32_t table_offset,
                        WasmSignature &type);
-    void drop(SHARED_PARAMS);
-    void select(SHARED_PARAMS);
-    void select_t(SHARED_PARAMS);
+    void drop(SHARED_PARAMS, valtype type);
+    void select(SHARED_PARAMS, valtype type);
+    void select_t(SHARED_PARAMS, valtype type);
     void localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
     void localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
     void localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
