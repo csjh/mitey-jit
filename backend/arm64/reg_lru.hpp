@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 
 #define ASSUME(cond)                                                           \
@@ -96,9 +97,11 @@ template <uint8_t N> class reg_lru {
     void surrender(uint8_t reg) { discard(reg); }
 
     // moves lasting registers to the top
+    // this could be optimized but like it's basically always just gonna be once
     void commit() {
-        // this could be optimized but like it's basically always just gonna be
-        while (current_lasting != head) {
+        assert(current_lasting != head);
+        access(head);
+        while (current_lasting != head) [[unlikely]] {
             access(head);
         }
     }

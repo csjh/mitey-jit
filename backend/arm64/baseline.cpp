@@ -1,4 +1,5 @@
 #include "./baseline.hpp"
+#include "../../type-templates.hpp"
 #include <cassert>
 #include <cstring>
 #include <limits>
@@ -370,24 +371,25 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
         assert(better_not);
 
         auto imm = v.as<uint32_t>();
-        if (imm < To::threshold) {
+
+        if constexpr (is_value_specialization_of<iwant::literal, To>)
+            if (imm < To::threshold)
             return v;
-        } else if (auto mask = tryLogicalImm(imm);
-                   std::is_same_v<To, iwant::bitmask> && mask) {
+        if constexpr (std::is_same_v<To, iwant::bitmask>)
+            if (auto mask = tryLogicalImm(imm); mask)
             return value::imm(std::bit_cast<uint32_t>(*mask));
-        } else {
+
             auto reg = intregs.temporary(code);
             mov(code, imm, reg);
             return value::reg(reg);
-        }
     }
     case value::location::flag: {
         auto better_not = !std::is_same_v<To, iwant::freg>;
         assert(better_not);
 
-        stack_size -= sizeof(runtime::WasmValue);
+        flag = flags();
 
-        if (std::is_same_v<To, iwant::flags>) {
+        if constexpr (std::is_same_v<To, iwant::flags>) {
             return v;
         } else {
             auto reg = intregs.temporary(code);

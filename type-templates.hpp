@@ -10,6 +10,12 @@ constexpr bool is_specialization_of = false;
 template <template <typename...> class T, typename... Us>
 constexpr bool is_specialization_of<T, T<Us...>> = true;
 
+template <template <auto...> class T, typename U>
+constexpr bool is_value_specialization_of = false;
+
+template <template <auto...> class T, auto... Us>
+constexpr bool is_value_specialization_of<T, T<Us...>> = true;
+
 template <typename T>
 using TupleIfNotTuple = std::conditional_t<
     std::is_same_v<T, void>, std::tuple<>,
