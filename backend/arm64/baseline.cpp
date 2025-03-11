@@ -548,25 +548,26 @@ void Arm64::unreachable(SHARED_PARAMS) {
     trap<runtime::TrapKind::unreachable>(code);
 }
 void Arm64::nop(SHARED_PARAMS) { put(code, noop); }
-// void Arm64::block(SHARED_PARAMS, WasmSignature &sig);
-// void Arm64::loop(SHARED_PARAMS, WasmSignature &sig);
-// std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig);
-// std::byte *Arm64::else_(SHARED_PARAMS, WasmSignature &sig,
-//                         std::byte *if_location);
-// void Arm64::end(SHARED_PARAMS, ControlFlow &flow);
-// void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
-//                uint32_t depth);
-// void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
-//                   uint32_t depth);
-// void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
-//                      std::span<uint32_t> targets);
-// void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack);
-// void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset);
-// void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
-//                           WasmSignature &type);
-// void Arm64::drop(SHARED_PARAMS);
-// void Arm64::select(SHARED_PARAMS);
-// void Arm64::select_t(SHARED_PARAMS);
+void Arm64::drop(SHARED_PARAMS, valtype type) {
+    values--;
+    stack_size -= sizeof(runtime::WasmValue);
+
+    switch (values->where()) {
+    case value::location::reg:
+        if (type == valtype::f32 || type == valtype::f64)
+            floatregs.surrender(values->as<freg>());
+        else
+            intregs.surrender(values->as<ireg>());
+        break;
+    case value::location::stack:
+        break;
+    case value::location::imm:
+        break;
+    case value::location::flag:
+        flag = flags();
+        break;
+    }
+}
 void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     push(locals[local_idx]);
 }
