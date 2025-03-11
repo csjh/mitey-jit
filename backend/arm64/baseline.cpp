@@ -95,8 +95,8 @@ void cmp(std::byte *&code, bool sf, ireg rn, ireg rm,
     subs(code, sf, ireg::xzr, rn, rm, shift, shift_n);
 }
 
-void cmp(std::byte *&code, bool sf, bool shift, ireg rn, uint16_t imm12) {
-    subs(code, sf, ireg::xzr, rn, imm12, shift);
+void cmp(std::byte *&code, bool sf, ireg rn, uint16_t imm12) {
+    subs(code, sf, ireg::xzr, rn, imm12);
 }
 
 void fcmp(std::byte *&code, bool is_double, freg rn, freg rm) {
@@ -106,7 +106,7 @@ void fcmp(std::byte *&code, bool is_double, freg rn, freg rm) {
                   (static_cast<uint32_t>(rn) << 5));
 }
 
-void clz(std::byte *&code, bool sf, ireg rn, ireg rd) {
+void clz(std::byte *&code, bool sf, ireg rd, ireg rn) {
     put(code, 0b01011010110000000001000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(rn) << 5) |
@@ -328,10 +328,7 @@ void Arm64::clobber_registers(std::byte *&code) {
 
 void Arm64::push(value v) {
     *values++ = v;
-    // consts don't occupy stack space
-    if (!v.is<value::location::imm>()) {
         stack_size += sizeof(runtime::WasmValue);
-    }
 }
 
 template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
@@ -340,8 +337,6 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
 
     switch (v.where()) {
     case value::location::reg: {
-        stack_size -= sizeof(runtime::WasmValue);
-
         if (is_volatile(v.as<RegType>())) {
             RegType reg;
             if constexpr (std::is_same_v<To, iwant::freg>)
@@ -355,8 +350,6 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
         }
     }
     case value::location::stack: {
-        stack_size -= sizeof(runtime::WasmValue);
-
         auto offset = v.as<uint32_t>();
         RegType reg;
         if constexpr (std::is_same_v<To, iwant::freg>)
@@ -414,6 +407,7 @@ Arm64::allocate_registers(std::byte *&code) {
     floatregs.begin();
 
     values -= nparams;
+    stack_size -= sizeof(runtime::WasmValue) * nparams;
 
     [&]<std::size_t... I>(std::index_sequence<I...>) {
         ((ret[I] =
@@ -658,8 +652,8 @@ void Arm64::i64ge_u(SHARED_PARAMS) { COMPARISON(true, cs); }
 #undef COMPARISON
 #define COMPARISON(is_64, op)                                                  \
     do {                                                                       \
-        auto [p1, p2] = allocate_registers<                                    \
-            std::tuple<iwant::freg, iwant::literal<1 << 12>>>(code);           \
+        auto [p1, p2] =                                                        \
+            allocate_registers<std::tuple<iwant::freg, iwant::freg>>(code);    \
         fcmp(code, is_64, p1.as<freg>(), p2.as<freg>());                       \
         push(value::flag(cond::op));                                           \
     } while (0)
