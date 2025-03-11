@@ -623,7 +623,7 @@ void Arm64::i64eqz(SHARED_PARAMS) {
         auto [p1, p2] = allocate_registers<                                    \
             std::tuple<iwant::ireg, iwant::literal<1 << 12>>>(code);           \
         if (p2.is<value::location::imm>()) {                                   \
-            cmp(code, is_64, false, p1.as<ireg>(), p2.as<uint32_t>());         \
+            cmp(code, is_64, p1.as<ireg>(), p2.as<uint32_t>());                \
         } else {                                                               \
             cmp(code, is_64, p1.as<ireg>(), p2.as<ireg>());                    \
         }                                                                      \
@@ -677,7 +677,7 @@ void Arm64::i32clz(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
 
-    clz(code, false, p1.as<ireg>(), res.as<ireg>());
+    clz(code, false, res.as<ireg>(), p1.as<ireg>());
 
     finalize(code, res.as<ireg>());
 }
@@ -692,7 +692,7 @@ void Arm64::i32add(SHARED_PARAMS) {
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        add(code, false, p1.as<ireg>(), res.as<ireg>(), p2.as<uint32_t>());
+        add(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<uint32_t>());
     } else {
         add(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
     }
