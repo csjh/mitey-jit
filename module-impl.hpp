@@ -948,8 +948,8 @@ HANDLER(block) {
     auto &signature = read_blocktype(mod.types, iter);
 
     stack.enter_flow(signature.params);
-    control_stack.emplace_back(
-        ControlFlow(signature.results, {}, {}, signature, stack.polymorphism(),
+    control_stack.emplace_back(ControlFlow(
+        signature.results, {}, {}, {}, signature, stack.polymorphism(),
                     stack.sp() - signature.params.bytesize(), Block()));
     stack.unpolymorphize();
 
@@ -960,8 +960,8 @@ HANDLER(loop) {
     auto &signature = read_blocktype(mod.types, iter);
 
     stack.enter_flow(signature.params);
-    control_stack.emplace_back(
-        ControlFlow(signature.params, {}, {}, signature, stack.polymorphism(),
+    control_stack.emplace_back(ControlFlow(
+        signature.params, {}, {}, {}, signature, stack.polymorphism(),
                     stack.sp() - signature.params.bytesize(), Loop(code)));
     stack.unpolymorphize();
 
@@ -973,8 +973,8 @@ HANDLER(if_) {
 
     stack.pop(valtype::i32);
     stack.enter_flow(signature.params);
-    control_stack.emplace_back(
-        ControlFlow(signature.results, {}, {}, signature, stack.polymorphism(),
+    control_stack.emplace_back(ControlFlow(
+        signature.results, {}, {}, {}, signature, stack.polymorphism(),
                     stack.sp() - signature.params.bytesize(), If(nullptr)));
     stack.unpolymorphize();
 
@@ -983,8 +983,8 @@ HANDLER(if_) {
     nextop();
 }
 HANDLER(else_) {
-    auto &[expected, pending_br, pending_br_tables, sig, _, stack_offset,
-           construct] = control_stack.back();
+    auto &[expected, pending_br, pending_br_if, pending_br_tables, sig, _,
+           stack_offset, construct] = control_stack.back();
     ensure(std::holds_alternative<If>(construct), "else must close an if");
     ensure(stack == sig.results, "type mismatch");
 
@@ -1004,8 +1004,8 @@ HANDLER(else_) {
     nextop();
 }
 HANDLER(end) {
-    auto &[_, pending_br, pending_br_tables, sig, polymorphism, sp, construct] =
-        control_stack.back();
+    auto &[_, pending_br, pending_br_if, pending_br_tables, sig, polymorphism,
+           sp, construct] = control_stack.back();
 
     ensure(stack == sig.results, "type mismatch stack vs. results");
 
@@ -1617,8 +1617,8 @@ std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
                                         std::byte *code, FunctionShell &fn) {
     auto stack = WasmStack();
     auto jit = Target();
-    auto control_stack = std::vector<ControlFlow>(
-        {ControlFlow(fn.type.results, {}, {}, fn.type, false, 0, Function())});
+    auto control_stack = std::vector<ControlFlow>({ControlFlow(
+        fn.type.results, {}, {}, {}, fn.type, false, 0, Function())});
 
     _(start_function, fn);
 

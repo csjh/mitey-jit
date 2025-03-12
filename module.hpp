@@ -112,6 +112,7 @@ struct PendingBrTable {
 struct ControlFlow {
     valtype_vector &expected;
     std::vector<std::byte *> pending_br;
+    std::vector<std::byte *> pending_br_if;
     std::vector<PendingBrTable> pending_br_tables;
     WasmSignature &sig;
     bool polymorphized;
