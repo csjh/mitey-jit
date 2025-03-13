@@ -127,6 +127,10 @@ class Arm64 {
     };
 
     template <typename To> value adapt_value(std::byte *&code, value v);
+    ireg adapt_value_into(std::byte *&code, value v, std::optional<ireg> &reg);
+    freg adapt_value_into(std::byte *&code, value v, std::optional<freg> &reg);
+
+    bool move_results(std::byte *&code, WasmStack &stack, ControlFlow &flow);
 
     // eventually i'll have to support multivalue here
     // honestly i don't think it'll even be that difficult (single digit lines)
@@ -139,7 +143,9 @@ class Arm64 {
     template <typename... Args>
     void finalize(std::byte *&code, Args... results);
 
-    void exit_function(SHARED_PARAMS, FunctionShell &fn);
+    void amend_br(std::byte *br, std::byte *target);
+
+    void exit_function(SHARED_PARAMS, ControlFlow &flow);
 
   public:
     // todo: figure out what values for these

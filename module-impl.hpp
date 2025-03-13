@@ -12,7 +12,9 @@
 extern std::vector<std::string> names;
 #endif
 
-#define _(name, ...) jit.name(code, stack __VA_OPT__(, ) __VA_ARGS__)
+#define _(name, ...)                                                           \
+    if (!stack.polymorphism())                                                 \
+    jit.name(code, stack __VA_OPT__(, ) __VA_ARGS__)
 
 namespace mitey {
 
@@ -935,9 +937,8 @@ consteval std::array<CompilationHandler<Target> *, 256> make_funcs() {
 template <typename Target> static auto funcs = make_funcs<Target>();
 
 HANDLER(unreachable) {
-    stack.polymorphize();
-
     _(unreachable);
+    stack.polymorphize();
     nextop();
 }
 HANDLER(nop) {
@@ -978,7 +979,7 @@ HANDLER(if_) {
                     stack.sp() - signature.params.bytesize(), If(nullptr)));
     stack.unpolymorphize();
 
-    auto if_ptr = _(if_, signature);
+    auto if_ptr = jit.if_(code, stack, signature);
     control_stack.back().construct = If(if_ptr);
     nextop();
 }
@@ -999,7 +1000,7 @@ HANDLER(else_) {
     control_stack.back().construct = IfElse();
     stack.unpolymorphize();
 
-    auto else_ptr = _(else_, sig, else_jump);
+    auto else_ptr = jit.else_(code, stack, sig, else_jump);
     pending_br.push_back(else_ptr);
     nextop();
 }
@@ -1013,7 +1014,9 @@ HANDLER(end) {
         ensure(sig.params == sig.results, "type mismatch params vs. results");
     }
 
-    _(end, control_stack.back());
+    // special cased (not in _(end)) because
+    // stack can be polymorphic here but we always want it to run
+    jit.end(code, stack, control_stack.back());
 
     if (std::holds_alternative<Function>(construct)) {
         return code;
@@ -1035,9 +1038,9 @@ HANDLER(end) {
 HANDLER(br) {
     auto depth = safe_read_leb128<uint32_t>(iter);
     stack.check_br(control_stack, depth);
-    stack.polymorphize();
 
     _(br, control_stack, depth);
+    stack.polymorphize();
     nextop();
 }
 HANDLER(br_if) {
@@ -1073,16 +1076,16 @@ HANDLER(br_table) {
             ensure(default_target == target, "type mismatch");
         }
     }
-    stack.polymorphize();
 
     _(br_table, control_stack, targets);
+    stack.polymorphize();
     nextop();
 }
 HANDLER(return_) {
     stack.check_br(control_stack, control_stack.size() - 1);
-    stack.polymorphize();
 
     _(return_, control_stack);
+    stack.polymorphize();
     nextop();
 }
 HANDLER(call) {

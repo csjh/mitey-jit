@@ -100,6 +100,12 @@ void cmp(std::byte *&code, bool sf, ireg rn, uint16_t imm12) {
     subs(code, sf, ireg::xzr, rn, imm12);
 }
 
+void b(std::byte *&code, int32_t imm26) {
+    put(code, 0b00010100000000000000000000000000 |
+                  (static_cast<uint32_t>(imm26) << 0));
+}
+
+
 void fcmp(std::byte *&code, bool is_double, freg rn, freg rm) {
     put(code, 0b00011110001000000010000000010000 |
                   (static_cast<uint32_t>(is_double) << 22) |
@@ -202,6 +208,31 @@ void ldr_offset(std::byte *&code, uint32_t offset, ireg rn, freg rt) {
                   (static_cast<uint32_t>(offset) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
+}
+
+template <size_t Bits, size_t Offset>
+void put_immediate(std::byte *base, std::byte *to) {
+    constexpr auto align = sizeof(uint32_t);
+
+    auto diff = to - base;
+    auto value = diff / align;
+
+    // sign lower int32_t to intBits_t
+    auto imm = static_cast<uint32_t>(value);
+    imm = imm << (32 - Bits) >> (32 - Bits);
+
+    uint32_t v;
+    std::memcpy(&v, base, sizeof(v));
+
+    auto high_len = Offset;
+    auto low_len = 32 - high_len - Bits;
+
+    auto low =
+        Bits + Offset == 32 ? 0 : (v << (high_len + Bits)) >> (high_len + Bits);
+    auto high = (v >> (low_len + Bits)) << (low_len + Bits);
+
+    uint32_t result = high | (imm << low_len) | low;
+    std::memcpy(base, &result, sizeof(result));
 }
 
 struct LogicalImm {
@@ -396,6 +427,117 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
     assert(false);
 }
 
+ireg Arm64::adapt_value_into(std::byte *&code, value v,
+                             std::optional<ireg> &hint) {
+    if (v.is<value::location::reg>())
+        return v.as<ireg>();
+
+    if (!hint)
+        hint = intregs.temporary(code);
+    auto reg = *hint;
+
+    switch (v.where()) {
+    case value::location::reg: {
+        __builtin_unreachable();
+    }
+    case value::location::stack: {
+        auto offset = v.as<uint32_t>();
+        ldr_offset(code, offset, stackreg, reg);
+        return reg;
+    }
+    case value::location::imm: {
+        auto imm = v.as<uint32_t>();
+        mov(code, imm, reg);
+        return reg;
+    }
+    case value::location::flag: {
+        cset(code, true, v.as<cond>(), reg);
+        return reg;
+    }
+    }
+
+    assert(false);
+}
+
+freg Arm64::adapt_value_into(std::byte *&code, value v,
+                             std::optional<freg> &hint) {
+    if (v.is<value::location::reg>())
+        return v.as<freg>();
+
+    if (!hint)
+        hint = floatregs.temporary(code);
+    auto reg = *hint;
+
+    switch (v.where()) {
+    case value::location::reg: {
+        __builtin_unreachable();
+    }
+    case value::location::stack: {
+        auto offset = v.as<uint32_t>();
+        ldr_offset(code, offset, stackreg, reg);
+        return reg;
+    }
+    case value::location::imm:
+    case value::location::flag:
+        __builtin_unreachable();
+    }
+
+    assert(false);
+}
+
+bool Arm64::move_results(std::byte *&code, WasmStack &stack,
+                         ControlFlow &flow) {
+    auto arity = flow.expected.bytesize();
+    auto resultless_stack = stack.sp() - arity;
+
+    // if the results are already in the right place, we don't need to move them
+    // if (resultless_stack == flow.stack_offset)
+    //     return false;
+
+    intregs.begin();
+    floatregs.begin();
+
+    // stack.sp() doesn't include locals
+    auto local_bytes = stack_size - stack.sp();
+    auto stack_offset = local_bytes + flow.stack_offset;
+    auto stack_iter = stack.rbegin();
+
+    values -= arity / sizeof(runtime::WasmValue);
+    stack_size -= arity;
+
+    std::optional<ireg> intreg = std::nullopt;
+    std::optional<freg> floatreg = std::nullopt;
+
+    for (int i = 0; i < flow.expected.size(); i++) {
+        auto v = flow.expected[i];
+        if (v == valtype::f32 || v == valtype::f64) {
+            auto reg = adapt_value_into(code, values[i], floatreg);
+            str_offset(code, stack_offset, stackreg, reg);
+            stack_offset += sizeof(runtime::WasmValue);
+        } else {
+            auto reg = adapt_value_into(code, values[i], intreg);
+            str_offset(code, stack_offset, stackreg, reg);
+            stack_offset += sizeof(runtime::WasmValue);
+        }
+
+        stack_iter++;
+    }
+
+    auto discarded =
+        (resultless_stack - flow.stack_offset) / sizeof(runtime::WasmValue);
+
+    for (auto i = 0; i < discarded; i++) {
+        drop(code, stack, *stack_iter);
+        stack_iter++;
+    }
+
+    return true;
+}
+
+void Arm64::amend_br(std::byte *br, std::byte *target) {
+    put_immediate<26, 6>(br, target);
+}
+
 template <typename Params, typename Result = Arm64::iwant::none>
 std::array<value, std::tuple_size_v<Params> +
                       !std::is_same_v<Result, Arm64::iwant::none>>
@@ -500,9 +642,11 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
 
     stack_size = fn.locals.size() * sizeof(runtime::WasmValue);
 }
-void Arm64::exit_function(SHARED_PARAMS, FunctionShell &fn) {
+void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     // note: this has to be fixed to not potentially overwrite locals
     // that are being returned
+
+    auto &fn = std::get<Function>(flow.construct).fn;
 
     clobber_flags(code);
     clobber_registers(code);
@@ -523,19 +667,51 @@ void Arm64::exit_function(SHARED_PARAMS, FunctionShell &fn) {
         }
     }
 
+    auto local_bytes = fn.local_bytes.back();
+
+    if (!stack.polymorphism()) {
     values -= fn.type.results.size();
     for (auto i = 0; i < fn.type.results.size(); i++) {
         auto result = fn.type.results[i];
-        auto offset = i * sizeof(runtime::WasmValue);
+            auto offset = local_bytes + i * sizeof(runtime::WasmValue);
 
         if (result == valtype::i32 || result == valtype::i64 ||
             result == valtype::funcref || result == valtype::externref) {
-            str_offset(code, offset, stackreg,
+                str_offset(
+                    code, offset, stackreg,
                        adapt_value<iwant::ireg>(code, values[i]).as<ireg>());
         } else if (result == valtype::f32 || result == valtype::f64) {
-            str_offset(code, offset, stackreg,
+                str_offset(
+                    code, offset, stackreg,
                        adapt_value<iwant::freg>(code, values[i]).as<freg>());
         }
+        }
+    }
+
+    // i want stuff to jump here, because this is where results are copied
+    for (auto target : flow.pending_br) {
+        amend_br(target, code);
+    }
+    for (auto target : flow.pending_br_if) {
+        amend_br_if(target, code);
+    }
+    for (auto [table, target] : flow.pending_br_tables) {
+        auto diff = code - table;
+        auto idiff = static_cast<int32_t>(diff);
+        ensure(idiff == diff, "branch target out of range");
+        std::memcpy(target, &idiff, sizeof(idiff));
+    }
+
+    // return values should be in [local_bytes, ...), so copy them backwards
+    // into the local area
+    // clobber at will (in this case x3)
+    for (auto i = 0; i < fn.type.results.size(); i++) {
+        auto result = fn.type.results[i];
+        auto final_offset = i * sizeof(runtime::WasmValue);
+        auto current_offset = local_bytes + final_offset;
+
+        ldr_offset(code, current_offset, stackreg, ireg::x3);
+        str_offset(code, final_offset, stackreg, ireg::x3);
     }
 
     // ldp     x29, x30, [sp], #0x10
@@ -549,6 +725,48 @@ void Arm64::unreachable(SHARED_PARAMS) {
     trap<runtime::TrapKind::unreachable>(code);
 }
 void Arm64::nop(SHARED_PARAMS) { put(code, noop); }
+void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
+    if (std::holds_alternative<If>(flow.construct)) {
+        amend_br(std::get<If>(flow.construct).else_jump, code);
+    }
+
+    if (!std::holds_alternative<Loop>(flow.construct)) {
+        for (auto target : flow.pending_br) {
+            amend_br(target, code);
+        }
+        for (auto target : flow.pending_br_if) {
+            amend_br_if(target, code);
+        }
+        for (auto [table, target] : flow.pending_br_tables) {
+            auto diff = code - table;
+            auto idiff = static_cast<int32_t>(diff);
+            ensure(idiff == diff, "branch target out of range");
+            std::memcpy(target, &idiff, sizeof(idiff));
+        }
+    }
+
+    if (std::holds_alternative<Function>(flow.construct)) {
+        exit_function(code, stack, flow);
+    }
+}
+void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
+               uint32_t depth) {
+    // for now, only support non-special case distances (+/- 128MB)
+
+    auto &flow = control_stack[control_stack.size() - depth - 1];
+
+    move_results(code, stack, flow);
+
+    auto imm = code;
+    b(code, 0);
+
+    if (std::holds_alternative<Loop>(flow.construct)) {
+        auto start = std::get<Loop>(flow.construct).start;
+        amend_br(imm, start);
+    } else {
+        flow.pending_br.push_back(imm);
+    }
+}
 void Arm64::drop(SHARED_PARAMS, valtype type) {
     values--;
     stack_size -= sizeof(runtime::WasmValue);

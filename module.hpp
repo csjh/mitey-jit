@@ -128,15 +128,15 @@ class WasmStack {
     valtype *buffer;
     uint32_t stack_size = 0;
 
-    auto rbegin() const { return std::reverse_iterator(buffer); }
-    auto rend() const {
-        return std::reverse_iterator(const_cast<valtype *>(buffer_start));
-    }
-
     template <typename T> auto find_diverging(const T &expected) const;
 
   public:
     WasmStack();
+
+    auto rbegin() const { return std::reverse_iterator(buffer); }
+    auto rend() const {
+        return std::reverse_iterator(const_cast<valtype *>(buffer_start));
+    }
 
     int64_t sp() { return stack_size; }
 
