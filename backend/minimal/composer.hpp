@@ -30,20 +30,6 @@ template <typename Target> class Composer {
         Target::put_call(code, runtime::name);                                 \
     }
 
-  public:
-    static constexpr size_t function_overhead =
-        Target::max_prelude_size + Target::max_postlude_size;
-    static constexpr size_t max_instruction =
-        Target::max_call_size + Target::max_temp1_size + Target::max_temp2_size;
-
-    void start_function(SHARED_PARAMS, FunctionShell &fn) {
-        auto locals_bytes = fn.locals.bytesize() - fn.type.params.bytesize();
-
-        Target::put_prelude(code);
-        Target::put_temp1(code, fn.type.params.bytesize());
-        Target::put_temp2(code, locals_bytes);
-        Target::put_call(code, runtime::clear_locals);
-    }
     void exit_function(SHARED_PARAMS, FunctionShell &fn) {
         // move results past locals
         Target::put_temp1(code, -fn.locals.bytesize());
@@ -58,6 +44,21 @@ template <typename Target> class Composer {
         }
 
         Target::put_postlude(code);
+    }
+
+  public:
+    static constexpr size_t function_overhead =
+        Target::max_prelude_size + Target::max_postlude_size;
+    static constexpr size_t max_instruction =
+        Target::max_call_size + Target::max_temp1_size + Target::max_temp2_size;
+
+    void start_function(SHARED_PARAMS, FunctionShell &fn) {
+        auto locals_bytes = fn.locals.bytesize() - fn.type.params.bytesize();
+
+        Target::put_prelude(code);
+        Target::put_temp1(code, fn.type.params.bytesize());
+        Target::put_temp2(code, locals_bytes);
+        Target::put_call(code, runtime::clear_locals);
     }
 
     nilary(unreachable);
@@ -88,6 +89,10 @@ template <typename Target> class Composer {
                 ensure(idiff == diff, "branch target out of range");
                 std::memcpy(target, &idiff, sizeof(idiff));
             }
+        }
+
+        if (std::holds_alternative<Function>(flow.construct)) {
+            exit_function(code, stack, std::get<Function>(flow.construct).fn);
         }
     }
     void br(SHARED_PARAMS, std::span<ControlFlow> control_stack,

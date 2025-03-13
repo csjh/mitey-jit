@@ -139,13 +139,14 @@ class Arm64 {
     template <typename... Args>
     void finalize(std::byte *&code, Args... results);
 
+    void exit_function(SHARED_PARAMS, FunctionShell &fn);
+
   public:
     // todo: figure out what values for these
     static constexpr size_t function_overhead = 100 * sizeof(uint32_t);
     static constexpr size_t max_instruction = 100 * sizeof(uint32_t);
 
     void start_function(SHARED_PARAMS, FunctionShell &fn);
-    void exit_function(SHARED_PARAMS, FunctionShell &fn);
 
     void unreachable(SHARED_PARAMS);
     void nop(SHARED_PARAMS);

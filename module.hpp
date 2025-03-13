@@ -90,7 +90,9 @@ struct ElementShell {
     valtype type;
 };
 
-struct Function {};
+struct Function {
+    FunctionShell &fn;
+};
 
 struct Block {};
 

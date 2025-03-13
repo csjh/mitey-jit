@@ -5,6 +5,7 @@
 #include <limits>
 #include <optional>
 #include <tuple>
+#include <variant>
 
 namespace mitey {
 namespace arm64 {
