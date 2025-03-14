@@ -360,7 +360,9 @@ void Arm64::clobber_registers(std::byte *&code) {
 
 void Arm64::push(value v) {
     *values++ = v;
-        stack_size += sizeof(runtime::WasmValue);
+    if (v.is<value::location::flags>())
+        flag = flags(stack_size, values - 1);
+    stack_size += sizeof(runtime::WasmValue);
 }
 
 template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
@@ -571,6 +573,8 @@ Arm64::allocate_registers(std::byte *&code) {
 
 template <typename... Args>
 void Arm64::finalize(std::byte *&code, Args... results) {
+    static_assert(sizeof...(Args) > 0);
+
     auto finalize = [&](auto result) {
         if constexpr (std::is_same_v<decltype(result), ireg>)
             intregs.claim(result,
@@ -586,8 +590,10 @@ void Arm64::finalize(std::byte *&code, Args... results) {
 
     (finalize(results), ...);
 
-    intregs.commit();
-    floatregs.commit();
+    if constexpr ((std::is_same_v<Args, ireg> || ...))
+        intregs.commit();
+    if constexpr ((std::is_same_v<Args, freg> || ...))
+        floatregs.commit();
 }
 
 void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
@@ -767,6 +773,9 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
         flow.pending_br.push_back(imm);
     }
 }
+void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
+    br(code, stack, control_stack, control_stack.size() - 1);
+}
 void Arm64::drop(SHARED_PARAMS, valtype type) {
     values--;
     stack_size -= sizeof(runtime::WasmValue);
@@ -801,7 +810,7 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 void Arm64::i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
 void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
     if (cons <= std::numeric_limits<uint32_t>::max()) {
-        auto [res] = allocate_registers<std::tuple<>, iwant::freg>(code);
+        auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
         mov(code, cons, res.as<ireg>());
         finalize(code, res.as<ireg>());
     } else {
@@ -827,11 +836,15 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
     finalize(code, res.as<freg>());
 }
 void Arm64::i32eqz(SHARED_PARAMS) {
+    clobber_flags(code);
+
     auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
     cmp(code, false, p.as<ireg>(), ireg::xzr);
     push(value::flag(cond::eq));
 }
 void Arm64::i64eqz(SHARED_PARAMS) {
+    clobber_flags(code);
+
     auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
     cmp(code, true, p.as<ireg>(), ireg::xzr);
     push(value::flag(cond::eq));
@@ -839,6 +852,7 @@ void Arm64::i64eqz(SHARED_PARAMS) {
 
 #define COMPARISON(is_64, op)                                                  \
     do {                                                                       \
+        clobber_flags(code);                                                   \
         auto [p1, p2] = allocate_registers<                                    \
             std::tuple<iwant::ireg, iwant::literal<1 << 12>>>(code);           \
         if (p2.is<value::location::imm>()) {                                   \
@@ -872,11 +886,13 @@ void Arm64::i64ge_u(SHARED_PARAMS) { COMPARISON(true, cs); }
 #undef COMPARISON
 #define COMPARISON(is_64, op)                                                  \
     do {                                                                       \
+        clobber_flags(code);                                                   \
         auto [p1, p2] =                                                        \
             allocate_registers<std::tuple<iwant::freg, iwant::freg>>(code);    \
         fcmp(code, is_64, p1.as<freg>(), p2.as<freg>());                       \
         push(value::flag(cond::op));                                           \
     } while (0)
+
 void Arm64::f32eq(SHARED_PARAMS) { COMPARISON(false, eq); }
 void Arm64::f64eq(SHARED_PARAMS) { COMPARISON(true, eq); }
 void Arm64::f32ne(SHARED_PARAMS) { COMPARISON(false, ne); }
