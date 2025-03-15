@@ -401,16 +401,16 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
 
         if constexpr (is_value_specialization_of<iwant::literal, To>)
             if (imm < To::threshold)
-            return v;
+                return v;
         if constexpr (std::is_same_v<To, iwant::bitmask>)
             if (auto mask = tryLogicalImm(imm); mask)
-            return value::imm(std::bit_cast<uint32_t>(*mask));
+                return value::imm(std::bit_cast<uint32_t>(*mask));
 
-            auto reg = intregs.temporary(code);
-            mov(code, imm, reg);
-            return value::reg(reg);
+        auto reg = intregs.temporary(code);
+        mov(code, imm, reg);
+        return value::reg(reg);
     }
-    case value::location::flag: {
+    case value::location::flags: {
         auto better_not = !std::is_same_v<To, iwant::freg>;
         assert(better_not);
 
@@ -452,7 +452,7 @@ ireg Arm64::adapt_value_into(std::byte *&code, value v,
         mov(code, imm, reg);
         return reg;
     }
-    case value::location::flag: {
+    case value::location::flags: {
         cset(code, true, v.as<cond>(), reg);
         return reg;
     }
@@ -480,7 +480,7 @@ freg Arm64::adapt_value_into(std::byte *&code, value v,
         return reg;
     }
     case value::location::imm:
-    case value::location::flag:
+    case value::location::flags:
         __builtin_unreachable();
     }
 
@@ -676,21 +676,21 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     auto local_bytes = fn.local_bytes.back();
 
     if (!stack.polymorphism()) {
-    values -= fn.type.results.size();
-    for (auto i = 0; i < fn.type.results.size(); i++) {
-        auto result = fn.type.results[i];
+        values -= fn.type.results.size();
+        for (auto i = 0; i < fn.type.results.size(); i++) {
+            auto result = fn.type.results[i];
             auto offset = local_bytes + i * sizeof(runtime::WasmValue);
 
-        if (result == valtype::i32 || result == valtype::i64 ||
-            result == valtype::funcref || result == valtype::externref) {
+            if (result == valtype::i32 || result == valtype::i64 ||
+                result == valtype::funcref || result == valtype::externref) {
                 str_offset(
                     code, offset, stackreg,
-                       adapt_value<iwant::ireg>(code, values[i]).as<ireg>());
-        } else if (result == valtype::f32 || result == valtype::f64) {
+                    adapt_value<iwant::ireg>(code, values[i]).as<ireg>());
+            } else if (result == valtype::f32 || result == valtype::f64) {
                 str_offset(
                     code, offset, stackreg,
-                       adapt_value<iwant::freg>(code, values[i]).as<freg>());
-        }
+                    adapt_value<iwant::freg>(code, values[i]).as<freg>());
+            }
         }
     }
 
@@ -791,7 +791,7 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
         break;
     case value::location::imm:
         break;
-    case value::location::flag:
+    case value::location::flags:
         flag = flags();
         break;
     }

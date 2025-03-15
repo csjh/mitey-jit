@@ -951,7 +951,7 @@ HANDLER(block) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(ControlFlow(
         signature.results, {}, {}, {}, signature, stack.polymorphism(),
-                    stack.sp() - signature.params.bytesize(), Block()));
+        stack.sp() - signature.params.bytesize(), Block()));
     stack.unpolymorphize();
 
     _(block, signature);
@@ -963,7 +963,7 @@ HANDLER(loop) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(ControlFlow(
         signature.params, {}, {}, {}, signature, stack.polymorphism(),
-                    stack.sp() - signature.params.bytesize(), Loop(code)));
+        stack.sp() - signature.params.bytesize(), Loop(code)));
     stack.unpolymorphize();
 
     _(loop, signature);
@@ -976,7 +976,7 @@ HANDLER(if_) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(ControlFlow(
         signature.results, {}, {}, {}, signature, stack.polymorphism(),
-                    stack.sp() - signature.params.bytesize(), If(nullptr)));
+        stack.sp() - signature.params.bytesize(), If(nullptr)));
     stack.unpolymorphize();
 
     auto if_ptr = jit.if_(code, stack, signature);

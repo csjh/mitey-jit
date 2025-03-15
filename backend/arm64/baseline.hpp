@@ -12,7 +12,7 @@ namespace arm64 {
 
 class value {
   public:
-    enum class location { reg, stack, imm, flag };
+    enum class location { reg, stack, imm, flags };
 
   private:
     location loc;
@@ -34,7 +34,7 @@ class value {
     }
     static value imm(uint32_t val) { return value(location::imm, val); }
     static value flag(cond c) {
-        return value(location::flag, static_cast<uint32_t>(c));
+        return value(location::flags, static_cast<uint32_t>(c));
     }
 
     template <typename T> T as() const { return static_cast<T>(val); }
