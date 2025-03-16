@@ -520,12 +520,12 @@ freg Arm64::adapt_value_into(std::byte *&code, value v,
 
 bool Arm64::move_results(std::byte *&code, WasmStack &stack,
                          ControlFlow &flow) {
-    auto arity = flow.expected.bytesize();
-    auto resultless_stack = stack.sp() - arity;
+    auto arity = flow.expected.size();
+    auto resultless_stack = stack.sp() - flow.expected.bytesize();
 
     // if the results are already in the right place, we don't need to move them
-    // if (resultless_stack == flow.stack_offset)
-    //     return false;
+    if (arity == 0 /* || resultless_stack == flow.stack_offset */)
+        return false;
 
     intregs.begin();
     floatregs.begin();
@@ -535,20 +535,18 @@ bool Arm64::move_results(std::byte *&code, WasmStack &stack,
     auto stack_offset = local_bytes + flow.stack_offset;
     auto stack_iter = stack.rbegin();
 
-    values -= arity / sizeof(runtime::WasmValue);
-    stack_size -= arity;
-
     std::optional<ireg> intreg = std::nullopt;
     std::optional<freg> floatreg = std::nullopt;
 
-    for (int i = 0; i < flow.expected.size(); i++) {
+    auto expected = values - arity;
+    for (int i = 0; i < arity; i++) {
         auto v = flow.expected[i];
         if (v == valtype::f32 || v == valtype::f64) {
-            auto reg = adapt_value_into(code, values[i], floatreg);
+            auto reg = adapt_value_into(code, expected[i], floatreg);
             str_offset(code, stack_offset, stackreg, reg);
             stack_offset += sizeof(runtime::WasmValue);
         } else {
-            auto reg = adapt_value_into(code, values[i], intreg);
+            auto reg = adapt_value_into(code, expected[i], intreg);
             str_offset(code, stack_offset, stackreg, reg);
             stack_offset += sizeof(runtime::WasmValue);
         }
@@ -793,6 +791,9 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
     move_results(code, stack, flow);
+
+    values -= flow.expected.size();
+    stack_size -= flow.expected.bytesize();
 
     auto imm = code;
     b(code, 0);
