@@ -198,8 +198,11 @@ void mov(std::byte *&code, bool sf, bool notneg, bool keep, uint8_t hw,
 }
 
 void mov(std::byte *&code, uint64_t imm, ireg dst) {
-    // todo: should this have a fast path for 0?
-    // i think that should be handled elsewhere
+    if (imm == 0) {
+        mov(code, ireg::xzr, dst);
+        return;
+    }
+
     bool keep = false;
     for (size_t i = 0; i < sizeof(uint32_t) && imm; i++) {
         auto literal = imm & 0xffff;
