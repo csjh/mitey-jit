@@ -144,6 +144,7 @@ class Arm64 {
     void finalize(std::byte *&code, Args... results);
 
     void amend_br(std::byte *br, std::byte *target);
+    void amend_br_if(std::byte *br, std::byte *target);
 
     void exit_function(SHARED_PARAMS, ControlFlow &flow);
 

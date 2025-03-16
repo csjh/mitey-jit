@@ -572,6 +572,18 @@ void Arm64::amend_br(std::byte *br, std::byte *target) {
     put_immediate<26, 6>(br, target);
 }
 
+void Arm64::amend_br_if(std::byte *br, std::byte *target) {
+    inst instruction;
+    std::memcpy(&instruction, br, sizeof(instruction));
+    // cbnz/cbz/b.cond have one of bits 30 and 29 set
+    constexpr uint32_t is_conditional = (1 << 30) | (1 << 29);
+    if (instruction & is_conditional) {
+        put_immediate<19, 8>(br, target);
+    } else {
+        amend_br(br, target);
+    }
+}
+
 template <typename Params, typename Result = Arm64::iwant::none>
 std::array<value, std::tuple_size_v<Params> +
                       !std::is_same_v<Result, Arm64::iwant::none>>
@@ -807,6 +819,43 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
         amend_br(imm, start);
     } else {
         flow.pending_br.push_back(imm);
+    }
+}
+void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
+                  uint32_t depth) {
+    // for now, only support non-special case distances (+/- 1MB)
+
+    auto &flow = control_stack[control_stack.size() - depth - 1];
+    auto [condition] = allocate_registers<std::tuple<iwant::flags>>(code);
+
+    std::byte *condjump = code;
+    code += sizeof(inst);
+
+    std::byte *imm;
+    if (move_results(code, stack, flow)) {
+        imm = code;
+        b(code, 0);
+
+        auto jump = code - condjump;
+        if (condition.is<value::location::flags>()) {
+            bcond(condjump, jump, invert(condition.as<cond>()));
+        } else {
+            cbz(condjump, false, jump, condition.as<ireg>());
+        }
+    } else {
+        imm = condjump;
+        if (condition.is<value::location::flags>()) {
+            bcond(condjump, 0, condition.as<cond>());
+        } else {
+            cbnz(condjump, false, 0, condition.as<ireg>());
+        }
+    }
+
+    if (std::holds_alternative<Loop>(flow.construct)) {
+        auto start = std::get<Loop>(flow.construct).start;
+        amend_br_if(imm, start);
+    } else {
+        flow.pending_br_if.push_back(imm);
     }
 }
 void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {

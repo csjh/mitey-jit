@@ -59,6 +59,9 @@ enum class cond : uint8_t {
     al = 0b1110, // Always executed.
     nv = 0b1111, // Never executed.
 };
+inline cond invert(cond c) {
+    return static_cast<cond>(static_cast<uint8_t>(c) ^ 1);
+}
 
 enum class shifttype : uint8_t {
     lsl = 0b00, // Logical shift left.
