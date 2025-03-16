@@ -1114,7 +1114,19 @@ void Arm64::i32add(SHARED_PARAMS) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64add(SHARED_PARAMS) {}
-void Arm64::i32sub(SHARED_PARAMS) {}
+void Arm64::i32sub(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        sub(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<uint32_t>());
+    } else {
+        sub(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
 void Arm64::i64sub(SHARED_PARAMS) {}
 void Arm64::i32mul(SHARED_PARAMS) {}
 void Arm64::i64mul(SHARED_PARAMS) {}
