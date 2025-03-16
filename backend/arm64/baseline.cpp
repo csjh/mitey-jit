@@ -776,6 +776,11 @@ void Arm64::unreachable(SHARED_PARAMS) {
     trap<runtime::TrapKind::unreachable>(code);
 }
 void Arm64::nop(SHARED_PARAMS) { put(code, noop); }
+void Arm64::block(SHARED_PARAMS, WasmSignature &sig) {}
+void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {}
+std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {}
+std::byte *Arm64::else_(SHARED_PARAMS, WasmSignature &sig,
+                        std::byte *if_location) {}
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
     if (std::holds_alternative<If>(flow.construct)) {
         amend_br(std::get<If>(flow.construct).else_jump, code);
@@ -858,9 +863,14 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
         flow.pending_br_if.push_back(imm);
     }
 }
+void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
+                     std::span<uint32_t> targets) {}
 void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
 }
+void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {}
+void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
+                          WasmSignature &type) {}
 void Arm64::drop(SHARED_PARAMS, valtype type) {
     values--;
     stack_size -= sizeof(runtime::WasmValue);
@@ -881,17 +891,19 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
         break;
     }
 }
+void Arm64::select(SHARED_PARAMS, valtype type) {}
+void Arm64::select_t(SHARED_PARAMS, valtype type) {}
 void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     push(locals[local_idx]);
 }
-// void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
-// void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
-// void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset);
-// void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset);
-// void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset);
-// void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset);
-// void Arm64::memorysize(SHARED_PARAMS);
-// void Arm64::memorygrow(SHARED_PARAMS);
+void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {}
+void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {}
+void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {}
+void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {}
+void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset) {}
+void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset) {}
+void Arm64::memorysize(SHARED_PARAMS) {}
+void Arm64::memorygrow(SHARED_PARAMS) {}
 void Arm64::i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
 void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
     if (cons <= std::numeric_limits<uint32_t>::max()) {
@@ -920,6 +932,29 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
 
     finalize(code, res.as<freg>());
 }
+void Arm64::i32load(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64load(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::f32load(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::f64load(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i32load8_s(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i32load8_u(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i32load16_s(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i32load16_u(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64load8_s(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64load8_u(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64load16_s(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64load16_u(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64load32_s(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64load32_u(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i32store(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64store(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::f32store(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::f64store(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i32store8(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i32store16(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64store8(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64store16(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+void Arm64::i64store32(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
 void Arm64::i32eqz(SHARED_PARAMS) {
     clobber_flags(code);
 
@@ -1001,11 +1036,11 @@ void Arm64::i32clz(SHARED_PARAMS) {
 
     finalize(code, res.as<ireg>());
 }
-// void Arm64::i64clz(SHARED_PARAMS);
-// void Arm64::i32ctz(SHARED_PARAMS);
-// void Arm64::i64ctz(SHARED_PARAMS);
-// void Arm64::i32popcnt(SHARED_PARAMS);
-// void Arm64::i64popcnt(SHARED_PARAMS);
+void Arm64::i64clz(SHARED_PARAMS) {}
+void Arm64::i32ctz(SHARED_PARAMS) {}
+void Arm64::i64ctz(SHARED_PARAMS) {}
+void Arm64::i32popcnt(SHARED_PARAMS) {}
+void Arm64::i64popcnt(SHARED_PARAMS) {}
 void Arm64::i32add(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
@@ -1019,116 +1054,117 @@ void Arm64::i32add(SHARED_PARAMS) {
 
     finalize(code, res.as<ireg>());
 }
-// void Arm64::i64add(SHARED_PARAMS);
-// void Arm64::i32sub(SHARED_PARAMS);
-// void Arm64::i64sub(SHARED_PARAMS);
-// void Arm64::i32mul(SHARED_PARAMS);
-// void Arm64::i64mul(SHARED_PARAMS);
-// void Arm64::i32div_s(SHARED_PARAMS);
-// void Arm64::i64div_s(SHARED_PARAMS);
-// void Arm64::i32div_u(SHARED_PARAMS);
-// void Arm64::i64div_u(SHARED_PARAMS);
-// void Arm64::i32rem_s(SHARED_PARAMS);
-// void Arm64::i64rem_s(SHARED_PARAMS);
-// void Arm64::i32rem_u(SHARED_PARAMS);
-// void Arm64::i64rem_u(SHARED_PARAMS);
-// void Arm64::i32and(SHARED_PARAMS);
-// void Arm64::i64and(SHARED_PARAMS);
-// void Arm64::i32or(SHARED_PARAMS);
-// void Arm64::i64or(SHARED_PARAMS);
-// void Arm64::i32xor(SHARED_PARAMS);
-// void Arm64::i64xor(SHARED_PARAMS);
-// void Arm64::i32shl(SHARED_PARAMS);
-// void Arm64::i64shl(SHARED_PARAMS);
-// void Arm64::i32shr_s(SHARED_PARAMS);
-// void Arm64::i64shr_s(SHARED_PARAMS);
-// void Arm64::i32shr_u(SHARED_PARAMS);
-// void Arm64::i64shr_u(SHARED_PARAMS);
-// void Arm64::i32rotl(SHARED_PARAMS);
-// void Arm64::i64rotl(SHARED_PARAMS);
-// void Arm64::i32rotr(SHARED_PARAMS);
-// void Arm64::i64rotr(SHARED_PARAMS);
-// void Arm64::f32abs(SHARED_PARAMS);
-// void Arm64::f64abs(SHARED_PARAMS);
-// void Arm64::f32neg(SHARED_PARAMS);
-// void Arm64::f64neg(SHARED_PARAMS);
-// void Arm64::f32ceil(SHARED_PARAMS);
-// void Arm64::f64ceil(SHARED_PARAMS);
-// void Arm64::f32floor(SHARED_PARAMS);
-// void Arm64::f64floor(SHARED_PARAMS);
-// void Arm64::f32trunc(SHARED_PARAMS);
-// void Arm64::f64trunc(SHARED_PARAMS);
-// void Arm64::f32nearest(SHARED_PARAMS);
-// void Arm64::f64nearest(SHARED_PARAMS);
-// void Arm64::f32sqrt(SHARED_PARAMS);
-// void Arm64::f64sqrt(SHARED_PARAMS);
-// void Arm64::f32add(SHARED_PARAMS);
-// void Arm64::f64add(SHARED_PARAMS);
-// void Arm64::f32sub(SHARED_PARAMS);
-// void Arm64::f64sub(SHARED_PARAMS);
-// void Arm64::f32mul(SHARED_PARAMS);
-// void Arm64::f64mul(SHARED_PARAMS);
-// void Arm64::f32div(SHARED_PARAMS);
-// void Arm64::f64div(SHARED_PARAMS);
-// void Arm64::f32min(SHARED_PARAMS);
-// void Arm64::f64min(SHARED_PARAMS);
-// void Arm64::f32max(SHARED_PARAMS);
-// void Arm64::f64max(SHARED_PARAMS);
-// void Arm64::f32copysign(SHARED_PARAMS);
-// void Arm64::f64copysign(SHARED_PARAMS);
-// void Arm64::i32wrap_i64(SHARED_PARAMS);
-// void Arm64::i64extend_i32_s(SHARED_PARAMS);
-// void Arm64::i64extend_i32_u(SHARED_PARAMS);
-// void Arm64::i32trunc_f32_s(SHARED_PARAMS);
-// void Arm64::i64trunc_f32_s(SHARED_PARAMS);
-// void Arm64::i32trunc_f32_u(SHARED_PARAMS);
-// void Arm64::i64trunc_f32_u(SHARED_PARAMS);
-// void Arm64::i32trunc_f64_s(SHARED_PARAMS);
-// void Arm64::i64trunc_f64_s(SHARED_PARAMS);
-// void Arm64::i32trunc_f64_u(SHARED_PARAMS);
-// void Arm64::i64trunc_f64_u(SHARED_PARAMS);
-// void Arm64::f32convert_i32_s(SHARED_PARAMS);
-// void Arm64::f64convert_i32_s(SHARED_PARAMS);
-// void Arm64::f32convert_i32_u(SHARED_PARAMS);
-// void Arm64::f64convert_i32_u(SHARED_PARAMS);
-// void Arm64::f32convert_i64_s(SHARED_PARAMS);
-// void Arm64::f64convert_i64_s(SHARED_PARAMS);
-// void Arm64::f32convert_i64_u(SHARED_PARAMS);
-// void Arm64::f64convert_i64_u(SHARED_PARAMS);
-// void Arm64::f32demote_f64(SHARED_PARAMS);
-// void Arm64::f64promote_f32(SHARED_PARAMS);
-// void Arm64::i32reinterpret_f32(SHARED_PARAMS);
-// void Arm64::f32reinterpret_i32(SHARED_PARAMS);
-// void Arm64::i64reinterpret_f64(SHARED_PARAMS);
-// void Arm64::f64reinterpret_i64(SHARED_PARAMS);
-// void Arm64::i32extend8_s(SHARED_PARAMS);
-// void Arm64::i32extend16_s(SHARED_PARAMS);
-// void Arm64::i64extend8_s(SHARED_PARAMS);
-// void Arm64::i64extend16_s(SHARED_PARAMS);
-// void Arm64::i64extend32_s(SHARED_PARAMS);
-// void Arm64::ref_null(SHARED_PARAMS);
-// void Arm64::ref_is_null(SHARED_PARAMS);
-// void Arm64::ref_func(SHARED_PARAMS, uint64_t misc_offset);
-// void Arm64::ref_eq(SHARED_PARAMS);
-// void Arm64::i32_trunc_sat_f32_s(SHARED_PARAMS);
-// void Arm64::i32_trunc_sat_f32_u(SHARED_PARAMS);
-// void Arm64::i32_trunc_sat_f64_s(SHARED_PARAMS);
-// void Arm64::i32_trunc_sat_f64_u(SHARED_PARAMS);
-// void Arm64::i64_trunc_sat_f32_s(SHARED_PARAMS);
-// void Arm64::i64_trunc_sat_f32_u(SHARED_PARAMS);
-// void Arm64::i64_trunc_sat_f64_s(SHARED_PARAMS);
-// void Arm64::i64_trunc_sat_f64_u(SHARED_PARAMS);
-// void Arm64::memory_init(SHARED_PARAMS, uint64_t misc_offset);
-// void Arm64::data_drop(SHARED_PARAMS, uint64_t misc_offset);
-// void Arm64::memory_copy(SHARED_PARAMS);
-// void Arm64::memory_fill(SHARED_PARAMS);
-// void Arm64::table_init(SHARED_PARAMS, uint64_t seg_offset,
-//                        uint64_t table_offset);
-// void Arm64::elem_drop(SHARED_PARAMS, uint64_t misc_offset);
-// void Arm64::table_copy(SHARED_PARAMS, uint64_t dst_offset, uint64_t
-// src_offset); void Arm64::table_grow(SHARED_PARAMS, uint64_t misc_offset);
-// void Arm64::table_size(SHARED_PARAMS, uint64_t misc_offset);
-// void Arm64::table_fill(SHARED_PARAMS, uint64_t misc_offset);
+void Arm64::i64add(SHARED_PARAMS) {}
+void Arm64::i32sub(SHARED_PARAMS) {}
+void Arm64::i64sub(SHARED_PARAMS) {}
+void Arm64::i32mul(SHARED_PARAMS) {}
+void Arm64::i64mul(SHARED_PARAMS) {}
+void Arm64::i32div_s(SHARED_PARAMS) {}
+void Arm64::i64div_s(SHARED_PARAMS) {}
+void Arm64::i32div_u(SHARED_PARAMS) {}
+void Arm64::i64div_u(SHARED_PARAMS) {}
+void Arm64::i32rem_s(SHARED_PARAMS) {}
+void Arm64::i64rem_s(SHARED_PARAMS) {}
+void Arm64::i32rem_u(SHARED_PARAMS) {}
+void Arm64::i64rem_u(SHARED_PARAMS) {}
+void Arm64::i32and(SHARED_PARAMS) {}
+void Arm64::i64and(SHARED_PARAMS) {}
+void Arm64::i32or(SHARED_PARAMS) {}
+void Arm64::i64or(SHARED_PARAMS) {}
+void Arm64::i32xor(SHARED_PARAMS) {}
+void Arm64::i64xor(SHARED_PARAMS) {}
+void Arm64::i32shl(SHARED_PARAMS) {}
+void Arm64::i64shl(SHARED_PARAMS) {}
+void Arm64::i32shr_s(SHARED_PARAMS) {}
+void Arm64::i64shr_s(SHARED_PARAMS) {}
+void Arm64::i32shr_u(SHARED_PARAMS) {}
+void Arm64::i64shr_u(SHARED_PARAMS) {}
+void Arm64::i32rotl(SHARED_PARAMS) {}
+void Arm64::i64rotl(SHARED_PARAMS) {}
+void Arm64::i32rotr(SHARED_PARAMS) {}
+void Arm64::i64rotr(SHARED_PARAMS) {}
+void Arm64::f32abs(SHARED_PARAMS) {}
+void Arm64::f64abs(SHARED_PARAMS) {}
+void Arm64::f32neg(SHARED_PARAMS) {}
+void Arm64::f64neg(SHARED_PARAMS) {}
+void Arm64::f32ceil(SHARED_PARAMS) {}
+void Arm64::f64ceil(SHARED_PARAMS) {}
+void Arm64::f32floor(SHARED_PARAMS) {}
+void Arm64::f64floor(SHARED_PARAMS) {}
+void Arm64::f32trunc(SHARED_PARAMS) {}
+void Arm64::f64trunc(SHARED_PARAMS) {}
+void Arm64::f32nearest(SHARED_PARAMS) {}
+void Arm64::f64nearest(SHARED_PARAMS) {}
+void Arm64::f32sqrt(SHARED_PARAMS) {}
+void Arm64::f64sqrt(SHARED_PARAMS) {}
+void Arm64::f32add(SHARED_PARAMS) {}
+void Arm64::f64add(SHARED_PARAMS) {}
+void Arm64::f32sub(SHARED_PARAMS) {}
+void Arm64::f64sub(SHARED_PARAMS) {}
+void Arm64::f32mul(SHARED_PARAMS) {}
+void Arm64::f64mul(SHARED_PARAMS) {}
+void Arm64::f32div(SHARED_PARAMS) {}
+void Arm64::f64div(SHARED_PARAMS) {}
+void Arm64::f32min(SHARED_PARAMS) {}
+void Arm64::f64min(SHARED_PARAMS) {}
+void Arm64::f32max(SHARED_PARAMS) {}
+void Arm64::f64max(SHARED_PARAMS) {}
+void Arm64::f32copysign(SHARED_PARAMS) {}
+void Arm64::f64copysign(SHARED_PARAMS) {}
+void Arm64::i32wrap_i64(SHARED_PARAMS) {}
+void Arm64::i64extend_i32_s(SHARED_PARAMS) {}
+void Arm64::i64extend_i32_u(SHARED_PARAMS) {}
+void Arm64::i32trunc_f32_s(SHARED_PARAMS) {}
+void Arm64::i64trunc_f32_s(SHARED_PARAMS) {}
+void Arm64::i32trunc_f32_u(SHARED_PARAMS) {}
+void Arm64::i64trunc_f32_u(SHARED_PARAMS) {}
+void Arm64::i32trunc_f64_s(SHARED_PARAMS) {}
+void Arm64::i64trunc_f64_s(SHARED_PARAMS) {}
+void Arm64::i32trunc_f64_u(SHARED_PARAMS) {}
+void Arm64::i64trunc_f64_u(SHARED_PARAMS) {}
+void Arm64::f32convert_i32_s(SHARED_PARAMS) {}
+void Arm64::f64convert_i32_s(SHARED_PARAMS) {}
+void Arm64::f32convert_i32_u(SHARED_PARAMS) {}
+void Arm64::f64convert_i32_u(SHARED_PARAMS) {}
+void Arm64::f32convert_i64_s(SHARED_PARAMS) {}
+void Arm64::f64convert_i64_s(SHARED_PARAMS) {}
+void Arm64::f32convert_i64_u(SHARED_PARAMS) {}
+void Arm64::f64convert_i64_u(SHARED_PARAMS) {}
+void Arm64::f32demote_f64(SHARED_PARAMS) {}
+void Arm64::f64promote_f32(SHARED_PARAMS) {}
+void Arm64::i32reinterpret_f32(SHARED_PARAMS) {}
+void Arm64::f32reinterpret_i32(SHARED_PARAMS) {}
+void Arm64::i64reinterpret_f64(SHARED_PARAMS) {}
+void Arm64::f64reinterpret_i64(SHARED_PARAMS) {}
+void Arm64::i32extend8_s(SHARED_PARAMS) {}
+void Arm64::i32extend16_s(SHARED_PARAMS) {}
+void Arm64::i64extend8_s(SHARED_PARAMS) {}
+void Arm64::i64extend16_s(SHARED_PARAMS) {}
+void Arm64::i64extend32_s(SHARED_PARAMS) {}
+void Arm64::ref_null(SHARED_PARAMS) {}
+void Arm64::ref_is_null(SHARED_PARAMS) {}
+void Arm64::ref_func(SHARED_PARAMS, uint64_t misc_offset) {}
+void Arm64::ref_eq(SHARED_PARAMS) {}
+void Arm64::i32_trunc_sat_f32_s(SHARED_PARAMS) {}
+void Arm64::i32_trunc_sat_f32_u(SHARED_PARAMS) {}
+void Arm64::i32_trunc_sat_f64_s(SHARED_PARAMS) {}
+void Arm64::i32_trunc_sat_f64_u(SHARED_PARAMS) {}
+void Arm64::i64_trunc_sat_f32_s(SHARED_PARAMS) {}
+void Arm64::i64_trunc_sat_f32_u(SHARED_PARAMS) {}
+void Arm64::i64_trunc_sat_f64_s(SHARED_PARAMS) {}
+void Arm64::i64_trunc_sat_f64_u(SHARED_PARAMS) {}
+void Arm64::memory_init(SHARED_PARAMS, uint64_t misc_offset) {}
+void Arm64::data_drop(SHARED_PARAMS, uint64_t misc_offset) {}
+void Arm64::memory_copy(SHARED_PARAMS) {}
+void Arm64::memory_fill(SHARED_PARAMS) {}
+void Arm64::table_init(SHARED_PARAMS, uint64_t seg_offset,
+                       uint64_t table_offset) {}
+void Arm64::elem_drop(SHARED_PARAMS, uint64_t misc_offset) {}
+void Arm64::table_copy(SHARED_PARAMS, uint64_t dst_offset,
+                       uint64_t src_offset) {}
+void Arm64::table_grow(SHARED_PARAMS, uint64_t misc_offset) {}
+void Arm64::table_size(SHARED_PARAMS, uint64_t misc_offset) {}
+void Arm64::table_fill(SHARED_PARAMS, uint64_t misc_offset) {}
 
 } // namespace arm64
 } // namespace mitey
