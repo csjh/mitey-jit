@@ -530,9 +530,6 @@ bool Arm64::move_results(std::byte *&code, WasmStack &stack,
     if (arity == 0 /* || resultless_stack == flow.stack_offset */)
         return false;
 
-    intregs.begin();
-    floatregs.begin();
-
     // stack.sp() doesn't include locals
     auto local_bytes = stack_size - stack.sp();
     auto stack_offset = local_bytes + flow.stack_offset;
@@ -808,6 +805,10 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
 void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                uint32_t depth) {
     // for now, only support non-special case distances (+/- 128MB)
+
+    // todo: check if these are necessary, or can they go back in move_results
+    intregs.begin();
+    floatregs.begin();
 
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
