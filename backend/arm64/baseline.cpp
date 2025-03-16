@@ -689,22 +689,6 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     clobber_flags(code);
     clobber_registers(code);
 
-    // restore saved values
-    for (auto i = 0; i < fn.type.params.size(); i++) {
-        if (!locals[i].is<value::location::reg>())
-            continue;
-
-        auto param = fn.locals[i];
-        auto offset = i * sizeof(runtime::WasmValue);
-
-        if (param == valtype::i32 || param == valtype::i64 ||
-            param == valtype::funcref || param == valtype::externref) {
-            ldr_offset(code, offset, stackreg, locals[i].as<ireg>());
-        } else if (param == valtype::f32 || param == valtype::f64) {
-            ldr_offset(code, offset, stackreg, locals[i].as<freg>());
-        }
-    }
-
     auto local_bytes = fn.local_bytes.back();
 
     if (!stack.polymorphism()) {
@@ -726,7 +710,8 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
         }
     }
 
-    // i want stuff to jump here, because this is where results are copied
+    // i want stuff to jump here, because this is where callee saved registers
+    // are restored, and results are copied
     for (auto target : flow.pending_br) {
         amend_br(target, code);
     }
@@ -738,6 +723,22 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
         auto idiff = static_cast<int32_t>(diff);
         ensure(idiff == diff, "branch target out of range");
         std::memcpy(target, &idiff, sizeof(idiff));
+    }
+
+    // restore saved values
+    for (auto i = 0; i < fn.type.params.size(); i++) {
+        if (!locals[i].is<value::location::reg>())
+            continue;
+
+        auto param = fn.locals[i];
+        auto offset = i * sizeof(runtime::WasmValue);
+
+        if (param == valtype::i32 || param == valtype::i64 ||
+            param == valtype::funcref || param == valtype::externref) {
+            ldr_offset(code, offset, stackreg, locals[i].as<ireg>());
+        } else if (param == valtype::f32 || param == valtype::f64) {
+            ldr_offset(code, offset, stackreg, locals[i].as<freg>());
+        }
     }
 
     // return values should be in [local_bytes, ...), so copy them backwards
