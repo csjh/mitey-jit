@@ -704,13 +704,18 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
 
     clobber_flags(code);
 
-    auto local_bytes = fn.local_bytes.back();
+    auto local_bytes = fn.locals.bytesize();
 
     if (!stack.polymorphism()) {
         values -= fn.type.results.size();
         for (auto i = 0; i < fn.type.results.size(); i++) {
             auto result = fn.type.results[i];
             auto offset = local_bytes + i * sizeof(runtime::WasmValue);
+
+            // if the value is already there, skip it
+            if (values[i].is<value::location::stack>() &&
+                values[i].as<uint32_t>() == offset)
+                continue;
 
             if (result == valtype::i32 || result == valtype::i64 ||
                 result == valtype::funcref || result == valtype::externref) {
@@ -741,17 +746,17 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     }
 
     // restore saved values
-    for (auto i = 0; i < fn.type.params.size(); i++) {
+    for (auto i = 0; i < fn.locals.size(); i++) {
         if (!locals[i].is<value::location::reg>())
             continue;
 
-        auto param = fn.locals[i];
+        auto local = fn.locals[i];
         auto offset = i * sizeof(runtime::WasmValue);
 
-        if (param == valtype::i32 || param == valtype::i64 ||
-            param == valtype::funcref || param == valtype::externref) {
+        if (local == valtype::i32 || local == valtype::i64 ||
+            local == valtype::funcref || local == valtype::externref) {
             ldr_offset(code, offset, stackreg, locals[i].as<ireg>());
-        } else if (param == valtype::f32 || param == valtype::f64) {
+        } else if (local == valtype::f32 || local == valtype::f64) {
             ldr_offset(code, offset, stackreg, locals[i].as<freg>());
         }
     }
