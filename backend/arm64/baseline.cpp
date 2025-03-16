@@ -371,6 +371,12 @@ void Arm64::reg_manager<RegType, First, Last>::clobber_all(std::byte *&code) {
     }
 }
 
+template <typename RegType, size_t First, size_t Last>
+bool Arm64::reg_manager<RegType, First, Last>::check_spill(RegType reg,
+                                                           std::byte *code) {
+    return data[to_index(reg)].spilladdr == code;
+}
+
 void Arm64::clobber_flags(std::byte *&code) {
     if (!flag.val)
         return;
@@ -405,17 +411,18 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
 
     switch (v.where()) {
     case value::location::reg: {
-        if (is_volatile(v.as<RegType>())) {
-            RegType reg;
-            if constexpr (std::is_same_v<To, iwant::freg>)
-                reg = floatregs.temporary(code);
-            else
-                reg = intregs.temporary(code);
-            mov(code, v.as<RegType>(), reg);
-            return value::reg(reg);
-        } else {
-            return v;
-        }
+        // why did I have the commented out part?
+        // if (is_volatile(v.as<RegType>())) {
+        //     RegType reg;
+        //     if constexpr (std::is_same_v<To, iwant::freg>)
+        //         reg = floatregs.temporary(code);
+        //     else
+        //         reg = intregs.temporary(code);
+        //     mov(code, v.as<RegType>(), reg);
+        //     return value::reg(reg);
+        // } else {
+        return v;
+        // }
     }
     case value::location::stack: {
         auto offset = v.as<uint32_t>();
@@ -696,7 +703,6 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     auto &fn = std::get<Function>(flow.construct).fn;
 
     clobber_flags(code);
-    clobber_registers(code);
 
     auto local_bytes = fn.local_bytes.back();
 
@@ -897,8 +903,55 @@ void Arm64::select_t(SHARED_PARAMS, valtype type) {}
 void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     push(locals[local_idx]);
 }
-void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {}
-void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {}
+void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
+    auto ty = fn.locals[local_idx];
+    auto local = locals[local_idx];
+
+    if (local.is<value::location::reg>()) {
+        // i don't like that this specializes allocate_registers
+        // but tbf it's the only place i need to do it
+
+        intregs.begin();
+        floatregs.begin();
+
+        values -= 1;
+        stack_size -= sizeof(runtime::WasmValue);
+
+        if (ty == valtype::f32 || ty == valtype::f64) {
+            if (values->is<value::location::reg>() &&
+                is_volatile(values->as<freg>()) &&
+                floatregs.check_spill(values->as<freg>(), code - sizeof(inst)))
+                code -= sizeof(inst);
+
+            auto reg = std::make_optional(local.as<freg>());
+            auto v = adapt_value_into(code, values[0], reg);
+            if (*reg != v)
+                mov(code, v, *reg);
+        } else {
+            if (values->is<value::location::reg>() &&
+                is_volatile(values->as<ireg>()) &&
+                intregs.check_spill(values->as<ireg>(), code - sizeof(inst)))
+                code -= sizeof(inst);
+
+            auto reg = std::make_optional(local.as<ireg>());
+            auto v = adapt_value_into(code, values[0], reg);
+            if (*reg != v)
+                mov(code, v, *reg);
+        }
+    } else {
+        if (ty == valtype::f32 || ty == valtype::f64) {
+            auto [reg] = allocate_registers<std::tuple<iwant::freg>>(code);
+            str_offset(code, local.as<uint32_t>(), stackreg, reg.as<freg>());
+        } else {
+            auto [reg] = allocate_registers<std::tuple<iwant::ireg>>(code);
+            str_offset(code, local.as<uint32_t>(), stackreg, reg.as<ireg>());
+        }
+    }
+}
+void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
+    localset(code, stack, fn, local_idx);
+    localget(code, stack, fn, local_idx);
+}
 void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {}
 void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {}
 void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset) {}

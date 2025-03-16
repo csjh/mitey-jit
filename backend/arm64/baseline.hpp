@@ -85,6 +85,7 @@ class Arm64 {
         void commit();
 
         void clobber_all(std::byte *&code);
+        bool check_spill(RegType reg, std::byte *code);
     };
 
     // callee saved registers
