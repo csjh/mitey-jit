@@ -161,7 +161,7 @@ class Arm64 {
     void block(SHARED_PARAMS, WasmSignature &sig);
     void loop(SHARED_PARAMS, WasmSignature &sig);
     std::byte *if_(SHARED_PARAMS, WasmSignature &sig);
-    std::byte *else_(SHARED_PARAMS, WasmSignature &sig, std::byte *if_location);
+    void else_(SHARED_PARAMS, std::span<ControlFlow> control_stack);
     void end(SHARED_PARAMS, ControlFlow &flow);
     void br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
             uint32_t depth);

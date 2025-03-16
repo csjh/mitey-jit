@@ -68,11 +68,13 @@ template <typename Target> class Composer {
     std::byte *if_(SHARED_PARAMS, WasmSignature &sig) {
         return Target::put_if(code);
     }
-    std::byte *else_(SHARED_PARAMS, WasmSignature &sig,
-                     std::byte *if_location) {
+    void else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
+        auto &if_flow = control_stack.back();
+
         auto imm = Target::put_br(code, 0, 0);
-        Target::put_immediate(if_location, code);
-        return imm;
+        if_flow.pending_br.push_back(imm);
+
+        Target::put_immediate(std::get<If>(if_flow.construct).else_jump, code);
     }
     void end(SHARED_PARAMS, ControlFlow &flow) {
         if (std::holds_alternative<If>(flow.construct)) {

@@ -19,15 +19,13 @@ class Noop {
     void block(SHARED_PARAMS, WasmSignature &) {}
     void loop(SHARED_PARAMS, WasmSignature &) {}
     std::byte *if_(SHARED_PARAMS, WasmSignature &) { return nullptr; }
-    std::byte *else_(SHARED_PARAMS, WasmSignature &, std::byte *) {
-        return nullptr;
-    }
+    void else_(SHARED_PARAMS, std::span<ControlFlow>) {}
     void end(SHARED_PARAMS, ControlFlow &) {}
     void br(SHARED_PARAMS, std::span<ControlFlow>, uint32_t) {}
     void br_if(SHARED_PARAMS, std::span<ControlFlow>, uint32_t) {}
     void br_table(SHARED_PARAMS, std::span<ControlFlow>, std::span<uint32_t>) {}
     void return_(SHARED_PARAMS, std::span<ControlFlow>) {}
-    std::byte *call(SHARED_PARAMS, FunctionShell &) { return nullptr; }
+    std::byte *call(SHARED_PARAMS, FunctionShell &, uint64_t) { return nullptr; }
     void call_indirect(SHARED_PARAMS, uint32_t, WasmSignature &) {}
     void drop(SHARED_PARAMS, valtype) {}
     void select(SHARED_PARAMS, valtype) {}

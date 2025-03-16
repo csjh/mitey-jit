@@ -963,10 +963,13 @@ HANDLER(loop) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(ControlFlow(
         signature.params, {}, {}, {}, signature, stack.polymorphism(),
-        stack.sp() - signature.params.bytesize(), Loop(code)));
+        stack.sp() - signature.params.bytesize(), Loop(nullptr)));
     stack.unpolymorphize();
 
+    // todo: i might want more flexibility than this
+    // maybe loop should return a pointer
     _(loop, signature);
+    std::get<Loop>(control_stack.back().construct).start = code;
     nextop();
 }
 HANDLER(if_) {
@@ -989,7 +992,7 @@ HANDLER(else_) {
     ensure(std::holds_alternative<If>(construct), "else must close an if");
     ensure(stack == sig.results, "type mismatch");
 
-    auto [else_jump] = std::get<If>(construct);
+    jit.else_(code, stack, control_stack);
 
     stack.pop(sig.results);
     stack.push(sig.params);
@@ -999,9 +1002,6 @@ HANDLER(else_) {
 
     control_stack.back().construct = IfElse();
     stack.unpolymorphize();
-
-    auto else_ptr = jit.else_(code, stack, sig, else_jump);
-    pending_br.push_back(else_ptr);
     nextop();
 }
 HANDLER(end) {

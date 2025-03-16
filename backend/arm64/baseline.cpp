@@ -785,11 +785,71 @@ void Arm64::unreachable(SHARED_PARAMS) {
 }
 void Arm64::nop(SHARED_PARAMS) { put(code, noop); }
 void Arm64::block(SHARED_PARAMS, WasmSignature &sig) {}
-void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {}
-std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {}
-std::byte *Arm64::else_(SHARED_PARAMS, WasmSignature &sig,
-                        std::byte *if_location) {}
+void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
+    values -= sig.params.size();
+    stack_size -= sig.params.bytesize();
+
+    std::optional<ireg> intreg = std::nullopt;
+    std::optional<freg> floatreg = std::nullopt;
+
+    auto params = values;
+    for (int i = 0; i < sig.params.size(); i++) {
+        auto ty = sig.params[i];
+        if (ty == valtype::f32 || ty == valtype::f64) {
+            auto r = adapt_value_into(code, params[i], floatreg);
+            str_offset(code, stack_size, stackreg, r);
+            push(value::stack(stack_size));
+        } else {
+            auto r = adapt_value_into(code, params[i], intreg);
+            str_offset(code, stack_size, stackreg, r);
+            push(value::stack(stack_size));
+        }
+    }
+}
+std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
+    auto dupe = values - sig.params.size();
+    for (int i = 0; i < sig.params.size(); i++) {
+        // this is super hacky, but instead of dumping the values to the stack
+        // and then loading from stack for both if/else blocks, the params will
+        // already be on the top of the stack after dumping results of the if
+
+        // should make sure i don't assume values translates 1:1 with stack_size
+        *values++ = dupe[i];
+    }
+
+    auto [condition] = allocate_registers<std::tuple<iwant::flags>>(code);
+
+    std::byte *imm = code;
+    if (condition.is<value::location::flags>()) {
+        bcond(code, 0, invert(condition.as<cond>()));
+    } else {
+        cbz(code, false, 0, condition.as<ireg>());
+    }
+
+    return imm;
+}
+void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
+    // todo: this is a tiny bit efficient, because at this point we have the
+    // additional knowledge that there is no need to move the results
+    // however it should be possible to optimize that anyways in move_results
+    if (!stack.polymorphism()) {
+        br(code, stack, control_stack, 0);
+    }
+
+    auto &if_flow = control_stack.back();
+    amend_br_if(std::get<If>(if_flow.construct).else_jump, code);
+
+    // not needed due to duping in if_
+    // for (auto ty : if_flow.sig.params)
+    //     push(value::stack(stack_size));
+}
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
+    if (stack.polymorphism()) {
+        for (auto ty : flow.sig.results) {
+            push(value::stack(stack_size));
+        }
+    }
+
     if (std::holds_alternative<If>(flow.construct)) {
         amend_br(std::get<If>(flow.construct).else_jump, code);
     }
