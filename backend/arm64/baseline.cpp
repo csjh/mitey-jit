@@ -100,11 +100,42 @@ void cmp(std::byte *&code, bool sf, ireg rn, uint16_t imm12) {
     subs(code, sf, ireg::xzr, rn, imm12);
 }
 
-void b(std::byte *&code, int32_t imm26) {
+void b(std::byte *&code, int32_t _imm26) {
+    uint32_t imm26 = _imm26 / sizeof(uint32_t);
+    imm26 &= 0x3ffffff;
+
     put(code, 0b00010100000000000000000000000000 |
                   (static_cast<uint32_t>(imm26) << 0));
 }
 
+void bcond(std::byte *&code, int32_t _imm19, cond c) {
+    uint32_t imm19 = _imm19 /= sizeof(uint32_t);
+    imm19 &= 0x7ffff;
+
+    put(code, 0b01010100000000000000000000000000 |
+                  (static_cast<uint32_t>(imm19) << 5) |
+                  (static_cast<uint32_t>(c) << 0));
+}
+
+void cbnz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
+    uint32_t imm19 = _imm19 /= sizeof(uint32_t);
+    imm19 &= 0x7ffff;
+
+    put(code, 0b00110101000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(imm19) << 5) |
+                  (static_cast<uint32_t>(rt) << 0));
+}
+
+void cbz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
+    uint32_t imm19 = _imm19 /= sizeof(uint32_t);
+    imm19 &= 0x7ffff;
+
+    put(code, 0b00110100000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(imm19) << 5) |
+                  (static_cast<uint32_t>(rt) << 0));
+}
 
 void fcmp(std::byte *&code, bool is_double, freg rn, freg rm) {
     put(code, 0b00011110001000000010000000010000 |
