@@ -161,7 +161,7 @@ void csinc(std::byte *&code, bool sf, ireg rm, cond c, ireg rn, ireg rd) {
 }
 
 void cset(std::byte *&code, bool sf, cond c, ireg rd) {
-    csinc(code, sf, ireg::xzr, c, ireg::xzr, rd);
+    csinc(code, sf, ireg::xzr, invert(c), ireg::xzr, rd);
 }
 
 void mov(std::byte *&code, ireg src, ireg dst) {
