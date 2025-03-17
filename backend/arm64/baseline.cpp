@@ -388,16 +388,18 @@ void mov(std::byte *&code, bool sf, ireg src, ireg dst) {
     orr(code, sf, shifttype::lsl, src, 0, ireg::xzr, dst);
 }
 
-void mov(std::byte *&code, bool sf, ireg src, freg dst) {
-    put(code, 0b00011110011001110000000000000000 |
+void mov(std::byte *&code, bool sf, ftype ft, ireg src, freg dst) {
+    put(code, 0b00011110001001110000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(ft) << 22) |
                   (static_cast<uint32_t>(src) << 5) |
                   (static_cast<uint32_t>(dst) << 0));
 }
 
-void mov(std::byte *&code, bool sf, freg src, ireg dst) {
-    put(code, 0b00011110011001100000000000000000 |
+void mov(std::byte *&code, bool sf, ftype ft, freg src, ireg dst) {
+    put(code, 0b00011110001001100000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(ft) << 22) |
                   (static_cast<uint32_t>(src) << 5) |
                   (static_cast<uint32_t>(dst) << 0));
 }
@@ -897,7 +899,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                 str_offset(code, offset, stackreg, freg::d0);
             } else {
                 str_offset(code, offset, stackreg, reg);
-                mov(code, true, ireg::xzr, reg);
+                mov(code, true, ftype::double_, ireg::xzr, reg);
             }
 
             locals[i] = value::reg(reg);
@@ -1323,7 +1325,7 @@ void Arm64::f32const(SHARED_PARAMS, float cons) {
     auto temp = intregs.temporary(code);
 
     mov(code, std::bit_cast<uint32_t>(cons), temp);
-    mov(code, false, temp, res.as<freg>());
+    mov(code, false, ftype::single, temp, res.as<freg>());
 
     finalize(code, res.as<freg>());
 }
@@ -1332,7 +1334,7 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
     auto temp = intregs.temporary(code);
 
     mov(code, std::bit_cast<uint64_t>(cons), temp);
-    mov(code, true, temp, res.as<freg>());
+    mov(code, true, ftype::double_, temp, res.as<freg>());
 
     finalize(code, res.as<freg>());
 }
@@ -1472,10 +1474,10 @@ void Arm64::i32popcnt(SHARED_PARAMS) {
 
     auto s = floatregs.temporary(code);
 
-    mov(code, false, p1.as<ireg>(), s);
+    mov(code, false, ftype::single, p1.as<ireg>(), s);
     cnt(code, false, s, s);
     addv(code, false, s, s);
-    mov(code, false, s, res.as<ireg>());
+    mov(code, false, ftype::single, s, res.as<ireg>());
 
     finalize(code, res.as<ireg>());
 }
@@ -1485,10 +1487,10 @@ void Arm64::i64popcnt(SHARED_PARAMS) {
 
     auto s = floatregs.temporary(code);
 
-    mov(code, true, p1.as<ireg>(), s);
+    mov(code, true, ftype::double_, p1.as<ireg>(), s);
     cnt(code, false, s, s);
     addv(code, false, s, s);
-    mov(code, true, s, res.as<ireg>());
+    mov(code, false, ftype::single, s, res.as<ireg>());
 
     finalize(code, res.as<ireg>());
 }
@@ -1548,14 +1550,14 @@ void Arm64::i32mul(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    mul(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+    mul(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64mul(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    mul(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+    mul(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
 void Arm64::i32div_s(SHARED_PARAMS) {}

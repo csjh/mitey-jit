@@ -70,5 +70,12 @@ enum class shifttype : uint8_t {
     ror = 0b11, // Rotate right.
 };
 
+enum class ftype : uint8_t {
+    single = 0b00,  // Single-precision
+    double_ = 0b01, // Double-precision
+    big = 0b10,     // 128 bit
+    half = 0b11,    // Half-precision
+};
+
 } // namespace arm64
 } // namespace mitey
