@@ -26,6 +26,15 @@ template <runtime::TrapKind kind> void trap(std::byte *&code) {
     // br x1
 }
 
+struct LogicalImm {
+    uint32_t prefix : 9;
+    uint32_t N : 1;
+    uint32_t immr : 6;
+    uint32_t imms : 6;
+    uint32_t postfix : 10;
+};
+static_assert(sizeof(LogicalImm) == sizeof(uint32_t));
+
 void orr(std::byte *&code, bool sf, shifttype shift, ireg rm, uint8_t shift_imm,
          ireg rn, ireg rd) {
     put(code, 0b00101010000000000000000000000000 |
@@ -33,6 +42,161 @@ void orr(std::byte *&code, bool sf, shifttype shift, ireg rm, uint8_t shift_imm,
                   (static_cast<uint32_t>(shift) << 22) |
                   (static_cast<uint32_t>(rm) << 16) |
                   (static_cast<uint32_t>(shift_imm) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void orr(std::byte *&code, bool sf, LogicalImm imm, ireg rn, ireg rd) {
+    put(code, 0b00110010000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(imm.N) << 22) |
+                  (static_cast<uint32_t>(imm.immr) << 16) |
+                  (static_cast<uint32_t>(imm.imms) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void and_(std::byte *&code, bool sf, shifttype shift, ireg rm,
+          uint8_t shift_imm, ireg rn, ireg rd) {
+    put(code, 0b00001010000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(shift) << 22) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(shift_imm) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void and_(std::byte *&code, bool sf, LogicalImm imm, ireg rn, ireg rd) {
+    put(code, 0b01110010000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(imm.N) << 22) |
+                  (static_cast<uint32_t>(imm.immr) << 16) |
+                  (static_cast<uint32_t>(imm.imms) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void eor(std::byte *&code, bool sf, shifttype shift, ireg rm, uint8_t shift_imm,
+         ireg rn, ireg rd) {
+    put(code, 0b01001010000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(shift) << 22) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(shift_imm) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void eor(std::byte *&code, bool sf, LogicalImm imm, ireg rn, ireg rd) {
+    put(code, 0b01010010000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(imm.N) << 22) |
+                  (static_cast<uint32_t>(imm.immr) << 16) |
+                  (static_cast<uint32_t>(imm.imms) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void ubfm(std::byte *&code, bool sf, LogicalImm imm, ireg rn, ireg rd) {
+    put(code, 0b01010011000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(imm.N) << 22) |
+                  (static_cast<uint32_t>(imm.immr) << 16) |
+                  (static_cast<uint32_t>(imm.imms) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void sbfm(std::byte *&code, bool sf, LogicalImm imm, ireg rn, ireg rd) {
+    put(code, 0b00010011000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(imm.N) << 22) |
+                  (static_cast<uint32_t>(imm.immr) << 16) |
+                  (static_cast<uint32_t>(imm.imms) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void sxtb(std::byte *&code, bool sf, ireg rn, ireg rd) {
+    sbfm(code, sf, LogicalImm{.N = sf, .immr = 0, .imms = 7}, rn, rd);
+}
+
+void sxth(std::byte *&code, bool sf, ireg rn, ireg rd) {
+    sbfm(code, sf, LogicalImm{.N = sf, .immr = 0, .imms = 15}, rn, rd);
+}
+
+void sxtw(std::byte *&code, ireg rn, ireg rd) {
+    sbfm(code, true, LogicalImm{.N = true, .immr = 0, .imms = 31}, rn, rd);
+}
+
+void lsl(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
+    auto width = sf ? 64 : 32;
+    shift_imm %= width;
+    ubfm(code, sf,
+         LogicalImm{.N = sf, .immr = shift_imm + 1, .imms = shift_imm}, rn, rd);
+}
+
+void lsl(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+    put(code, 0b00011010110000000010000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void lsr(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
+    auto width = sf ? 64 : 32;
+    shift_imm %= width;
+    ubfm(code, sf,
+         LogicalImm{.N = sf, .immr = shift_imm, .imms = 0b011111u | sf << 5},
+         rn, rd);
+}
+
+void lsr(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+    put(code, 0b00011010110000000010010000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void asr(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
+    auto width = sf ? 64 : 32;
+    shift_imm %= width;
+    sbfm(code, sf,
+         LogicalImm{.N = sf, .immr = shift_imm, .imms = 0b011111u | sf << 5},
+         rn, rd);
+}
+
+void asr(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+    put(code, 0b00011010110000000010100000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void extr(std::byte *&code, bool sf, ireg rm, uint32_t imms, ireg rn, ireg rd) {
+    auto width = sf ? 64 : 32;
+    imms %= width;
+    put(code, 0b00010011100000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(sf) << 22) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(imms) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void ror(std::byte *&code, bool sf, uint32_t imms, ireg rs, ireg rd) {
+    extr(code, sf, rs, imms, rs, rd);
+}
+
+void ror(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+    put(code, 0b00011010110000000010110000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rd) << 0));
 }
@@ -86,6 +250,10 @@ void sub(std::byte *&code, bool sf, ireg rd, ireg rn, ireg rm,
     addsub(code, sf, true, false, shift, rm, shift_n, rn, rd);
 }
 
+void neg(std::byte *&code, bool sf, ireg rn, ireg rd) {
+    sub(code, sf, rd, ireg::xzr, rn);
+}
+
 void subs(std::byte *&code, bool sf, ireg rd, ireg rn, ireg rm,
           shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
     addsub(code, sf, true, true, shift, rm, shift_n, rn, rd);
@@ -98,6 +266,19 @@ void cmp(std::byte *&code, bool sf, ireg rn, ireg rm,
 
 void cmp(std::byte *&code, bool sf, ireg rn, uint16_t imm12) {
     subs(code, sf, ireg::xzr, rn, imm12);
+}
+
+void madd(std::byte *&code, bool sf, ireg rm, ireg ra, ireg rn, ireg rd) {
+    put(code, 0b00011011000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(ra) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void mul(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+    madd(code, sf, rm, ireg::xzr, rn, rd);
 }
 
 void b(std::byte *&code, int32_t _imm26) {
@@ -144,9 +325,30 @@ void fcmp(std::byte *&code, bool is_double, freg rn, freg rm) {
                   (static_cast<uint32_t>(rn) << 5));
 }
 
-void clz(std::byte *&code, bool sf, ireg rd, ireg rn) {
+void clz(std::byte *&code, bool sf, ireg rn, ireg rd) {
     put(code, 0b01011010110000000001000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void rbit(std::byte *&code, bool sf, ireg rn, ireg rd) {
+    put(code, 0b01011010110000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void cnt(std::byte *&code, bool Q, freg rn, freg rd) {
+    put(code, 0b00001110001000000101100000000000 |
+                  (static_cast<uint32_t>(Q) << 30) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void addv(std::byte *&code, bool Q, freg rn, freg rd) {
+    put(code, 0b00001110001100011011100000000000 |
+                  (static_cast<uint32_t>(Q) << 30) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rd) << 0));
 }
@@ -164,18 +366,38 @@ void cset(std::byte *&code, bool sf, cond c, ireg rd) {
     csinc(code, sf, ireg::xzr, invert(c), ireg::xzr, rd);
 }
 
-void mov(std::byte *&code, ireg src, ireg dst) {
-    orr(code, true, shifttype::lsl, src, 0, ireg::xzr, dst);
+void csel(std::byte *&code, bool sf, ireg rm, cond c, ireg rn, ireg rd) {
+    put(code, 0b00011010100000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(c) << 12) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
 }
 
-void mov(std::byte *&code, ireg src, freg dst) {
-    put(code, 0b10011110011001110000000000000000 |
+void csel(std::byte *&code, bool is_double, freg rm, cond c, freg rn, freg rd) {
+    put(code, 0b00011110001000000000110000000000 |
+                  (static_cast<uint32_t>(is_double) << 22) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(c) << 12) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void mov(std::byte *&code, bool sf, ireg src, ireg dst) {
+    orr(code, sf, shifttype::lsl, src, 0, ireg::xzr, dst);
+}
+
+void mov(std::byte *&code, bool sf, ireg src, freg dst) {
+    put(code, 0b00011110011001110000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(src) << 5) |
                   (static_cast<uint32_t>(dst) << 0));
 }
 
-void mov(std::byte *&code, freg src, ireg dst) {
-    put(code, 0b10011110011001100000000000000000 |
+void mov(std::byte *&code, bool sf, freg src, ireg dst) {
+    put(code, 0b00011110011001100000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(src) << 5) |
                   (static_cast<uint32_t>(dst) << 0));
 }
@@ -199,7 +421,7 @@ void mov(std::byte *&code, bool sf, bool notneg, bool keep, uint8_t hw,
 
 void mov(std::byte *&code, uint64_t imm, ireg dst) {
     if (imm == 0) {
-        mov(code, ireg::xzr, dst);
+        mov(code, true, ireg::xzr, dst);
         return;
     }
 
@@ -268,15 +490,6 @@ void put_immediate(std::byte *base, std::byte *to) {
     uint32_t result = high | (imm << low_len) | low;
     std::memcpy(base, &result, sizeof(result));
 }
-
-struct LogicalImm {
-    uint32_t prefix : 9;
-    uint32_t N : 1;
-    uint32_t immr : 6;
-    uint32_t imms : 6;
-    uint32_t postfix : 10;
-};
-static_assert(sizeof(LogicalImm) == sizeof(uint32_t));
 
 // based on
 // https://dougallj.wordpress.com/2021/10/30/bit-twiddling-optimising-aarch64-logical-immediate-encoding-and-decoding/
@@ -665,12 +878,12 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             auto reg = *ireg_alloc++;
             // save current value
             if (is_param) {
-                mov(code, reg, ireg::x3);
+                mov(code, true, reg, ireg::x3);
                 ldr_offset(code, offset, stackreg, reg);
                 str_offset(code, offset, stackreg, ireg::x3);
             } else {
                 str_offset(code, offset, stackreg, reg);
-                mov(code, ireg::xzr, reg);
+                mov(code, true, ireg::xzr, reg);
             }
 
             locals[i] = value::reg(reg);
@@ -684,7 +897,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                 str_offset(code, offset, stackreg, freg::d0);
             } else {
                 str_offset(code, offset, stackreg, reg);
-                mov(code, ireg::xzr, reg);
+                mov(code, true, ireg::xzr, reg);
             }
 
             locals[i] = value::reg(reg);
@@ -936,7 +1149,47 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     }
 }
 void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
-                     std::span<uint32_t> targets) {}
+                     std::span<uint32_t> targets) {
+    // auto t1_addr = code;
+    // Target::placehold(code, Target::put_temp1);
+    // auto t2_addr = code;
+    // Target::placehold(code, Target::put_temp2);
+    // auto call_addr = code;
+    // Target::placehold(code, Target::put_call);
+    // auto table_addr = code;
+
+    // Target::put_temp1(t1_addr, reinterpret_cast<uint64_t>(table_addr));
+
+    // auto base = control_stack.size() - 1;
+    // auto &default_target = control_stack[base - targets.back()].expected;
+
+    // auto info = runtime::BrInfo(targets.size() - 1,
+    // default_target.bytesize()); if (info.arity == 0) {
+    //     Target::put_call(call_addr, runtime::br_table_0);
+    // } else if (info.arity == 8) {
+    //     Target::put_call(call_addr, runtime::br_table_8);
+    // } else {
+    //     Target::put_call(call_addr, runtime::br_table_n);
+    // }
+    // Target::put_temp2(t2_addr, std::bit_cast<uint64_t>(info));
+
+    // for (auto depth : targets) {
+    //     auto &target = control_stack[base - depth].expected;
+
+    //     auto &flow = control_stack[base - depth];
+    //     auto offset = static_cast<int32_t>(flow.stack_offset - stack.sp());
+    //     if (std::holds_alternative<Loop>(flow.construct)) {
+    //         auto target = runtime::BrTableTarget(
+    //             std::get<Loop>(flow.construct).start - table_addr, offset);
+    //         std::memcpy(code, &target, sizeof(target));
+    //         code += sizeof(target);
+    //     } else {
+    //         flow.pending_br_tables.push_back(PendingBrTable(table_addr,
+    //         code)); code += sizeof(uint32_t); std::memcpy(code, &offset,
+    //         sizeof(offset)); code += sizeof(offset);
+    //     }
+    // }
+}
 void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
 }
@@ -963,8 +1216,40 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
         break;
     }
 }
-void Arm64::select(SHARED_PARAMS, valtype type) {}
-void Arm64::select_t(SHARED_PARAMS, valtype type) {}
+void Arm64::select(SHARED_PARAMS, valtype type) {
+    if (type == valtype::f32 || type == valtype::f64) {
+        auto [condition, v1, v2, reg] = allocate_registers<
+            std::tuple<iwant::flags, iwant::freg, iwant::freg>, iwant::freg>(
+            code);
+
+        if (!condition.is<value::location::flags>()) {
+            clobber_flags(code);
+            cmp(code, false, condition.as<ireg>(), ireg::xzr);
+            condition = value::flag(cond::ne);
+        }
+
+        csel(code, type == valtype::f64, v2.as<freg>(), condition.as<cond>(),
+             v1.as<freg>(), reg.as<freg>());
+
+        finalize(code, reg.as<freg>());
+    } else {
+        auto [condition, v1, v2, reg] = allocate_registers<
+            std::tuple<iwant::flags, iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+
+        if (!condition.is<value::location::flags>()) {
+            clobber_flags(code);
+            cmp(code, false, condition.as<ireg>(), ireg::xzr);
+            condition = value::flag(cond::ne);
+        }
+
+        csel(code, type == valtype::f64, v2.as<ireg>(), condition.as<cond>(),
+             v1.as<ireg>(), reg.as<ireg>());
+
+        finalize(code, reg.as<ireg>());
+    }
+}
+void Arm64::select_t(SHARED_PARAMS, valtype type) { select(code, stack, type); }
 void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     push(locals[local_idx]);
 }
@@ -1001,7 +1286,7 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             auto reg = std::make_optional(local.as<ireg>());
             auto v = adapt_value_into(code, values[0], reg);
             if (*reg != v)
-                mov(code, v, *reg);
+                mov(code, true, v, *reg);
         }
     } else {
         if (ty == valtype::f32 || ty == valtype::f64) {
@@ -1038,7 +1323,7 @@ void Arm64::f32const(SHARED_PARAMS, float cons) {
     auto temp = intregs.temporary(code);
 
     mov(code, std::bit_cast<uint32_t>(cons), temp);
-    mov(code, temp, res.as<freg>());
+    mov(code, false, temp, res.as<freg>());
 
     finalize(code, res.as<freg>());
 }
@@ -1047,7 +1332,7 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
     auto temp = intregs.temporary(code);
 
     mov(code, std::bit_cast<uint64_t>(cons), temp);
-    mov(code, temp, res.as<freg>());
+    mov(code, true, temp, res.as<freg>());
 
     finalize(code, res.as<freg>());
 }
@@ -1151,15 +1436,62 @@ void Arm64::i32clz(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
 
-    clz(code, false, res.as<ireg>(), p1.as<ireg>());
+    clz(code, false, p1.as<ireg>(), res.as<ireg>());
 
     finalize(code, res.as<ireg>());
 }
-void Arm64::i64clz(SHARED_PARAMS) {}
-void Arm64::i32ctz(SHARED_PARAMS) {}
-void Arm64::i64ctz(SHARED_PARAMS) {}
-void Arm64::i32popcnt(SHARED_PARAMS) {}
-void Arm64::i64popcnt(SHARED_PARAMS) {}
+void Arm64::i64clz(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    clz(code, true, p1.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32ctz(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    rbit(code, false, p1.as<ireg>(), res.as<ireg>());
+    clz(code, false, res.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64ctz(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    rbit(code, true, p1.as<ireg>(), res.as<ireg>());
+    clz(code, true, res.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32popcnt(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    auto s = floatregs.temporary(code);
+
+    mov(code, false, p1.as<ireg>(), s);
+    cnt(code, false, s, s);
+    addv(code, false, s, s);
+    mov(code, false, s, res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64popcnt(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    auto s = floatregs.temporary(code);
+
+    mov(code, true, p1.as<ireg>(), s);
+    cnt(code, false, s, s);
+    addv(code, false, s, s);
+    mov(code, true, s, res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
 void Arm64::i32add(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
@@ -1173,7 +1505,19 @@ void Arm64::i32add(SHARED_PARAMS) {
 
     finalize(code, res.as<ireg>());
 }
-void Arm64::i64add(SHARED_PARAMS) {}
+void Arm64::i64add(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        add(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<uint32_t>());
+    } else {
+        add(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
 void Arm64::i32sub(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
@@ -1187,9 +1531,33 @@ void Arm64::i32sub(SHARED_PARAMS) {
 
     finalize(code, res.as<ireg>());
 }
-void Arm64::i64sub(SHARED_PARAMS) {}
-void Arm64::i32mul(SHARED_PARAMS) {}
-void Arm64::i64mul(SHARED_PARAMS) {}
+void Arm64::i64sub(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        sub(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<uint32_t>());
+    } else {
+        sub(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32mul(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+    mul(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64mul(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+    mul(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
 void Arm64::i32div_s(SHARED_PARAMS) {}
 void Arm64::i64div_s(SHARED_PARAMS) {}
 void Arm64::i32div_u(SHARED_PARAMS) {}
@@ -1198,22 +1566,224 @@ void Arm64::i32rem_s(SHARED_PARAMS) {}
 void Arm64::i64rem_s(SHARED_PARAMS) {}
 void Arm64::i32rem_u(SHARED_PARAMS) {}
 void Arm64::i64rem_u(SHARED_PARAMS) {}
-void Arm64::i32and(SHARED_PARAMS) {}
-void Arm64::i64and(SHARED_PARAMS) {}
-void Arm64::i32or(SHARED_PARAMS) {}
-void Arm64::i64or(SHARED_PARAMS) {}
-void Arm64::i32xor(SHARED_PARAMS) {}
-void Arm64::i64xor(SHARED_PARAMS) {}
-void Arm64::i32shl(SHARED_PARAMS) {}
-void Arm64::i64shl(SHARED_PARAMS) {}
-void Arm64::i32shr_s(SHARED_PARAMS) {}
-void Arm64::i64shr_s(SHARED_PARAMS) {}
-void Arm64::i32shr_u(SHARED_PARAMS) {}
-void Arm64::i64shr_u(SHARED_PARAMS) {}
-void Arm64::i32rotl(SHARED_PARAMS) {}
-void Arm64::i64rotl(SHARED_PARAMS) {}
-void Arm64::i32rotr(SHARED_PARAMS) {}
-void Arm64::i64rotr(SHARED_PARAMS) {}
+void Arm64::i32and(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        and_(code, false, p2.as<LogicalImm>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        and_(code, false, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
+             res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64and(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        and_(code, true, p2.as<LogicalImm>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        and_(code, true, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
+             res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32or(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        orr(code, false, p2.as<LogicalImm>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        orr(code, false, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
+            res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64or(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        orr(code, true, p2.as<LogicalImm>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        orr(code, true, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
+            res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32xor(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        eor(code, false, p2.as<LogicalImm>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        eor(code, false, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
+            res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64xor(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        eor(code, true, p2.as<LogicalImm>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        eor(code, true, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
+            res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32shl(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        lsl(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        lsl(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64shl(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        lsl(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        lsl(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32shr_s(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        asr(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        asr(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64shr_s(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        asr(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        asr(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32shr_u(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        lsr(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        lsr(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64shr_u(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        lsr(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        lsr(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32rotl(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        ror(code, false, 32 - (p2.as<uint32_t>() & 31), p1.as<ireg>(),
+            res.as<ireg>());
+    } else {
+        neg(code, false, p2.as<ireg>(), res.as<ireg>());
+        ror(code, false, res.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64rotl(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        ror(code, true, 64 - (p2.as<uint32_t>() & 63), p1.as<ireg>(),
+            res.as<ireg>());
+    } else {
+        neg(code, true, p2.as<ireg>(), res.as<ireg>());
+        ror(code, true, res.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32rotr(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        ror(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        ror(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64rotr(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+                           iwant::ireg>(code);
+
+    if (p2.is<value::location::imm>()) {
+        ror(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else {
+        ror(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    }
+
+    finalize(code, res.as<ireg>());
+}
 void Arm64::f32abs(SHARED_PARAMS) {}
 void Arm64::f64abs(SHARED_PARAMS) {}
 void Arm64::f32neg(SHARED_PARAMS) {}
@@ -1242,9 +1812,24 @@ void Arm64::f32max(SHARED_PARAMS) {}
 void Arm64::f64max(SHARED_PARAMS) {}
 void Arm64::f32copysign(SHARED_PARAMS) {}
 void Arm64::f64copysign(SHARED_PARAMS) {}
+// noop
 void Arm64::i32wrap_i64(SHARED_PARAMS) {}
-void Arm64::i64extend_i32_s(SHARED_PARAMS) {}
-void Arm64::i64extend_i32_u(SHARED_PARAMS) {}
+void Arm64::i64extend_i32_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    sxtw(code, p1.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64extend_i32_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    mov(code, false, p1.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
 void Arm64::i32trunc_f32_s(SHARED_PARAMS) {}
 void Arm64::i64trunc_f32_s(SHARED_PARAMS) {}
 void Arm64::i32trunc_f32_u(SHARED_PARAMS) {}
@@ -1267,11 +1852,46 @@ void Arm64::i32reinterpret_f32(SHARED_PARAMS) {}
 void Arm64::f32reinterpret_i32(SHARED_PARAMS) {}
 void Arm64::i64reinterpret_f64(SHARED_PARAMS) {}
 void Arm64::f64reinterpret_i64(SHARED_PARAMS) {}
-void Arm64::i32extend8_s(SHARED_PARAMS) {}
-void Arm64::i32extend16_s(SHARED_PARAMS) {}
-void Arm64::i64extend8_s(SHARED_PARAMS) {}
-void Arm64::i64extend16_s(SHARED_PARAMS) {}
-void Arm64::i64extend32_s(SHARED_PARAMS) {}
+void Arm64::i32extend8_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    sxtb(code, false, p1.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32extend16_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    sxth(code, false, p1.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64extend8_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    sxtb(code, true, p1.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64extend16_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    sxth(code, true, p1.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64extend32_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    sxtw(code, p1.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
 void Arm64::ref_null(SHARED_PARAMS) {}
 void Arm64::ref_is_null(SHARED_PARAMS) {}
 void Arm64::ref_func(SHARED_PARAMS, uint64_t misc_offset) {}

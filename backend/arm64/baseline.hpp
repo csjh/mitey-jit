@@ -113,15 +113,15 @@ class Arm64 {
 
     class iwant {
         struct thresholdless {
-            static constexpr uint32_t threshold = 0;
+            static constexpr uint64_t threshold = 0;
         };
 
       public:
         struct none : thresholdless {};
         struct ireg : thresholdless {};
         struct freg : thresholdless {};
-        template <uint32_t t> struct literal {
-            static constexpr uint32_t threshold = t;
+        template <uint64_t t> struct literal {
+            static constexpr uint64_t threshold = t;
         };
         struct bitmask : thresholdless {};
         struct flags : thresholdless {};
