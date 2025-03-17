@@ -384,7 +384,7 @@ void Arm64::clobber_flags(std::byte *&code) {
     // step 1. claim a register, spilling if necessary
     auto reg = intregs.result(code);
     // step 2. spill into claimed register
-    cset(code, true, flag.val->as<cond>(), reg);
+    cset(code, false, flag.val->as<cond>(), reg);
     // step 3. set register metadata (for spilling)
     intregs.claim(reg, decltype(intregs)::metadata(code, flag.stack_offset));
     put(code, noop);
@@ -461,7 +461,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
             return v;
         } else {
             auto reg = intregs.temporary(code);
-            cset(code, true, v.as<cond>(), reg);
+            cset(code, false, v.as<cond>(), reg);
             return value::reg(reg);
         }
     }
@@ -494,7 +494,7 @@ ireg Arm64::adapt_value_into(std::byte *&code, value v,
         return reg;
     }
     case value::location::flags: {
-        cset(code, true, v.as<cond>(), reg);
+        cset(code, false, v.as<cond>(), reg);
         return reg;
     }
     }
