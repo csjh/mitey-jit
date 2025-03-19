@@ -131,7 +131,8 @@ class Arm64 {
     ireg adapt_value_into(std::byte *&code, value v, std::optional<ireg> &reg);
     freg adapt_value_into(std::byte *&code, value v, std::optional<freg> &reg);
 
-    bool move_results(std::byte *&code, WasmStack &stack, ControlFlow &flow);
+    bool move_results(std::byte *&code, WasmStack &stack, ControlFlow &flow,
+                      bool discard = true);
 
     // eventually i'll have to support multivalue here
     // honestly i don't think it'll even be that difficult (single digit lines)

@@ -790,6 +790,7 @@ ireg Arm64::adapt_value_into(std::byte *&code, value v,
         return reg;
     }
     case value::location::flags: {
+        flag = flags();
         cset(code, false, v.as<cond>(), reg);
         return reg;
     }
@@ -824,8 +825,8 @@ freg Arm64::adapt_value_into(std::byte *&code, value v,
     assert(false);
 }
 
-bool Arm64::move_results(std::byte *&code, WasmStack &stack,
-                         ControlFlow &flow) {
+bool Arm64::move_results(std::byte *&code, WasmStack &stack, ControlFlow &flow,
+                         bool discard) {
     auto arity = flow.expected.size();
     auto resultless_stack = stack.sp() - flow.expected.bytesize();
 
@@ -856,6 +857,9 @@ bool Arm64::move_results(std::byte *&code, WasmStack &stack,
 
         stack_iter++;
     }
+
+    if (!discard)
+        return true;
 
     auto discarded =
         (resultless_stack - flow.stack_offset) / sizeof(runtime::WasmValue);
@@ -997,8 +1001,6 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     // that are being returned
 
     auto &fn = std::get<Function>(flow.construct).fn;
-
-    clobber_flags(code);
 
     auto local_bytes = fn.locals.bytesize();
 
@@ -1208,7 +1210,7 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     code += sizeof(inst);
 
     std::byte *imm;
-    if (move_results(code, stack, flow)) {
+    if (move_results(code, stack, flow, false)) {
         imm = code;
         b(code, 0);
 
