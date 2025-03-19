@@ -13,7 +13,7 @@ extern std::vector<std::string> names;
 #endif
 
 #define _(name, ...)                                                           \
-    if (!stack.polymorphism())                                                 \
+    if (!stack.polymorphism() && !control_stack.back().polymorphized)          \
     jit.name(code, stack __VA_OPT__(, ) __VA_ARGS__)
 
 namespace mitey {
@@ -980,19 +980,24 @@ HANDLER(if_) {
     control_stack.emplace_back(ControlFlow(
         signature.results, {}, {}, {}, signature, stack.polymorphism(),
         stack.sp() - signature.params.bytesize(), If(nullptr)));
-    stack.unpolymorphize();
 
-    auto if_ptr = jit.if_(code, stack, signature);
-    control_stack.back().construct = If(if_ptr);
+    if (!stack.polymorphism()) {
+        auto if_ptr = jit.if_(code, stack, signature);
+        control_stack.back().construct = If(if_ptr);
+    }
+
+    stack.unpolymorphize();
     nextop();
 }
 HANDLER(else_) {
-    auto &[expected, pending_br, pending_br_if, pending_br_tables, sig, _,
-           stack_offset, construct] = control_stack.back();
+    auto &[expected, pending_br, pending_br_if, pending_br_tables, sig,
+           is_polymorphic, stack_offset, construct] = control_stack.back();
     ensure(std::holds_alternative<If>(construct), "else must close an if");
     ensure(stack == sig.results, "type mismatch");
 
-    jit.else_(code, stack, control_stack);
+    if (!is_polymorphic) {
+        jit.else_(code, stack, control_stack);
+    }
 
     stack.pop(sig.results);
     stack.push(sig.params);
@@ -1014,9 +1019,11 @@ HANDLER(end) {
         ensure(sig.params == sig.results, "type mismatch params vs. results");
     }
 
-    // special cased (not in _(end)) because
-    // stack can be polymorphic here but we always want it to run
-    jit.end(code, stack, control_stack.back());
+    if (!polymorphism) {
+        // special cased (not in _(end)) because
+        // stack can be polymorphic here but we always want it to run
+        jit.end(code, stack, control_stack.back());
+    }
 
     if (std::holds_alternative<Function>(construct)) {
         return code;

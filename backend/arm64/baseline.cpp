@@ -1140,10 +1140,13 @@ void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     //     push(value::stack(stack_size));
 }
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
-    if (stack.polymorphism()) {
-        for (auto ty : flow.sig.results) {
-            push(value::stack(stack_size));
-        }
+    if (!stack.polymorphism()) {
+        move_results(code, stack, flow);
+        values -= flow.sig.results.size();
+        stack_size -= flow.sig.results.bytesize();
+    }
+    for (auto ty : flow.sig.results) {
+        push(value::stack(stack_size));
     }
 
     if (std::holds_alternative<If>(flow.construct)) {
