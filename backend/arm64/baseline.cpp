@@ -1326,8 +1326,8 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
 }
 void Arm64::select(SHARED_PARAMS, valtype type) {
     if (type == valtype::f32 || type == valtype::f64) {
-        auto [condition, v1, v2, reg] = allocate_registers<
-            std::tuple<iwant::flags, iwant::freg, iwant::freg>, iwant::freg>(
+        auto [v1, v2, condition, reg] = allocate_registers<
+            std::tuple<iwant::freg, iwant::freg, iwant::flags>, iwant::freg>(
             code);
 
         if (!condition.is<value::location::flags>()) {
