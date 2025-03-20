@@ -1,3 +1,4 @@
+#include "../backend/arm64/baseline.hpp"
 #include "../backend/arm64/minimal.hpp"
 #include "../backend/minimal/composer.hpp"
 #include "../instance.hpp"
@@ -361,8 +362,7 @@ from_file(const std::string &filename, const mitey::runtime::Imports &imports) {
     wasm_file.close();
 
     auto module =
-        mitey::Module::compile<mitey::Mac, mitey::Composer<mitey::Arm64>>(
-            bytes);
+        mitey::Module::compile<mitey::Mac, mitey::arm64::Arm64>(bytes);
     auto instance = module->instantiate(imports);
 
     // force all created instances to stick around
