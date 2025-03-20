@@ -150,6 +150,9 @@ class Arm64 {
 
     void exit_function(SHARED_PARAMS, ControlFlow &flow);
 
+    template <auto mtype, extendtype etype>
+    void abstract_memop(SHARED_PARAMS, uint64_t offset);
+
   public:
     // todo: figure out what values for these
     static constexpr size_t function_overhead = 100 * sizeof(uint32_t);

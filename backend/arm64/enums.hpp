@@ -77,5 +77,19 @@ enum class ftype : uint8_t {
     half = 0b11,    // Half-precision
 };
 
+enum class memtype : uint8_t {
+    b = 0b00, // Byte
+    h = 0b01, // Halfword
+    w = 0b10, // Word
+    x = 0b11, // Doubleword
+};
+
+enum class extendtype : uint8_t {
+    str = 0b00, // Store
+    uns = 0b01, // Unsigned
+    dse = 0b10, // Extend to doubleword
+    wse = 0b11, // Extend to word
+};
+
 } // namespace arm64
 } // namespace mitey

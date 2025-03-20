@@ -517,6 +517,26 @@ void fdiv(std::byte *&code, ftype ft, freg rm, freg rn, freg rd) {
                   (static_cast<uint32_t>(rd) << 0));
 }
 
+void load(std::byte *&code, memtype ty, extendtype ext, ireg rm, ireg rn,
+          ireg rt) {
+    put(code, 0b00111000001000000110100000000000 |
+                  (static_cast<uint32_t>(ty) << 30) |
+                  (static_cast<uint32_t>(ext) << 22) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rt) << 0));
+}
+
+void load(std::byte *&code, ftype ty, extendtype ext, ireg rm, ireg rn,
+          freg rt) {
+    put(code, 0b00111100001000000110100000000000 |
+                  (static_cast<uint32_t>(ty) << 30) |
+                  (static_cast<uint32_t>(ext) << 22) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rt) << 0));
+}
+
 void str_offset(std::byte *&code, uint32_t offset, ireg rn, ireg rt) {
     offset /= 8;
     put(code, 0b11111001000000000000000000000000 |
@@ -1424,29 +1444,104 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
 
     finalize(code, res.as<freg>());
 }
-void Arm64::i32load(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64load(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::f32load(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::f64load(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i32load8_s(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i32load8_u(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i32load16_s(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i32load16_u(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64load8_s(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64load8_u(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64load16_s(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64load16_u(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64load32_s(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64load32_u(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i32store(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64store(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::f32store(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::f64store(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i32store8(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i32store16(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64store8(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64store16(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
-void Arm64::i64store32(SHARED_PARAMS, uint64_t offset, uint64_t align) {}
+
+template <auto mtype, extendtype etype>
+void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
+    using MemTypeType = decltype(mtype);
+
+    constexpr bool is_store = etype == extendtype::str;
+    constexpr bool is_float = std::is_same_v<MemTypeType, ftype>;
+
+    using IWantTy = std::conditional_t<is_float, iwant::freg, iwant::ireg>;
+    using RegTy = std::conditional_t<is_float, freg, ireg>;
+
+    using Result = std::conditional_t<is_store, iwant::none, IWantTy>;
+    using Params = decltype(std::tuple_cat(
+        std::tuple<iwant::ireg>{},
+        std::conditional_t<is_store, std::tuple<IWantTy>, std::tuple<>>{}));
+
+    auto [addr, res] = allocate_registers<Params, Result>(code);
+
+    /* todo: handle offsets larger than 1 << 12 */
+    if (offset)
+        add(code, true, addr.template as<ireg>(), addr.template as<ireg>(),
+            offset);
+    load(code, mtype, etype, memreg, addr.template as<ireg>(),
+         res.template as<RegTy>());
+
+    if constexpr (!is_store)
+        finalize(code, res.template as<RegTy>());
+}
+
+void Arm64::i32load(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::w, extendtype::uns>(code, stack, offset);
+}
+void Arm64::i64load(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::x, extendtype::uns>(code, stack, offset);
+}
+void Arm64::f32load(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<ftype::single, extendtype::uns>(code, stack, offset);
+}
+void Arm64::f64load(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<ftype::double_, extendtype::uns>(code, stack, offset);
+}
+void Arm64::i32load8_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::b, extendtype::wse>(code, stack, offset);
+}
+void Arm64::i32load8_u(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::b, extendtype::uns>(code, stack, offset);
+}
+void Arm64::i32load16_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::h, extendtype::wse>(code, stack, offset);
+}
+void Arm64::i32load16_u(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::h, extendtype::uns>(code, stack, offset);
+}
+void Arm64::i64load8_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::b, extendtype::dse>(code, stack, offset);
+}
+void Arm64::i64load8_u(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::b, extendtype::uns>(code, stack, offset);
+}
+void Arm64::i64load16_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::h, extendtype::dse>(code, stack, offset);
+}
+void Arm64::i64load16_u(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::h, extendtype::uns>(code, stack, offset);
+}
+void Arm64::i64load32_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::w, extendtype::dse>(code, stack, offset);
+}
+void Arm64::i64load32_u(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::w, extendtype::uns>(code, stack, offset);
+}
+void Arm64::i32store(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::w, extendtype::str>(code, stack, offset);
+}
+void Arm64::i64store(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::x, extendtype::str>(code, stack, offset);
+}
+void Arm64::f32store(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<ftype::single, extendtype::str>(code, stack, offset);
+}
+void Arm64::f64store(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<ftype::double_, extendtype::str>(code, stack, offset);
+}
+void Arm64::i32store8(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::b, extendtype::str>(code, stack, offset);
+}
+void Arm64::i32store16(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::h, extendtype::str>(code, stack, offset);
+}
+void Arm64::i64store8(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::b, extendtype::str>(code, stack, offset);
+}
+void Arm64::i64store16(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::h, extendtype::str>(code, stack, offset);
+}
+void Arm64::i64store32(SHARED_PARAMS, uint64_t offset, uint64_t) {
+    abstract_memop<memtype::w, extendtype::str>(code, stack, offset);
+}
 void Arm64::i32eqz(SHARED_PARAMS) {
     clobber_flags(code);
 
