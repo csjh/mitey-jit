@@ -1128,34 +1128,6 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     // note: this has to be fixed to not potentially overwrite locals
     // that are being returned
 
-    auto &fn = std::get<Function>(flow.construct).fn;
-
-    auto local_bytes = fn.locals.bytesize();
-
-    if (!stack.polymorphism()) {
-        values -= fn.type.results.size();
-        for (auto i = 0; i < fn.type.results.size(); i++) {
-            auto result = fn.type.results[i];
-            auto offset = local_bytes + i * sizeof(runtime::WasmValue);
-
-            // if the value is already there, skip it
-            if (values[i].is<value::location::stack>() &&
-                values[i].as<uint32_t>() == offset)
-                continue;
-
-            if (result == valtype::i32 || result == valtype::i64 ||
-                result == valtype::funcref || result == valtype::externref) {
-                str_offset(
-                    code, offset, stackreg,
-                    adapt_value<iwant::ireg>(code, values[i]).as<ireg>());
-            } else if (result == valtype::f32 || result == valtype::f64) {
-                str_offset(
-                    code, offset, stackreg,
-                    adapt_value<iwant::freg>(code, values[i]).as<freg>());
-            }
-        }
-    }
-
     // i want stuff to jump here, because this is where callee saved registers
     // are restored, and results are copied
     for (auto target : flow.pending_br) {
@@ -1171,6 +1143,7 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
         std::memcpy(target, &idiff, sizeof(idiff));
     }
 
+    auto &fn = std::get<Function>(flow.construct).fn;
     // restore saved values
     for (auto i = 0; i < fn.locals.size(); i++) {
         if (!locals[i].is<value::location::reg>())
@@ -1187,16 +1160,18 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
         }
     }
 
-    // return values should be in [local_bytes, ...), so copy them backwards
-    // into the local area
-    // clobber at will (in this case x3)
-    for (auto i = 0; i < fn.type.results.size(); i++) {
-        auto result = fn.type.results[i];
-        auto final_offset = i * sizeof(runtime::WasmValue);
-        auto current_offset = local_bytes + final_offset;
+    if (auto local_bytes = fn.locals.bytesize(); local_bytes != 0) {
+        // return values should be in [local_bytes, ...), so copy them backwards
+        // into the local area
+        // clobber at will (in this case x3)
+        for (auto i = 0; i < fn.type.results.size(); i++) {
+            auto result = fn.type.results[i];
+            auto final_offset = i * sizeof(runtime::WasmValue);
+            auto current_offset = local_bytes + final_offset;
 
-        ldr_offset(code, current_offset, stackreg, ireg::x3);
-        str_offset(code, final_offset, stackreg, ireg::x3);
+            ldr_offset(code, current_offset, stackreg, ireg::x3);
+            str_offset(code, final_offset, stackreg, ireg::x3);
+        }
     }
 
     // ldp     x29, x30, [sp], #0x10
@@ -1270,6 +1245,9 @@ void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     //     push(value::stack(stack_size));
 }
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
+    intregs.begin();
+    floatregs.begin();
+
     if (!stack.polymorphism()) {
         move_results(code, stack, flow.sig.results, flow.stack_offset);
         values -= flow.sig.results.size();
