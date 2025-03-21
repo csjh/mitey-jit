@@ -323,6 +323,12 @@ void bcond(std::byte *&code, int32_t _imm19, cond c) {
                   (static_cast<uint32_t>(c) << 0));
 }
 
+void br(std::byte *&code, ireg rn) {
+    put(code,
+        0b11010110000111110000000000000000 | (static_cast<uint32_t>(rn) << 5));
+}
+
+
 void cbnz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
     uint32_t imm19 = _imm19 /= sizeof(uint32_t);
     imm19 &= 0x7ffff;
@@ -459,6 +465,17 @@ void mov(std::byte *&code, uint64_t imm, ireg dst) {
         mov(code, true, true, keep, i, literal, dst);
         keep = true;
     }
+}
+
+void adr(std::byte *&code, int32_t imm, ireg rd) {
+    // assume imm fits
+    auto immlo = imm & 0b11;
+    auto immhi = imm >> 2;
+
+    put(code, 0b00010000000000000000000000000000 |
+                  (static_cast<uint32_t>(immlo) << 29) |
+                  (static_cast<uint32_t>(immhi) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
 }
 
 void fabs(std::byte *&code, ftype ft, freg rn, freg rd) {
@@ -614,6 +631,14 @@ void load(std::byte *&code, ftype ty, extendtype ext, ireg rm, ireg rn,
                   (static_cast<uint32_t>(ty) << 30) |
                   (static_cast<uint32_t>(ext) << 22) |
                   (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rt) << 0));
+}
+
+void ldpsw(std::byte *&code, uint8_t imm, ireg rt2, ireg rn, ireg rt) {
+    put(code, 0b01101001010000000000000000000000 |
+                  (static_cast<uint32_t>(imm) << 15) |
+                  (static_cast<uint32_t>(rt2) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
 }
@@ -963,6 +988,8 @@ bool Arm64::move_results(std::byte *&code, WasmStack &stack,
     if (!discard)
         return true;
 
+    // this looks wrong
+    // should probably be control_stack.back().stack_offset
     auto discarded = (resultless_stack - copy_to) / sizeof(runtime::WasmValue);
 
     for (auto i = 0; i < discarded; i++) {
@@ -1339,45 +1366,96 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 }
 void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                      std::span<uint32_t> targets) {
-    // auto t1_addr = code;
-    // Target::placehold(code, Target::put_temp1);
-    // auto t2_addr = code;
-    // Target::placehold(code, Target::put_temp2);
-    // auto call_addr = code;
-    // Target::placehold(code, Target::put_call);
-    // auto table_addr = code;
+    clobber_flags(code);
 
-    // Target::put_temp1(t1_addr, reinterpret_cast<uint64_t>(table_addr));
+    auto base = control_stack.size() - 1;
+    auto &wanted = control_stack[base - targets.back()].expected;
 
-    // auto base = control_stack.size() - 1;
-    // auto &default_target = control_stack[base - targets.back()].expected;
+    auto [input] = allocate_registers<std::tuple<iwant::ireg>>(code);
+    auto depth = intregs.temporary(code);
+    auto addr = intregs.temporary(code);
 
-    // auto info = runtime::BrInfo(targets.size() - 1,
-    // default_target.bytesize()); if (info.arity == 0) {
-    //     Target::put_call(call_addr, runtime::br_table_0);
-    // } else if (info.arity == 8) {
-    //     Target::put_call(call_addr, runtime::br_table_8);
-    // } else {
-    //     Target::put_call(call_addr, runtime::br_table_n);
-    // }
-    // Target::put_temp2(t2_addr, std::bit_cast<uint64_t>(info));
+    // put max depth in $depth
+    mov(code, targets.size(), depth);
+    // $depth = min($depth, $input)
+    cmp(code, false, input.as<ireg>(), depth);
+    csel(code, false, depth, cond::cc, input.as<ireg>(), depth);
+    // put table address in $addr
+    auto adr_location = code;
+    code += sizeof(inst);
+    // $addr = $addr + $depth * sizeof(BrTableTarget)
+    add(code, true, addr, depth, addr, shifttype::lsl, 3);
+    // reuse $addr & $depth into $result_offset & $jump_offset
+    auto result_offset = addr, jump_offset = depth;
+    // [$result_offset, $jump_offset] = ldpsw($addr)
+    ldpsw(code, 0, result_offset, addr, jump_offset);
 
-    // for (auto depth : targets) {
-    //     auto &target = control_stack[base - depth].expected;
+    if (wanted.size() > 0) {
+        auto arity = wanted.size();
+        auto resultless_stack = stack.sp() - wanted.bytesize();
 
-    //     auto &flow = control_stack[base - depth];
-    //     auto offset = static_cast<int32_t>(flow.stack_offset - stack.sp());
-    //     if (std::holds_alternative<Loop>(flow.construct)) {
-    //         auto target = runtime::BrTableTarget(
-    //             std::get<Loop>(flow.construct).start - table_addr, offset);
-    //         std::memcpy(code, &target, sizeof(target));
-    //         code += sizeof(target);
-    //     } else {
-    //         flow.pending_br_tables.push_back(PendingBrTable(table_addr,
-    //         code)); code += sizeof(uint32_t); std::memcpy(code, &offset,
-    //         sizeof(offset)); code += sizeof(offset);
-    //     }
-    // }
+        // stack.sp() doesn't include locals
+        auto local_bytes = stack_size - stack.sp();
+        auto stack_iter = stack.rbegin();
+
+        std::optional<ireg> intreg = std::nullopt;
+        std::optional<freg> floatreg = std::nullopt;
+
+        auto expected = values - arity;
+        for (int i = 0; i < arity; i++) {
+            auto v = wanted[i];
+            if (v == valtype::f32 || v == valtype::f64) {
+                auto reg = adapt_value_into(code, expected[i], floatreg);
+                load(code, ftype::double_, extendtype::str, result_offset,
+                     stackreg, reg);
+                add(code, true, result_offset, result_offset,
+                    sizeof(runtime::WasmValue));
+            } else {
+                auto reg = adapt_value_into(code, expected[i], intreg);
+                load(code, memtype::x, extendtype::str, result_offset, stackreg,
+                     reg);
+                add(code, true, result_offset, result_offset,
+                    sizeof(runtime::WasmValue));
+            }
+
+            stack_iter++;
+        }
+
+        auto discarded =
+            (resultless_stack - control_stack.back().stack_offset) /
+            sizeof(runtime::WasmValue);
+
+        for (auto i = 0; i < discarded; i++) {
+            drop(code, stack, *stack_iter);
+            stack_iter++;
+        }
+    }
+
+    auto relative_point = code;
+    // $jump = PC + $jump_offset
+    auto jump = result_offset;
+    adr(code, 0, jump);
+    add(code, true, jump, jump, jump_offset);
+    arm64::br(code, jump);
+
+    adr(adr_location, code - adr_location, addr);
+
+    for (auto depth : targets) {
+        auto &flow = control_stack[base - depth];
+        auto offset = static_cast<int32_t>(flow.stack_offset - stack.sp());
+        if (std::holds_alternative<Loop>(flow.construct)) {
+            auto target = runtime::BrTableTarget(
+                std::get<Loop>(flow.construct).start - relative_point, offset);
+            std::memcpy(code, &target, sizeof(target));
+            code += sizeof(target);
+        } else {
+            flow.pending_br_tables.push_back(
+                PendingBrTable(relative_point, code));
+            code += sizeof(uint32_t);
+            std::memcpy(code, &offset, sizeof(offset));
+            code += sizeof(offset);
+        }
+    }
 }
 void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
