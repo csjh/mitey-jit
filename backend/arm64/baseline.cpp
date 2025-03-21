@@ -328,6 +328,10 @@ void br(std::byte *&code, ireg rn) {
         0b11010110000111110000000000000000 | (static_cast<uint32_t>(rn) << 5));
 }
 
+void blr(std::byte *&code, ireg rn) {
+    put(code,
+        0b11010110001111110000000000000000 | (static_cast<uint32_t>(rn) << 5));
+}
 
 void cbnz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
     uint32_t imm19 = _imm19 /= sizeof(uint32_t);
@@ -1438,7 +1442,49 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
 }
-void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {}
+void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
+    clobber_flags(code);
+
+    values -= fn.type.params.size();
+    stack_size -= fn.type.params.bytesize();
+
+    // todo: make this work with stack_size larger than 1 << 12
+    add(code, true, stackreg, stackreg, stack_size);
+
+    std::optional<ireg> intreg = std::nullopt;
+    std::optional<freg> floatreg = std::nullopt;
+
+    uint32_t stack_offset = 0;
+    for (int i = 0; i < fn.type.params.size(); i++) {
+        auto v = fn.type.params[i];
+        if (v == valtype::f32 || v == valtype::f64) {
+            auto reg = adapt_value_into(code, values[i], floatreg);
+            str_offset(code, stack_offset, stackreg, reg);
+            stack_offset += sizeof(runtime::WasmValue);
+        } else {
+            auto reg = adapt_value_into(code, values[i], intreg);
+            str_offset(code, stack_offset, stackreg, reg);
+            stack_offset += sizeof(runtime::WasmValue);
+        }
+    }
+
+    clobber_registers(code);
+
+    // load the FunctionInfo pointer
+    ldr_offset(code, func_offset * sizeof(void *), miscreg, ireg::x3);
+    ldr_offset(code, offsetof(runtime::FunctionInfo, signature), ireg::x3,
+               ireg::x3);
+    blr(code, ireg::x3);
+
+    sub(code, true, stackreg, stackreg, stack_size);
+
+    // values -= fn.type.params.size();
+    // stack_size -= sizeof(runtime::WasmValue) * (fn.type.params.size() + 1);
+
+    for (int i = 0; i < fn.type.results.size(); i++) {
+        push(value::stack(stack_size));
+    }
+}
 void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
                           WasmSignature &type) {}
 void Arm64::drop(SHARED_PARAMS, valtype type) {
