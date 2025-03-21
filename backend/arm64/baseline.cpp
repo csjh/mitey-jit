@@ -277,8 +277,33 @@ void madd(std::byte *&code, bool sf, ireg rm, ireg ra, ireg rn, ireg rd) {
                   (static_cast<uint32_t>(rd) << 0));
 }
 
+void msub(std::byte *&code, bool sf, ireg rm, ireg ra, ireg rn, ireg rd) {
+    put(code, 0b00011011000000001000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(ra) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
 void mul(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
     madd(code, sf, rm, ireg::xzr, rn, rd);
+}
+
+void sdiv(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+    put(code, 0b00011010110000000000110000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void udiv(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+    put(code, 0b00011010110000000000100000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
 }
 
 void b(std::byte *&code, int32_t _imm26) {
@@ -511,6 +536,62 @@ void fmul(std::byte *&code, ftype ft, freg rm, freg rn, freg rd) {
 
 void fdiv(std::byte *&code, ftype ft, freg rm, freg rn, freg rd) {
     put(code, 0b00011110001000000001100000000000 |
+                  (static_cast<uint32_t>(ft) << 22) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void fcvt(std::byte *&code, ftype from, ftype to, freg rn, freg rd) {
+    put(code, 0b00011110001000100100000000000000 |
+                  (static_cast<uint32_t>(from) << 22) |
+                  (static_cast<uint32_t>(to) << 15) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void fcvtzs(std::byte *&code, bool sf, ftype ft, freg rn, ireg rd) {
+    put(code, 0b00011110001110000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(ft) << 22) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void fcvtzu(std::byte *&code, bool sf, ftype ft, freg rn, ireg rd) {
+    put(code, 0b00011110001110010000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(ft) << 22) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void scvtf(std::byte *&code, bool sf, ftype ft, ireg rn, freg rd) {
+    put(code, 0b00011110001000100000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(ft) << 22) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void ucvtf(std::byte *&code, bool sf, ftype ft, ireg rn, freg rd) {
+    put(code, 0b00011110001000110000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(ft) << 22) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void fmin(std::byte *&code, ftype ft, freg rm, freg rn, freg rd) {
+    put(code, 0b00011110001000000101100000000000 |
+                  (static_cast<uint32_t>(ft) << 22) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rd) << 0));
+}
+
+void fmax(std::byte *&code, ftype ft, freg rm, freg rn, freg rd) {
+    put(code, 0b00011110001000000100100000000000 |
                   (static_cast<uint32_t>(ft) << 22) |
                   (static_cast<uint32_t>(rm) << 16) |
                   (static_cast<uint32_t>(rn) << 5) |
@@ -1410,9 +1491,48 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     localset(code, stack, fn, local_idx);
     localget(code, stack, fn, local_idx);
 }
-void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
-void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
+void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
+    // placeholder
+    push(value::imm(0));
 }
+void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
+    // placeholder
+    drop(code, stack, valtype::externref);
+}
+void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
+    if (type == valtype::f32 || type == valtype::f64) {
+        auto [res] = allocate_registers<std::tuple<>, iwant::freg>(code);
+        auto addr = intregs.temporary(code);
+        ldr_offset(code, misc_offset * sizeof(void *), miscreg, addr);
+        ldr_offset(code, 0, addr, res.as<freg>());
+        finalize(code, res.as<freg>());
+    } else {
+        auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+        ldr_offset(code, misc_offset * sizeof(void *), miscreg, res.as<ireg>());
+        ldr_offset(code, 0, res.as<ireg>(), res.as<ireg>());
+        finalize(code, res.as<ireg>());
+    }
+}
+void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
+    if (type == valtype::f32 || type == valtype::f64) {
+        auto [val] = allocate_registers<std::tuple<iwant::freg>>(code);
+        auto addr = intregs.temporary(code);
+        ldr_offset(code, misc_offset * sizeof(void *), miscreg, addr);
+        str_offset(code, 0, addr, val.as<freg>());
+    } else {
+        auto [val] = allocate_registers<std::tuple<iwant::ireg>>(code);
+        auto addr = intregs.temporary(code);
+        ldr_offset(code, misc_offset * sizeof(void *), miscreg, addr);
+        str_offset(code, 0, addr, val.as<ireg>());
+    }
+}
+void Arm64::memorysize(SHARED_PARAMS) {
+    // placeholder
+    push(value::imm(0));
+}
+void Arm64::memorygrow(SHARED_PARAMS) {
+    // placeholder
+    drop(code, stack, valtype::i32);
 }
 void Arm64::i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
 void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
@@ -1739,14 +1859,70 @@ void Arm64::i64mul(SHARED_PARAMS) {
     mul(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
-void Arm64::i32div_s(SHARED_PARAMS) {}
-void Arm64::i64div_s(SHARED_PARAMS) {}
-void Arm64::i32div_u(SHARED_PARAMS) {}
-void Arm64::i64div_u(SHARED_PARAMS) {}
-void Arm64::i32rem_s(SHARED_PARAMS) {}
-void Arm64::i64rem_s(SHARED_PARAMS) {}
-void Arm64::i32rem_u(SHARED_PARAMS) {}
-void Arm64::i64rem_u(SHARED_PARAMS) {}
+void Arm64::i32div_s(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+    sdiv(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64div_s(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+    sdiv(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32div_u(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+    udiv(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64div_u(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+    udiv(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32rem_s(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+    sdiv(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    msub(code, false, p1.as<ireg>(), p2.as<ireg>(), res.as<ireg>(),
+         res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64rem_s(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+    sdiv(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    msub(code, true, p1.as<ireg>(), p2.as<ireg>(), res.as<ireg>(),
+         res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32rem_u(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+    udiv(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    msub(code, false, p1.as<ireg>(), p2.as<ireg>(), res.as<ireg>(),
+         res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64rem_u(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
+            code);
+    udiv(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+    msub(code, true, p1.as<ireg>(), p2.as<ireg>(), res.as<ireg>(),
+         res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
 void Arm64::i32and(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
@@ -2105,12 +2281,48 @@ void Arm64::f64div(SHARED_PARAMS) {
     fdiv(code, ftype::double_, p1.as<freg>(), p2.as<freg>(), res.as<freg>());
     finalize(code, res.as<freg>());
 }
-void Arm64::f32min(SHARED_PARAMS) {}
-void Arm64::f64min(SHARED_PARAMS) {}
-void Arm64::f32max(SHARED_PARAMS) {}
-void Arm64::f64max(SHARED_PARAMS) {}
-void Arm64::f32copysign(SHARED_PARAMS) {}
-void Arm64::f64copysign(SHARED_PARAMS) {}
+void Arm64::f32min(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
+            code);
+    fmin(code, ftype::single, p1.as<freg>(), p2.as<freg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f64min(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
+            code);
+    fmin(code, ftype::double_, p1.as<freg>(), p2.as<freg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f32max(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
+            code);
+    fmax(code, ftype::single, p1.as<freg>(), p2.as<freg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f64max(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
+            code);
+    fmax(code, ftype::double_, p1.as<freg>(), p2.as<freg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f32copysign(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
+            code);
+    // todo: implement
+    finalize(code, res.as<freg>());
+}
+void Arm64::f64copysign(SHARED_PARAMS) {
+    auto [p1, p2, res] =
+        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
+            code);
+    // todo: implement
+    finalize(code, res.as<freg>());
+}
 // noop
 void Arm64::i32wrap_i64(SHARED_PARAMS) {}
 void Arm64::i64extend_i32_s(SHARED_PARAMS) {
@@ -2129,28 +2341,138 @@ void Arm64::i64extend_i32_u(SHARED_PARAMS) {
 
     finalize(code, res.as<ireg>());
 }
-void Arm64::i32trunc_f32_s(SHARED_PARAMS) {}
-void Arm64::i64trunc_f32_s(SHARED_PARAMS) {}
-void Arm64::i32trunc_f32_u(SHARED_PARAMS) {}
-void Arm64::i64trunc_f32_u(SHARED_PARAMS) {}
-void Arm64::i32trunc_f64_s(SHARED_PARAMS) {}
-void Arm64::i64trunc_f64_s(SHARED_PARAMS) {}
-void Arm64::i32trunc_f64_u(SHARED_PARAMS) {}
-void Arm64::i64trunc_f64_u(SHARED_PARAMS) {}
-void Arm64::f32convert_i32_s(SHARED_PARAMS) {}
-void Arm64::f64convert_i32_s(SHARED_PARAMS) {}
-void Arm64::f32convert_i32_u(SHARED_PARAMS) {}
-void Arm64::f64convert_i32_u(SHARED_PARAMS) {}
-void Arm64::f32convert_i64_s(SHARED_PARAMS) {}
-void Arm64::f64convert_i64_s(SHARED_PARAMS) {}
-void Arm64::f32convert_i64_u(SHARED_PARAMS) {}
-void Arm64::f64convert_i64_u(SHARED_PARAMS) {}
-void Arm64::f32demote_f64(SHARED_PARAMS) {}
-void Arm64::f64promote_f32(SHARED_PARAMS) {}
-void Arm64::i32reinterpret_f32(SHARED_PARAMS) {}
-void Arm64::f32reinterpret_i32(SHARED_PARAMS) {}
-void Arm64::i64reinterpret_f64(SHARED_PARAMS) {}
-void Arm64::f64reinterpret_i64(SHARED_PARAMS) {}
+void Arm64::i32trunc_f32_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzs(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64trunc_f32_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzs(code, true, ftype::single, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32trunc_f32_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzu(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64trunc_f32_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzu(code, true, ftype::single, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32trunc_f64_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzs(code, false, ftype::double_, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64trunc_f64_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzs(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32trunc_f64_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzu(code, false, ftype::double_, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64trunc_f64_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzu(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::f32convert_i32_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
+    scvtf(code, false, ftype::single, p1.as<ireg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f64convert_i32_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
+    scvtf(code, false, ftype::double_, p1.as<ireg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f32convert_i32_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
+    ucvtf(code, false, ftype::single, p1.as<ireg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f64convert_i32_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
+    ucvtf(code, false, ftype::double_, p1.as<ireg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f32convert_i64_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
+    scvtf(code, true, ftype::single, p1.as<ireg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f64convert_i64_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
+    scvtf(code, true, ftype::double_, p1.as<ireg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f32convert_i64_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
+    ucvtf(code, true, ftype::single, p1.as<ireg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f64convert_i64_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
+    ucvtf(code, true, ftype::double_, p1.as<ireg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f32demote_f64(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
+    fcvt(code, ftype::double_, ftype::single, p1.as<freg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::f64promote_f32(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
+    fcvt(code, ftype::single, ftype::double_, p1.as<freg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::i32reinterpret_f32(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    mov(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::f32reinterpret_i32(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
+    mov(code, false, ftype::single, p1.as<ireg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
+void Arm64::i64reinterpret_f64(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    mov(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::f64reinterpret_i64(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
+    mov(code, true, ftype::double_, p1.as<ireg>(), res.as<freg>());
+    finalize(code, res.as<freg>());
+}
 void Arm64::i32extend8_s(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
@@ -2191,30 +2513,120 @@ void Arm64::i64extend32_s(SHARED_PARAMS) {
 
     finalize(code, res.as<ireg>());
 }
-void Arm64::ref_null(SHARED_PARAMS) {}
-void Arm64::ref_is_null(SHARED_PARAMS) {}
-void Arm64::ref_func(SHARED_PARAMS, uint64_t misc_offset) {}
-void Arm64::ref_eq(SHARED_PARAMS) {}
-void Arm64::i32_trunc_sat_f32_s(SHARED_PARAMS) {}
-void Arm64::i32_trunc_sat_f32_u(SHARED_PARAMS) {}
-void Arm64::i32_trunc_sat_f64_s(SHARED_PARAMS) {}
-void Arm64::i32_trunc_sat_f64_u(SHARED_PARAMS) {}
-void Arm64::i64_trunc_sat_f32_s(SHARED_PARAMS) {}
-void Arm64::i64_trunc_sat_f32_u(SHARED_PARAMS) {}
-void Arm64::i64_trunc_sat_f64_s(SHARED_PARAMS) {}
-void Arm64::i64_trunc_sat_f64_u(SHARED_PARAMS) {}
-void Arm64::memory_init(SHARED_PARAMS, uint64_t misc_offset) {}
-void Arm64::data_drop(SHARED_PARAMS, uint64_t misc_offset) {}
-void Arm64::memory_copy(SHARED_PARAMS) {}
-void Arm64::memory_fill(SHARED_PARAMS) {}
+void Arm64::ref_null(SHARED_PARAMS) {
+    auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+    mov(code, 0, res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::ref_is_null(SHARED_PARAMS) { i64eqz(code, stack); }
+void Arm64::ref_func(SHARED_PARAMS, uint64_t misc_offset) {
+    auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+    ldr_offset(code, misc_offset * sizeof(void *), res.as<ireg>(), miscreg);
+    finalize(code, res.as<ireg>());
+}
+void Arm64::ref_eq(SHARED_PARAMS) { i64eq(code, stack); }
+void Arm64::i32_trunc_sat_f32_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzs(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32_trunc_sat_f32_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzu(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32_trunc_sat_f64_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzs(code, false, ftype::double_, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i32_trunc_sat_f64_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzu(code, false, ftype::double_, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64_trunc_sat_f32_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzs(code, true, ftype::single, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64_trunc_sat_f32_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzu(code, true, ftype::single, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64_trunc_sat_f64_s(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzs(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::i64_trunc_sat_f64_u(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+    fcvtzu(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
+    finalize(code, res.as<ireg>());
+}
+void Arm64::memory_init(SHARED_PARAMS, uint64_t misc_offset) {
+    // placeholder
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+}
+void Arm64::data_drop(SHARED_PARAMS, uint64_t misc_offset) {
+    // placeholder
+}
+void Arm64::memory_copy(SHARED_PARAMS) {
+    // placeholder
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+}
+void Arm64::memory_fill(SHARED_PARAMS) {
+    // placeholder
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+}
 void Arm64::table_init(SHARED_PARAMS, uint64_t seg_offset,
-                       uint64_t table_offset) {}
-void Arm64::elem_drop(SHARED_PARAMS, uint64_t misc_offset) {}
+                       uint64_t table_offset) {
+    // placeholder
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+}
+void Arm64::elem_drop(SHARED_PARAMS, uint64_t misc_offset) {
+    // placeholder
+}
 void Arm64::table_copy(SHARED_PARAMS, uint64_t dst_offset,
-                       uint64_t src_offset) {}
-void Arm64::table_grow(SHARED_PARAMS, uint64_t misc_offset) {}
-void Arm64::table_size(SHARED_PARAMS, uint64_t misc_offset) {}
-void Arm64::table_fill(SHARED_PARAMS, uint64_t misc_offset) {}
+                       uint64_t src_offset) {
+    // placeholder
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+}
+void Arm64::table_grow(SHARED_PARAMS, uint64_t misc_offset) {
+    // placeholder
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+}
+void Arm64::table_size(SHARED_PARAMS, uint64_t misc_offset) {
+    // placeholder
+    push(value::imm(0));
+}
+void Arm64::table_fill(SHARED_PARAMS, uint64_t misc_offset) {
+    // placeholder
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+    drop(code, stack, valtype::i32);
+}
 
 } // namespace arm64
 } // namespace mitey
