@@ -926,10 +926,11 @@ freg Arm64::adapt_value_into(std::byte *&code, value v,
     assert(false);
 }
 
-bool Arm64::move_results(std::byte *&code, WasmStack &stack, ControlFlow &flow,
+bool Arm64::move_results(std::byte *&code, WasmStack &stack,
+                         valtype_vector &copied_values, uint32_t copy_to,
                          bool discard) {
-    auto arity = flow.expected.size();
-    auto resultless_stack = stack.sp() - flow.expected.bytesize();
+    auto arity = copied_values.size();
+    auto resultless_stack = stack.sp() - copied_values.bytesize();
 
     // if the results are already in the right place, we don't need to move them
     if (arity == 0 /* || resultless_stack == flow.stack_offset */)
@@ -937,7 +938,7 @@ bool Arm64::move_results(std::byte *&code, WasmStack &stack, ControlFlow &flow,
 
     // stack.sp() doesn't include locals
     auto local_bytes = stack_size - stack.sp();
-    auto stack_offset = local_bytes + flow.stack_offset;
+    auto stack_offset = local_bytes + copy_to;
     auto stack_iter = stack.rbegin();
 
     std::optional<ireg> intreg = std::nullopt;
@@ -945,7 +946,7 @@ bool Arm64::move_results(std::byte *&code, WasmStack &stack, ControlFlow &flow,
 
     auto expected = values - arity;
     for (int i = 0; i < arity; i++) {
-        auto v = flow.expected[i];
+        auto v = copied_values[i];
         if (v == valtype::f32 || v == valtype::f64) {
             auto reg = adapt_value_into(code, expected[i], floatreg);
             str_offset(code, stack_offset, stackreg, reg);
@@ -962,8 +963,7 @@ bool Arm64::move_results(std::byte *&code, WasmStack &stack, ControlFlow &flow,
     if (!discard)
         return true;
 
-    auto discarded =
-        (resultless_stack - flow.stack_offset) / sizeof(runtime::WasmValue);
+    auto discarded = (resultless_stack - copy_to) / sizeof(runtime::WasmValue);
 
     for (auto i = 0; i < discarded; i++) {
         drop(code, stack, *stack_iter);
@@ -1244,7 +1244,7 @@ void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
 }
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
     if (!stack.polymorphism()) {
-        move_results(code, stack, flow);
+        move_results(code, stack, flow.sig.results, flow.stack_offset);
         values -= flow.sig.results.size();
         stack_size -= flow.sig.results.bytesize();
     }
@@ -1285,7 +1285,7 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
-    move_results(code, stack, flow);
+    move_results(code, stack, flow.expected, flow.stack_offset);
 
     values -= flow.expected.size();
     stack_size -= flow.expected.bytesize();
@@ -1311,7 +1311,7 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     code += sizeof(inst);
 
     std::byte *imm;
-    if (move_results(code, stack, flow, false)) {
+    if (move_results(code, stack, flow.expected, flow.stack_offset, false)) {
         imm = code;
         b(code, 0);
 

@@ -131,7 +131,8 @@ class Arm64 {
     ireg adapt_value_into(std::byte *&code, value v, std::optional<ireg> &reg);
     freg adapt_value_into(std::byte *&code, value v, std::optional<freg> &reg);
 
-    bool move_results(std::byte *&code, WasmStack &stack, ControlFlow &flow,
+    bool move_results(std::byte *&code, WasmStack &stack,
+                      valtype_vector &copied_values, uint32_t copy_to,
                       bool discard = true);
 
     // eventually i'll have to support multivalue here
