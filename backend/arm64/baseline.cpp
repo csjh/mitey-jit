@@ -1992,36 +1992,36 @@ void Arm64::i32rem_s(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    sdiv(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    msub(code, false, p1.as<ireg>(), p2.as<ireg>(), res.as<ireg>(),
-         res.as<ireg>());
+    auto v = intregs.temporary(code);
+    sdiv(code, false, p2.as<ireg>(), p1.as<ireg>(), v);
+    msub(code, false, p2.as<ireg>(), p1.as<ireg>(), v, res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64rem_s(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    sdiv(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    msub(code, true, p1.as<ireg>(), p2.as<ireg>(), res.as<ireg>(),
-         res.as<ireg>());
+    auto v = intregs.temporary(code);
+    sdiv(code, true, p2.as<ireg>(), p1.as<ireg>(), v);
+    msub(code, true, p2.as<ireg>(), p1.as<ireg>(), v, res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
 void Arm64::i32rem_u(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    udiv(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    msub(code, false, p1.as<ireg>(), p2.as<ireg>(), res.as<ireg>(),
-         res.as<ireg>());
+    auto v = intregs.temporary(code);
+    udiv(code, false, p2.as<ireg>(), p1.as<ireg>(), v);
+    msub(code, false, p2.as<ireg>(), p1.as<ireg>(), v, res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64rem_u(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    udiv(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    msub(code, true, p1.as<ireg>(), p2.as<ireg>(), res.as<ireg>(),
-         res.as<ireg>());
+    auto v = intregs.temporary(code);
+    udiv(code, true, p2.as<ireg>(), p1.as<ireg>(), v);
+    msub(code, true, p2.as<ireg>(), p1.as<ireg>(), v, res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
 void Arm64::i32and(SHARED_PARAMS) {
