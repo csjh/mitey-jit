@@ -1634,11 +1634,10 @@ void Arm64::memorysize(SHARED_PARAMS) {
 }
 void Arm64::memorygrow(SHARED_PARAMS) {
     // placeholder
-    drop(code, stack, valtype::i32);
 }
 void Arm64::i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
 void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
-    if (cons <= std::numeric_limits<uint32_t>::max()) {
+    if (cons > std::numeric_limits<uint32_t>::max()) {
         auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
         mov(code, cons, res.as<ireg>());
         finalize(code, res.as<ireg>());
