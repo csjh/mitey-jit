@@ -1212,7 +1212,8 @@ HANDLER(globalget) {
     auto global_ty = mod.globals[global_idx].type;
     stack.apply(std::array<valtype, 0>(), std::array{global_ty});
 
-    _(globalget, 1 + mod.functions.size() + mod.tables.size() + global_idx);
+    _(globalget, 1 + mod.functions.size() + mod.tables.size() + global_idx,
+      global_ty);
     nextop();
 }
 HANDLER(globalset) {
@@ -1224,7 +1225,8 @@ HANDLER(globalset) {
     auto global_ty = mod.globals[global_idx].type;
     stack.apply(std::array{global_ty}, std::array<valtype, 0>());
 
-    _(globalset, 1 + mod.functions.size() + mod.tables.size() + global_idx);
+    _(globalset, 1 + mod.functions.size() + mod.tables.size() + global_idx,
+      global_ty);
     nextop();
 }
 HANDLER(memorysize) {

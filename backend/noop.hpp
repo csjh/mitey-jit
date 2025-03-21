@@ -35,8 +35,8 @@ class Noop {
     void localtee(SHARED_PARAMS, FunctionShell &, uint32_t) {}
     void tableget(SHARED_PARAMS, uint64_t) {}
     void tableset(SHARED_PARAMS, uint64_t) {}
-    void globalget(SHARED_PARAMS, uint64_t) {}
-    void globalset(SHARED_PARAMS, uint64_t) {}
+    void globalget(SHARED_PARAMS, uint64_t, valtype) {}
+    void globalset(SHARED_PARAMS, uint64_t, valtype) {}
     void memorysize(SHARED_PARAMS) {}
     void memorygrow(SHARED_PARAMS) {}
     void i32const(SHARED_PARAMS, uint32_t) {}

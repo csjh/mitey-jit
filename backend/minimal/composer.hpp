@@ -210,8 +210,14 @@ template <typename Target> class Composer {
     }
     unary(tableget);
     unary(tableset);
-    unary(globalget);
-    unary(globalset);
+    void globalget(std::byte *&code, WasmStack &stack, uint64_t tmp1, valtype) {
+        Target::put_temp1(code, tmp1);
+        Target::put_call(code, runtime::globalget);
+    }
+    void globalset(std::byte *&code, WasmStack &stack, uint64_t tmp1, valtype) {
+        Target::put_temp1(code, tmp1);
+        Target::put_call(code, runtime::globalset);
+    }
     nilary(memorysize);
     nilary(memorygrow);
     void i32const(SHARED_PARAMS, uint32_t cons) {

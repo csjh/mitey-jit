@@ -185,8 +185,8 @@ class Arm64 {
     void localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx);
     void tableget(SHARED_PARAMS, uint64_t misc_offset);
     void tableset(SHARED_PARAMS, uint64_t misc_offset);
-    void globalget(SHARED_PARAMS, uint64_t misc_offset);
-    void globalset(SHARED_PARAMS, uint64_t misc_offset);
+    void globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type);
+    void globalset(SHARED_PARAMS, uint64_t misc_offset, valtype type);
     void memorysize(SHARED_PARAMS);
     void memorygrow(SHARED_PARAMS);
     void i32const(SHARED_PARAMS, uint32_t cons);

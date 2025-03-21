@@ -1410,12 +1410,10 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     localset(code, stack, fn, local_idx);
     localget(code, stack, fn, local_idx);
 }
-void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {}
-void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {}
-void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset) {}
-void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset) {}
-void Arm64::memorysize(SHARED_PARAMS) {}
-void Arm64::memorygrow(SHARED_PARAMS) {}
+void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
+void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
+}
+}
 void Arm64::i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
 void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
     if (cons <= std::numeric_limits<uint32_t>::max()) {
