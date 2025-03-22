@@ -1524,8 +1524,8 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
 
         finalize(code, reg.as<freg>());
     } else {
-        auto [condition, v1, v2, reg] = allocate_registers<
-            std::tuple<iwant::flags, iwant::ireg, iwant::ireg>, iwant::ireg>(
+        auto [v1, v2, condition, reg] = allocate_registers<
+            std::tuple<iwant::ireg, iwant::ireg, iwant::flags>, iwant::ireg>(
             code);
 
         if (!condition.is<value::location::flags>()) {
