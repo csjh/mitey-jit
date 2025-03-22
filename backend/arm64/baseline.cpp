@@ -1446,28 +1446,11 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     clobber_flags(code);
 
-    values -= fn.type.params.size();
+    move_results(code, stack, fn.type.params,
+                 stack_size - fn.type.params.bytesize(), false);
+
     stack_size -= fn.type.params.bytesize();
-
-    // todo: make this work with stack_size larger than 1 << 12
-    add(code, true, stackreg, stackreg, stack_size);
-
-    std::optional<ireg> intreg = std::nullopt;
-    std::optional<freg> floatreg = std::nullopt;
-
-    uint32_t stack_offset = 0;
-    for (int i = 0; i < fn.type.params.size(); i++) {
-        auto v = fn.type.params[i];
-        if (v == valtype::f32 || v == valtype::f64) {
-            auto reg = adapt_value_into(code, values[i], floatreg);
-            str_offset(code, stack_offset, stackreg, reg);
-            stack_offset += sizeof(runtime::WasmValue);
-        } else {
-            auto reg = adapt_value_into(code, values[i], intreg);
-            str_offset(code, stack_offset, stackreg, reg);
-            stack_offset += sizeof(runtime::WasmValue);
-        }
-    }
+    values -= fn.type.params.size();
 
     clobber_registers(code);
 
@@ -1475,8 +1458,10 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     ldr_offset(code, func_offset * sizeof(void *), miscreg, ireg::x3);
     ldr_offset(code, offsetof(runtime::FunctionInfo, signature), ireg::x3,
                ireg::x3);
-    blr(code, ireg::x3);
 
+    // todo: make this work with stack_size larger than 1 << 12
+    add(code, true, stackreg, stackreg, stack_size);
+    blr(code, ireg::x3);
     sub(code, true, stackreg, stackreg, stack_size);
 
     // values -= fn.type.params.size();
