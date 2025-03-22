@@ -439,8 +439,9 @@ void mov(std::byte *&code, bool sf, ftype ft, freg src, ireg dst) {
                   (static_cast<uint32_t>(dst) << 0));
 }
 
-void mov(std::byte *&code, freg src, freg dst) {
-    put(code, 0b10011110011001110000000000000000 |
+void mov(std::byte *&code, ftype ft, freg src, freg dst) {
+    put(code, 0b00011110001000000100000000000000 |
+                  (static_cast<uint32_t>(ft) << 22) |
                   (static_cast<uint32_t>(src) << 5) |
                   (static_cast<uint32_t>(dst) << 0));
 }
@@ -1111,7 +1112,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             auto reg = *freg_alloc++;
             // save current value
             if (is_param) {
-                mov(code, reg, freg::d0);
+                mov(code, ftype::double_, reg, freg::d0);
                 ldr_offset(code, offset, stackreg, reg);
                 str_offset(code, offset, stackreg, freg::d0);
             } else {
@@ -1567,7 +1568,7 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             auto reg = std::make_optional(local.as<freg>());
             auto v = adapt_value_into(code, values[0], reg);
             if (*reg != v)
-                mov(code, v, *reg);
+                mov(code, ftype::double_, v, *reg);
         } else {
             if (values->is<value::location::reg>() &&
                 is_volatile(values->as<ireg>()) &&
