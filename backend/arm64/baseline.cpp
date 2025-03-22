@@ -1213,6 +1213,8 @@ void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
     }
 }
 std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
+    auto [condition] = allocate_registers<std::tuple<iwant::flags>>(code);
+
     auto dupe = values - sig.params.size();
     for (int i = 0; i < sig.params.size(); i++) {
         // this is super hacky, but instead of dumping the values to the stack
@@ -1222,8 +1224,6 @@ std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
         // should make sure i don't assume values translates 1:1 with stack_size
         *values++ = dupe[i];
     }
-
-    auto [condition] = allocate_registers<std::tuple<iwant::flags>>(code);
 
     std::byte *imm = code;
     if (condition.is<value::location::flags>()) {
@@ -1245,6 +1245,8 @@ void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     auto &if_flow = control_stack.back();
     amend_br_if(std::get<If>(if_flow.construct).else_jump, code);
 
+    stack_size += if_flow.sig.params.bytesize();
+
     // not needed due to duping in if_
     // for (auto ty : if_flow.sig.params)
     //     push(value::stack(stack_size));
@@ -1263,7 +1265,17 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
     }
 
     if (std::holds_alternative<If>(flow.construct)) {
-        amend_br(std::get<If>(flow.construct).else_jump, code);
+        amend_br_if(std::get<If>(flow.construct).else_jump, code);
+
+        if (!stack.polymorphism()) {
+            // move the duplicated params into their proper positions
+            stack_size += flow.sig.params.bytesize();
+            move_results(code, stack, flow.sig.results, flow.stack_offset);
+        }
+    }
+
+    for (auto ty : flow.sig.results) {
+        push(value::stack(stack_size));
     }
 
     if (!std::holds_alternative<Loop>(flow.construct)) {
