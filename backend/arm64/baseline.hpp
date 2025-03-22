@@ -52,6 +52,9 @@ class Arm64 {
             // when a register is given a value, this is set to a noop
             // when a register is stolen, this is set to a spill
             std::byte *spilladdr = nullptr;
+            // this could be an index into the values pointer but
+            // that's an optimization attempt for another day
+            value *value_offset = nullptr;
             uint32_t stack_offset = 0;
         };
 
@@ -151,7 +154,7 @@ class Arm64 {
 
     void exit_function(SHARED_PARAMS, ControlFlow &flow);
 
-    template <auto mtype, extendtype etype>
+    template <memtype mtype, extendtype etype, bool is_float>
     void abstract_memop(SHARED_PARAMS, uint64_t offset);
 
   public:
