@@ -961,34 +961,26 @@ freg Arm64::adapt_value_into(std::byte *&code, value v,
 }
 
 bool Arm64::move_results(std::byte *&code, WasmStack &stack,
-                         valtype_vector &copied_values, uint32_t copy_to,
+                         valtype_vector &copied_values, uint32_t stack_offset,
                          bool discard) {
     auto arity = copied_values.size();
-    auto resultless_stack = stack.sp() - copied_values.bytesize();
-
-    // if the results are already in the right place, we don't need to move them
-    if (arity == 0 /* || resultless_stack == flow.stack_offset */)
-        return false;
-
-    // stack.sp() doesn't include locals
-    auto local_bytes = stack_size - stack.sp();
-    auto stack_offset = local_bytes + copy_to;
     auto stack_iter = stack.rbegin();
 
     std::optional<ireg> intreg = std::nullopt;
     std::optional<freg> floatreg = std::nullopt;
 
     auto expected = values - arity;
+    auto dest = stack_offset;
     for (int i = 0; i < arity; i++) {
         auto v = copied_values[i];
         if (v == valtype::f32 || v == valtype::f64) {
             auto reg = adapt_value_into(code, expected[i], floatreg);
-            str_offset(code, stack_offset, stackreg, reg);
-            stack_offset += sizeof(runtime::WasmValue);
+            str_offset(code, dest, stackreg, reg);
+            dest += sizeof(runtime::WasmValue);
         } else {
             auto reg = adapt_value_into(code, expected[i], intreg);
-            str_offset(code, stack_offset, stackreg, reg);
-            stack_offset += sizeof(runtime::WasmValue);
+            str_offset(code, dest, stackreg, reg);
+            dest += sizeof(runtime::WasmValue);
         }
 
         stack_iter++;
@@ -997,9 +989,13 @@ bool Arm64::move_results(std::byte *&code, WasmStack &stack,
     if (!discard)
         return true;
 
+    values -= arity;
+    stack_size -= arity * sizeof(runtime::WasmValue);
+
     // this looks wrong
     // should probably be control_stack.back().stack_offset
-    auto discarded = (resultless_stack - copy_to) / sizeof(runtime::WasmValue);
+    auto discarded = (stack.sp() - copied_values.bytesize() - stack_offset) /
+                     sizeof(runtime::WasmValue);
 
     for (auto i = 0; i < discarded; i++) {
         drop(code, stack, *stack_iter);
@@ -1196,24 +1192,10 @@ void Arm64::unreachable(SHARED_PARAMS) {
 void Arm64::nop(SHARED_PARAMS) { put(code, noop); }
 void Arm64::block(SHARED_PARAMS, WasmSignature &sig) {}
 void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
-    values -= sig.params.size();
-    stack_size -= sig.params.bytesize();
+    move_results(code, stack, sig.params, stack_size - sig.params.bytesize());
 
-    std::optional<ireg> intreg = std::nullopt;
-    std::optional<freg> floatreg = std::nullopt;
-
-    auto params = values;
-    for (int i = 0; i < sig.params.size(); i++) {
-        auto ty = sig.params[i];
-        if (ty == valtype::f32 || ty == valtype::f64) {
-            auto r = adapt_value_into(code, params[i], floatreg);
-            str_offset(code, stack_size, stackreg, r);
-            push(value::stack(stack_size));
-        } else {
-            auto r = adapt_value_into(code, params[i], intreg);
-            str_offset(code, stack_size, stackreg, r);
-            push(value::stack(stack_size));
-        }
+    for (auto ty : sig.params) {
+        push(value::stack(stack_size));
     }
 }
 std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
@@ -1261,11 +1243,6 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
 
     if (!stack.polymorphism()) {
         move_results(code, stack, flow.sig.results, flow.stack_offset);
-        values -= flow.sig.results.size();
-        stack_size -= flow.sig.results.bytesize();
-    }
-    for (auto ty : flow.sig.results) {
-        push(value::stack(stack_size));
     }
 
     if (std::holds_alternative<If>(flow.construct)) {
@@ -1312,9 +1289,6 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
     move_results(code, stack, flow.expected, flow.stack_offset);
-
-    values -= flow.expected.size();
-    stack_size -= flow.expected.bytesize();
 
     auto imm = code;
     b(code, 0);
@@ -1389,45 +1363,42 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     // [$result_offset, $jump_offset] = ldpsw($addr)
     ldpsw(code, 0, result_offset, addr, jump_offset);
 
-    if (wanted.size() > 0) {
-        auto arity = wanted.size();
-        auto resultless_stack = stack.sp() - wanted.bytesize();
+    auto arity = wanted.size();
+    auto stack_iter = stack.rbegin();
 
-        // stack.sp() doesn't include locals
-        auto local_bytes = stack_size - stack.sp();
-        auto stack_iter = stack.rbegin();
+    std::optional<ireg> intreg = std::nullopt;
+    std::optional<freg> floatreg = std::nullopt;
 
-        std::optional<ireg> intreg = std::nullopt;
-        std::optional<freg> floatreg = std::nullopt;
-
-        auto expected = values - arity;
-        for (int i = 0; i < arity; i++) {
-            auto v = wanted[i];
-            if (v == valtype::f32 || v == valtype::f64) {
-                auto reg = adapt_value_into(code, expected[i], floatreg);
-                load(code, memtype::x, extendtype::str, result_offset, stackreg,
-                     reg);
-                add(code, true, result_offset, result_offset,
-                    sizeof(runtime::WasmValue));
-            } else {
-                auto reg = adapt_value_into(code, expected[i], intreg);
-                load(code, memtype::x, extendtype::str, result_offset, stackreg,
-                     reg);
-                add(code, true, result_offset, result_offset,
-                    sizeof(runtime::WasmValue));
-            }
-
-            stack_iter++;
+    auto expected = values - arity;
+    for (int i = 0; i < arity; i++) {
+        auto v = wanted[i];
+        if (v == valtype::f32 || v == valtype::f64) {
+            auto reg = adapt_value_into(code, expected[i], floatreg);
+            load(code, memtype::x, extendtype::str, result_offset, stackreg,
+                 reg);
+            add(code, true, result_offset, result_offset,
+                sizeof(runtime::WasmValue));
+        } else {
+            auto reg = adapt_value_into(code, expected[i], intreg);
+            load(code, memtype::x, extendtype::str, result_offset, stackreg,
+                 reg);
+            add(code, true, result_offset, result_offset,
+                sizeof(runtime::WasmValue));
         }
 
-        auto discarded =
-            (resultless_stack - control_stack.back().stack_offset) /
-            sizeof(runtime::WasmValue);
+        stack_iter++;
+    }
 
-        for (auto i = 0; i < discarded; i++) {
-            drop(code, stack, *stack_iter);
-            stack_iter++;
-        }
+    values -= arity;
+    stack_size -= arity * sizeof(runtime::WasmValue);
+
+    auto discarded =
+        (stack.sp() - wanted.bytesize() - control_stack.back().stack_offset) /
+        sizeof(runtime::WasmValue);
+
+    for (auto i = 0; i < discarded; i++) {
+        drop(code, stack, *stack_iter);
+        stack_iter++;
     }
 
     auto relative_point = code;
