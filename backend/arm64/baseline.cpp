@@ -1358,8 +1358,8 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     auto depth = intregs.temporary(code);
     auto addr = intregs.temporary(code);
 
-    // put max depth in $depth
-    mov(code, targets.size(), depth);
+    // put max depth (-1 for default target) in $depth
+    mov(code, targets.size() - 1, depth);
     // $depth = min($depth, $input)
     cmp(code, false, input.as<ireg>(), depth);
     csel(code, false, depth, cond::cc, input.as<ireg>(), depth);
@@ -1425,7 +1425,7 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 
     for (auto depth : targets) {
         auto &flow = control_stack[base - depth];
-        auto offset = static_cast<int32_t>(flow.stack_offset - stack.sp());
+        auto offset = flow.stack_offset;
         if (std::holds_alternative<Loop>(flow.construct)) {
             auto target = runtime::BrTableTarget(
                 std::get<Loop>(flow.construct).start - relative_point, offset);
