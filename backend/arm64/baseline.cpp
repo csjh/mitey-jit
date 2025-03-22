@@ -630,7 +630,7 @@ void load(std::byte *&code, memtype ty, extendtype ext, ireg rm, ireg rn,
                   (static_cast<uint32_t>(rt) << 0));
 }
 
-void load(std::byte *&code, ftype ty, extendtype ext, ireg rm, ireg rn,
+void load(std::byte *&code, memtype ty, extendtype ext, ireg rm, ireg rn,
           freg rt) {
     put(code, 0b00111100001000000110100000000000 |
                   (static_cast<uint32_t>(ty) << 30) |
@@ -1389,8 +1389,8 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
             auto v = wanted[i];
             if (v == valtype::f32 || v == valtype::f64) {
                 auto reg = adapt_value_into(code, expected[i], floatreg);
-                load(code, ftype::double_, extendtype::str, result_offset,
-                     stackreg, reg);
+                load(code, memtype::x, extendtype::str, result_offset, stackreg,
+                     reg);
                 add(code, true, result_offset, result_offset,
                     sizeof(runtime::WasmValue));
             } else {
@@ -1665,12 +1665,11 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
     finalize(code, res.as<freg>());
 }
 
-template <auto mtype, extendtype etype>
+template <memtype mtype, extendtype etype, bool is_float = false>
 void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
     using MemTypeType = decltype(mtype);
 
     constexpr bool is_store = etype == extendtype::str;
-    constexpr bool is_float = std::is_same_v<MemTypeType, ftype>;
 
     using IWantTy = std::conditional_t<is_float, iwant::freg, iwant::ireg>;
     using RegTy = std::conditional_t<is_float, freg, ireg>;
@@ -1700,10 +1699,10 @@ void Arm64::i64load(SHARED_PARAMS, uint64_t offset, uint64_t) {
     abstract_memop<memtype::x, extendtype::uns>(code, stack, offset);
 }
 void Arm64::f32load(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<ftype::single, extendtype::uns>(code, stack, offset);
+    abstract_memop<memtype::w, extendtype::uns, true>(code, stack, offset);
 }
 void Arm64::f64load(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<ftype::double_, extendtype::uns>(code, stack, offset);
+    abstract_memop<memtype::x, extendtype::uns, true>(code, stack, offset);
 }
 void Arm64::i32load8_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
     abstract_memop<memtype::b, extendtype::wse>(code, stack, offset);
@@ -1742,10 +1741,10 @@ void Arm64::i64store(SHARED_PARAMS, uint64_t offset, uint64_t) {
     abstract_memop<memtype::x, extendtype::str>(code, stack, offset);
 }
 void Arm64::f32store(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<ftype::single, extendtype::str>(code, stack, offset);
+    abstract_memop<memtype::w, extendtype::str, true>(code, stack, offset);
 }
 void Arm64::f64store(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<ftype::double_, extendtype::str>(code, stack, offset);
+    abstract_memop<memtype::x, extendtype::str, true>(code, stack, offset);
 }
 void Arm64::i32store8(SHARED_PARAMS, uint64_t offset, uint64_t) {
     abstract_memop<memtype::b, extendtype::str>(code, stack, offset);
