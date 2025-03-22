@@ -1035,7 +1035,7 @@ HANDLER(end) {
     stack.set_polymorphism(polymorphism);
 
     // necessary in case of polymorphic stack
-    stack.set_sp(sp + sig.params.bytesize());
+    stack.set_sp(sp);
 
     stack.push(sig.results);
 
