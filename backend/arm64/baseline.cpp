@@ -738,9 +738,11 @@ bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
 
 template <typename RegType, size_t First, size_t Last>
 void Arm64::reg_manager<RegType, First, Last>::spill(RegType reg) {
-    auto [addr, offset] = data[to_index(reg)];
-    if (addr)
+    auto [addr, v, offset] = data[to_index(reg)];
+    if (addr) {
         str_offset(addr, offset, stackreg, reg);
+        *v = value::stack(offset);
+    }
 }
 
 template <typename RegType, size_t First, size_t Last>
@@ -813,7 +815,8 @@ void Arm64::clobber_flags(std::byte *&code) {
     // step 2. spill into claimed register
     cset(code, false, flag.val->as<cond>(), reg);
     // step 3. set register metadata (for spilling)
-    intregs.claim(reg, decltype(intregs)::metadata(code, flag.stack_offset));
+    intregs.claim(
+        reg, decltype(intregs)::metadata(code, flag.val, flag.stack_offset));
     put(code, noop);
 
     *flag.val = value::reg(reg);
@@ -838,18 +841,13 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
 
     switch (v.where()) {
     case value::location::reg: {
-        // why did I have the commented out part?
-        // if (is_volatile(v.as<RegType>())) {
-        //     RegType reg;
-        //     if constexpr (std::is_same_v<To, iwant::freg>)
-        //         reg = floatregs.temporary(code);
-        //     else
-        //         reg = intregs.temporary(code);
-        //     mov(code, v.as<RegType>(), reg);
-        //     return value::reg(reg);
-        // } else {
+        if (auto r = v.as<RegType>(); is_volatile(r)) {
+            if constexpr (std::is_same_v<To, iwant::freg>)
+                floatregs.surrender(r);
+            else
+                intregs.surrender(r);
+        }
         return v;
-        // }
     }
     case value::location::stack: {
         auto offset = v.as<uint32_t>();
@@ -899,8 +897,11 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
 
 ireg Arm64::adapt_value_into(std::byte *&code, value v,
                              std::optional<ireg> &hint) {
-    if (v.is<value::location::reg>())
+    if (v.is<value::location::reg>()) {
+        if (is_volatile(v.as<ireg>()))
+            intregs.surrender(v.as<ireg>());
         return v.as<ireg>();
+    }
 
     if (!hint)
         hint = intregs.temporary(code);
@@ -932,8 +933,11 @@ ireg Arm64::adapt_value_into(std::byte *&code, value v,
 
 freg Arm64::adapt_value_into(std::byte *&code, value v,
                              std::optional<freg> &hint) {
-    if (v.is<value::location::reg>())
+    if (v.is<value::location::reg>()) {
+        if (is_volatile(v.as<freg>()))
+            floatregs.surrender(v.as<freg>());
         return v.as<freg>();
+    }
 
     if (!hint)
         hint = floatregs.temporary(code);
@@ -1058,11 +1062,11 @@ void Arm64::finalize(std::byte *&code, Args... results) {
 
     auto finalize = [&](auto result) {
         if constexpr (std::is_same_v<decltype(result), ireg>)
-            intregs.claim(result,
-                          decltype(intregs)::metadata(code, stack_size));
+            intregs.claim(
+                result, decltype(intregs)::metadata(code, values, stack_size));
         else
-            floatregs.claim(result,
-                            decltype(floatregs)::metadata(code, stack_size));
+            floatregs.claim(result, decltype(floatregs)::metadata(code, values,
+                                                                  stack_size));
         // buffer area for spilling
         put(code, noop);
 
