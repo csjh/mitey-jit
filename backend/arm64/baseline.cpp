@@ -976,12 +976,12 @@ freg Arm64::adapt_value_into(std::byte *&code, value v,
 void Arm64::stackify(std::byte *&code, WasmStack &stack,
                      valtype_vector &moved_values) {
     move_results(code, stack, moved_values,
-                 stack_size - moved_values.bytesize(), move_discard::copied);
+                 stack_size - moved_values.bytesize(), true);
 }
 
 bool Arm64::move_results(std::byte *&code, WasmStack &stack,
                          valtype_vector &copied_values, uint32_t stack_offset,
-                         move_discard discard) {
+                         bool discard_copied) {
     std::optional<ireg> intreg = std::nullopt;
     std::optional<freg> floatreg = std::nullopt;
 
@@ -1000,26 +1000,24 @@ bool Arm64::move_results(std::byte *&code, WasmStack &stack,
         }
     }
 
-    if (discard == move_discard::none)
+    if (!discard_copied)
         return true;
 
     values -= copied_values.size();
     stack_size -= copied_values.bytesize();
 
-    if (discard == move_discard::copied)
-        return true;
+    return true;
+}
 
-    // this looks wrong
-    // should probably be control_stack.back().stack_offset
-    auto discarded = (stack_size - stack_offset) / sizeof(runtime::WasmValue);
+void Arm64::discard(std::byte *&code, WasmStack &stack, uint32_t skip,
+                    uint32_t to) {
+    auto discarded = (stack_size - to) / sizeof(runtime::WasmValue);
 
-    auto excess = stack.rbegin() + copied_values.size();
+    auto excess = stack.rbegin() + skip;
     for (auto i = 0; i < discarded; i++) {
         drop(code, stack, *excess);
         excess++;
     }
-
-    return true;
 }
 
 void Arm64::amend_br(std::byte *br, std::byte *target) {
@@ -1290,8 +1288,9 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
-    move_results(code, stack, flow.expected, flow.stack_offset,
-                 move_discard::excess);
+    move_results(code, stack, flow.expected, flow.stack_offset, true);
+    discard(code, stack, flow.expected.size(),
+            control_stack.back().stack_offset);
 
     auto imm = code;
     b(code, 0);
@@ -1314,8 +1313,7 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     code += sizeof(inst);
 
     std::byte *imm;
-    if (move_results(code, stack, flow.expected, flow.stack_offset,
-                     move_discard::none)) {
+    if (move_results(code, stack, flow.expected, flow.stack_offset, false)) {
         imm = code;
         b(code, 0);
 
@@ -1367,14 +1365,11 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     // [$result_offset, $jump_offset] = ldpsw($addr)
     ldpsw(code, 0, result_offset, addr, jump_offset);
 
-    auto arity = wanted.size();
-    auto stack_iter = stack.rbegin();
-
     std::optional<ireg> intreg = std::nullopt;
     std::optional<freg> floatreg = std::nullopt;
 
-    auto expected = values - arity;
-    for (int i = 0; i < arity; i++) {
+    auto expected = values - wanted.size();
+    for (int i = 0; i < wanted.size(); i++) {
         auto v = wanted[i];
         if (v == valtype::f32 || v == valtype::f64) {
             auto reg = adapt_value_into(code, expected[i], floatreg);
@@ -1389,21 +1384,12 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
             add(code, true, result_offset, result_offset,
                 sizeof(runtime::WasmValue));
         }
-
-        stack_iter++;
     }
 
-    values -= arity;
-    stack_size -= arity * sizeof(runtime::WasmValue);
+    values -= wanted.size();
+    stack_size -= wanted.bytesize();
 
-    auto discarded =
-        (stack.sp() - wanted.bytesize() - control_stack.back().stack_offset) /
-        sizeof(runtime::WasmValue);
-
-    for (auto i = 0; i < discarded; i++) {
-        drop(code, stack, *stack_iter);
-        stack_iter++;
-    }
+    discard(code, stack, wanted.size(), control_stack.back().stack_offset);
 
     auto relative_point = code;
     // $jump = PC + $jump_offset
