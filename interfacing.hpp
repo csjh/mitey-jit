@@ -169,8 +169,6 @@ template <auto func> runtime::TemplessSignature *wasm_functionify() {
     constexpr auto n_args = std::tuple_size_v<Args>;
 
     return [](auto memory, auto misc, auto stack) {
-        stack -= n_args;
-
         // Convert input arguments to tuple
         auto args = [&]<size_t... I>(std::index_sequence<I...>) {
             return Args{
@@ -193,7 +191,6 @@ template <auto func> runtime::TemplessSignature *wasm_functionify() {
         } else {
             push_tuple_to_wasm(run(), stack, std::make_index_sequence<arity>{});
         }
-        stack += arity;
 
         return runtime::dummy(memory, misc, stack, 0, 0);
     };
