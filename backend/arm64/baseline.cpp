@@ -1570,10 +1570,10 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 }
 void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
     // placeholder
-    push(value::imm(0));
 }
 void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
     // placeholder
+    drop(code, stack, valtype::i32);
     drop(code, stack, valtype::externref);
 }
 void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
