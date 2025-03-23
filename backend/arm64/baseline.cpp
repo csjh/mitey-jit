@@ -1421,6 +1421,9 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
 }
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
+    intregs.begin();
+    floatregs.begin();
+
     clobber_flags(code);
 
     stackify(code, stack, fn.type.params);
@@ -1604,7 +1607,7 @@ void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
 }
 void Arm64::memorysize(SHARED_PARAMS) {
     // placeholder
-    push(value::imm(0));
+    push(value::imm(1));
 }
 void Arm64::memorygrow(SHARED_PARAMS) {
     // placeholder
