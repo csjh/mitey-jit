@@ -1502,7 +1502,22 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
 }
 void Arm64::select_t(SHARED_PARAMS, valtype type) { select(code, stack, type); }
 void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-    push(locals[local_idx]);
+    if (fn.locals[local_idx] == valtype::f32 ||
+        fn.locals[local_idx] == valtype::f64) {
+        auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
+        auto r = std::make_optional(reg.as<freg>());
+        auto t = adapt_value_into(code, locals[local_idx], r);
+        if (*r != t)
+            mov(code, ftype::double_, t, *r);
+        finalize(code, reg.as<freg>());
+    } else {
+        auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+        auto r = std::make_optional(reg.as<ireg>());
+        auto t = adapt_value_into(code, locals[local_idx], r);
+        if (*r != t)
+            mov(code, true, t, *r);
+        finalize(code, reg.as<ireg>());
+    }
 }
 void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     auto ty = fn.locals[local_idx];
