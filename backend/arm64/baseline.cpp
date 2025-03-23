@@ -348,7 +348,7 @@ void cbz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
 }
 
 void fcmp(std::byte *&code, bool is_double, freg rn, freg rm) {
-    put(code, 0b00011110001000000010000000010000 |
+    put(code, 0b00011110001000000010000000000000 |
                   (static_cast<uint32_t>(is_double) << 22) |
                   (static_cast<uint32_t>(rm) << 16) |
                   (static_cast<uint32_t>(rn) << 5));
