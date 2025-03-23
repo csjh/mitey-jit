@@ -616,7 +616,7 @@ void fmax(std::byte *&code, ftype ft, freg rm, freg rn, freg rd) {
 
 void load(std::byte *&code, memtype ty, extendtype ext, ireg rm, ireg rn,
           ireg rt) {
-    put(code, 0b00111000001000000110100000000000 |
+    put(code, 0b00111000001000001100100000000000 |
                   (static_cast<uint32_t>(ty) << 30) |
                   (static_cast<uint32_t>(ext) << 22) |
                   (static_cast<uint32_t>(rm) << 16) |
@@ -626,7 +626,7 @@ void load(std::byte *&code, memtype ty, extendtype ext, ireg rm, ireg rn,
 
 void load(std::byte *&code, memtype ty, extendtype ext, ireg rm, ireg rn,
           freg rt) {
-    put(code, 0b00111100001000000110100000000000 |
+    put(code, 0b00111100001000001100100000000000 |
                   (static_cast<uint32_t>(ty) << 30) |
                   (static_cast<uint32_t>(ext) << 22) |
                   (static_cast<uint32_t>(rm) << 16) |
@@ -1672,7 +1672,7 @@ void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
     if (offset)
         add(code, true, addr.template as<ireg>(), addr.template as<ireg>(),
             offset);
-    load(code, mtype, etype, memreg, addr.template as<ireg>(),
+    load(code, mtype, etype, addr.template as<ireg>(), memreg,
          res.template as<RegTy>());
 
     if constexpr (!is_store)
