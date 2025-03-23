@@ -45,6 +45,7 @@ class value {
 #define SHARED_PARAMS std::byte *&code, WasmStack &stack
 
 class Arm64 {
+  public:
     template <typename RegType, size_t First, size_t Last> class reg_manager {
       public:
         struct metadata {
@@ -91,11 +92,15 @@ class Arm64 {
         bool check_spill(RegType reg, std::byte *code);
     };
 
+    using int_manager = reg_manager<ireg, 3, icaller_saved.size()>;
+    using float_manager = reg_manager<freg, 0, fcaller_saved.size()>;
+
+  private:
     // callee saved registers
     std::span<value> locals;
     // caller saved registers
-    reg_manager<ireg, 3, icaller_saved.size()> intregs;
-    reg_manager<freg, 0, fcaller_saved.size()> floatregs;
+    int_manager intregs;
+    float_manager floatregs;
 
     struct flags {
         // offset to spill into
