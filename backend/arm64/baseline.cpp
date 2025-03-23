@@ -1137,21 +1137,6 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     // note: this has to be fixed to not potentially overwrite locals
     // that are being returned
 
-    // i want stuff to jump here, because this is where callee saved registers
-    // are restored, and results are copied
-    for (auto target : flow.pending_br) {
-        amend_br(target, code);
-    }
-    for (auto target : flow.pending_br_if) {
-        amend_br_if(target, code);
-    }
-    for (auto [table, target] : flow.pending_br_tables) {
-        auto diff = code - table;
-        auto idiff = static_cast<int32_t>(diff);
-        ensure(idiff == diff, "branch target out of range");
-        std::memcpy(target, &idiff, sizeof(idiff));
-    }
-
     auto &fn = std::get<Function>(flow.construct).fn;
     // restore saved values
     for (auto i = 0; i < fn.locals.size(); i++) {
