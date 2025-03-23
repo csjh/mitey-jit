@@ -134,9 +134,16 @@ class Arm64 {
     ireg adapt_value_into(std::byte *&code, value v, std::optional<ireg> &reg);
     freg adapt_value_into(std::byte *&code, value v, std::optional<freg> &reg);
 
+    enum class move_discard {
+        none,
+        copied,
+        excess,
+    };
+
+    void stackify(std::byte *&code, WasmStack &stack, valtype_vector &values);
     bool move_results(std::byte *&code, WasmStack &stack,
                       valtype_vector &copied_values, uint32_t copy_to,
-                      bool discard = true);
+                      move_discard discard);
 
     // eventually i'll have to support multivalue here
     // honestly i don't think it'll even be that difficult (single digit lines)

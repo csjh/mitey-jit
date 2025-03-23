@@ -960,18 +960,21 @@ freg Arm64::adapt_value_into(std::byte *&code, value v,
     assert(false);
 }
 
+void Arm64::stackify(std::byte *&code, WasmStack &stack,
+                     valtype_vector &moved_values) {
+    move_results(code, stack, moved_values,
+                 stack_size - moved_values.bytesize(), move_discard::copied);
+}
+
 bool Arm64::move_results(std::byte *&code, WasmStack &stack,
                          valtype_vector &copied_values, uint32_t stack_offset,
-                         bool discard) {
-    auto arity = copied_values.size();
-    auto stack_iter = stack.rbegin();
-
+                         move_discard discard) {
     std::optional<ireg> intreg = std::nullopt;
     std::optional<freg> floatreg = std::nullopt;
 
-    auto expected = values - arity;
+    auto expected = values - copied_values.size();
     auto dest = stack_offset;
-    for (int i = 0; i < arity; i++) {
+    for (int i = 0; i < copied_values.size(); i++) {
         auto v = copied_values[i];
         if (v == valtype::f32 || v == valtype::f64) {
             auto reg = adapt_value_into(code, expected[i], floatreg);
@@ -982,24 +985,25 @@ bool Arm64::move_results(std::byte *&code, WasmStack &stack,
             str_offset(code, dest, stackreg, reg);
             dest += sizeof(runtime::WasmValue);
         }
-
-        stack_iter++;
     }
 
-    if (!discard)
+    if (discard == move_discard::none)
         return true;
 
-    values -= arity;
-    stack_size -= arity * sizeof(runtime::WasmValue);
+    values -= copied_values.size();
+    stack_size -= copied_values.bytesize();
+
+    if (discard == move_discard::copied)
+        return true;
 
     // this looks wrong
     // should probably be control_stack.back().stack_offset
-    auto discarded = (stack.sp() - copied_values.bytesize() - stack_offset) /
-                     sizeof(runtime::WasmValue);
+    auto discarded = (stack_size - stack_offset) / sizeof(runtime::WasmValue);
 
+    auto excess = stack.rbegin() + copied_values.size();
     for (auto i = 0; i < discarded; i++) {
-        drop(code, stack, *stack_iter);
-        stack_iter++;
+        drop(code, stack, *excess);
+        excess++;
     }
 
     return true;
@@ -1192,7 +1196,7 @@ void Arm64::unreachable(SHARED_PARAMS) {
 void Arm64::nop(SHARED_PARAMS) { put(code, noop); }
 void Arm64::block(SHARED_PARAMS, WasmSignature &sig) {}
 void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
-    move_results(code, stack, sig.params, stack_size - sig.params.bytesize());
+    stackify(code, stack, sig.params);
 
     for (auto ty : sig.params) {
         push(value::stack(stack_size));
@@ -1242,7 +1246,7 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
     floatregs.begin();
 
     if (!stack.polymorphism()) {
-        move_results(code, stack, flow.sig.results, flow.stack_offset);
+        stackify(code, stack, flow.sig.results);
     }
 
     if (std::holds_alternative<If>(flow.construct)) {
@@ -1251,7 +1255,7 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
         if (!stack.polymorphism()) {
             // move the duplicated params into their proper positions
             stack_size += flow.sig.params.bytesize();
-            move_results(code, stack, flow.sig.results, flow.stack_offset);
+            stackify(code, stack, flow.sig.results);
         }
     }
 
@@ -1288,7 +1292,8 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
-    move_results(code, stack, flow.expected, flow.stack_offset);
+    move_results(code, stack, flow.expected, flow.stack_offset,
+                 move_discard::excess);
 
     auto imm = code;
     b(code, 0);
@@ -1311,7 +1316,8 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     code += sizeof(inst);
 
     std::byte *imm;
-    if (move_results(code, stack, flow.expected, flow.stack_offset, false)) {
+    if (move_results(code, stack, flow.expected, flow.stack_offset,
+                     move_discard::none)) {
         imm = code;
         b(code, 0);
 
@@ -1433,11 +1439,7 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     clobber_flags(code);
 
-    move_results(code, stack, fn.type.params,
-                 stack_size - fn.type.params.bytesize(), false);
-
-    stack_size -= fn.type.params.bytesize();
-    values -= fn.type.params.size();
+    stackify(code, stack, fn.type.params);
 
     clobber_registers(code);
 
