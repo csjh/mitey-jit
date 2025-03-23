@@ -20,12 +20,6 @@ template <typename T> void put(std::byte *&code, const T &val) {
     code += sizeof(T);
 }
 
-template <runtime::TrapKind kind> void trap(std::byte *&code) {
-    // put address of runtime::trap in x1
-    // put kind in x0
-    // br x1
-}
-
 struct LogicalImm {
     uint32_t prefix : 9;
     uint32_t N : 1;
@@ -648,6 +642,14 @@ void ldpsw(std::byte *&code, uint8_t imm, ireg rt2, ireg rn, ireg rt) {
                   (static_cast<uint32_t>(rt) << 0));
 }
 
+void ldr(std::byte *&code, bool sf, uint32_t imm19, ireg rt) {
+    imm19 /= sizeof(inst);
+    put(code, 0b00011000000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 30) |
+                  (static_cast<uint32_t>(imm19) << 5) |
+                  (static_cast<uint32_t>(rt) << 0));
+}
+
 void str_offset(std::byte *&code, uint32_t offset, ireg rn, ireg rt) {
     offset /= 8;
     put(code, 0b11111001000000000000000000000000 |
@@ -678,6 +680,17 @@ void ldr_offset(std::byte *&code, uint32_t offset, ireg rn, freg rt) {
                   (static_cast<uint32_t>(offset) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
+}
+
+template <runtime::TrapKind kind> void trap(std::byte *&code) {
+    // put address of runtime::trap in x1
+    ldr(code, true, sizeof(inst) * 3, ireg::x1);
+    // put kind in x0
+    mov(code, true, true, false, 0, static_cast<uint64_t>(kind), ireg::x0);
+    // br x1
+    br(code, ireg::x1);
+    // put address for pc-relative load
+    put(code, reinterpret_cast<uint64_t>(&runtime::trap));
 }
 
 template <size_t Bits, size_t Offset>
