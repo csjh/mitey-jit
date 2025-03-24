@@ -528,7 +528,15 @@ int main(int argv, char **argc) {
         } else if (std::holds_alternative<test_return>(t)) {
             auto &m = std::get<test_return>(t);
 
-            std::vector<WasmValue> result = execute_action(m.action);
+            std::vector<WasmValue> result;
+            try {
+                result = execute_action(m.action);
+            } catch (std::runtime_error &e) {
+                std::cerr << "Expected return values but got: " << e.what()
+                          << std::endl;
+                failures++;
+                continue;
+            }
 
             if (result.size() != m.expected.size()) {
                 std::cerr << "Expected " << m.expected.size()
