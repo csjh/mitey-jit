@@ -129,8 +129,9 @@ void sxtw(std::byte *&code, ireg rn, ireg rd) {
 void lsl(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
     auto width = sf ? 64 : 32;
     shift_imm %= width;
-    ubfm(code, sf,
-         LogicalImm{.N = sf, .immr = shift_imm + 1, .imms = shift_imm}, rn, rd);
+    auto imms = width - shift_imm - 1;
+    auto immr = imms + 1;
+    ubfm(code, sf, LogicalImm{.N = sf, .immr = immr, .imms = imms}, rn, rd);
 }
 
 void lsl(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
