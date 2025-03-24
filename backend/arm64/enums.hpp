@@ -84,11 +84,18 @@ enum class memtype : uint8_t {
     x = 0b11, // Doubleword
 };
 
-enum class extendtype : uint8_t {
+enum class resexttype : uint8_t {
     str = 0b00, // Store
     uns = 0b01, // Unsigned
     dse = 0b10, // Extend to doubleword
     wse = 0b11, // Extend to word
+};
+
+enum class indexttype : uint8_t {
+    uxtw = 0b010,
+    lsl = 0b011,
+    sxtw = 0b110,
+    sxtx = 0b111,
 };
 
 } // namespace arm64

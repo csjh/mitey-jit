@@ -265,6 +265,15 @@ void cmp(std::byte *&code, bool sf, ireg rn, uint16_t imm12) {
     subs(code, sf, ireg::xzr, rn, imm12);
 }
 
+void ccmp(std::byte *&code, bool sf, ireg rm, cond c, ireg rn, uint8_t nzcv) {
+    put(code, 0b01111010010000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(c) << 12) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(nzcv) << 0));
+}
+
 void madd(std::byte *&code, bool sf, ireg rm, ireg ra, ireg rn, ireg rd) {
     put(code, 0b00011011000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
@@ -602,22 +611,35 @@ void fmax(std::byte *&code, ftype ft, freg rm, freg rn, freg rd) {
                   (static_cast<uint32_t>(rd) << 0));
 }
 
-void load(std::byte *&code, memtype ty, extendtype ext, ireg rm, ireg rn,
-          ireg rt) {
-    put(code, 0b00111000001000001100100000000000 |
+void load(std::byte *&code, memtype ty, resexttype resext, indexttype indext,
+          bool S, ireg rm, ireg rn, ireg rt) {
+    put(code, 0b00111000001000000000100000000000 |
                   (static_cast<uint32_t>(ty) << 30) |
-                  (static_cast<uint32_t>(ext) << 22) |
+                  (static_cast<uint32_t>(resext) << 22) |
                   (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(indext) << 13) |
+                  (static_cast<uint32_t>(S) << 12) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
 }
 
-void load(std::byte *&code, memtype ty, extendtype ext, ireg rm, ireg rn,
-          freg rt) {
-    put(code, 0b00111100001000001100100000000000 |
+void load(std::byte *&code, memtype ty, resexttype resext, indexttype indext,
+          bool S, ireg rm, ireg rn, freg rt) {
+    put(code, 0b00111100001000000000100000000000 |
                   (static_cast<uint32_t>(ty) << 30) |
-                  (static_cast<uint32_t>(ext) << 22) |
+                  (static_cast<uint32_t>(resext) << 22) |
                   (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(indext) << 13) |
+                  (static_cast<uint32_t>(S) << 12) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rt) << 0));
+}
+
+void ldp(std::byte *&code, bool sf, uint8_t imm, ireg rt2, ireg rn, ireg rt) {
+    put(code, 0b00101001010000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(imm) << 15) |
+                  (static_cast<uint32_t>(rt2) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
 }
@@ -639,7 +661,7 @@ void ldr(std::byte *&code, bool sf, uint32_t imm19, ireg rt) {
 }
 
 void str(std::byte *&code, bool sf, uint32_t offset, ireg rn, ireg rt) {
-    offset /= 8;
+    offset /= sf ? 8 : 4;
     put(code, 0b10111001000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 30) |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -648,7 +670,7 @@ void str(std::byte *&code, bool sf, uint32_t offset, ireg rn, ireg rt) {
 }
 
 void str(std::byte *&code, bool sf, uint32_t offset, ireg rn, freg rt) {
-    offset /= 8;
+    offset /= sf ? 8 : 4;
     put(code, 0b10111101000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 30) |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -657,7 +679,7 @@ void str(std::byte *&code, bool sf, uint32_t offset, ireg rn, freg rt) {
 }
 
 void ldr(std::byte *&code, bool sf, uint32_t offset, ireg rn, ireg rt) {
-    offset /= 8;
+    offset /= sf ? 8 : 4;
     put(code, 0b10111001010000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 30) |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -666,7 +688,7 @@ void ldr(std::byte *&code, bool sf, uint32_t offset, ireg rn, ireg rt) {
 }
 
 void ldr(std::byte *&code, bool sf, uint32_t offset, ireg rn, freg rt) {
-    offset /= 8;
+    offset /= sf ? 8 : 4;
     put(code, 0b10111101010000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 30) |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -1418,14 +1440,14 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
         auto v = wanted[i];
         if (v == valtype::f32 || v == valtype::f64) {
             auto reg = adapt_value_into(code, expected[i], floatreg);
-            raw::load(code, memtype::x, extendtype::str, result_offset,
-                      stackreg, reg);
+            raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
+                      result_offset, stackreg, reg);
             raw::add(code, true, result_offset, result_offset,
                      sizeof(runtime::WasmValue));
         } else {
             auto reg = adapt_value_into(code, expected[i], intreg);
-            raw::load(code, memtype::x, extendtype::str, result_offset,
-                      stackreg, reg);
+            raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
+                      result_offset, stackreg, reg);
             raw::add(code, true, result_offset, result_offset,
                      sizeof(runtime::WasmValue));
         }
@@ -1490,7 +1512,80 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     }
 }
 void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
-                          WasmSignature &type) {}
+                          WasmSignature &type) {
+    auto [v] = allocate_registers<std::tuple<iwant::ireg>>(code);
+    auto idx = v.as<ireg>();
+    auto table_ptr = intregs.temporary(code), current = intregs.temporary(code),
+         elements = intregs.temporary(code),
+         function_ptr = intregs.temporary(code),
+         expected_sig = intregs.temporary(code),
+         given_sig = intregs.temporary(code);
+
+    clobber_flags(code);
+    clobber_registers(code);
+
+    stackify(code, stack, type.params);
+
+    raw::ldr(code, true, table_offset * sizeof(void *), miscreg, table_ptr);
+
+    static_assert(offsetof(runtime::WasmTable, current) == 0);
+    static_assert(offsetof(runtime::WasmTable, elements) == 8);
+    raw::ldp(code, true, 0, elements, table_ptr, current);
+
+    raw::cmp(code, false, current, idx);
+    auto undefined_trap = code;
+    raw::bcond(code, 0, cond::ls);
+
+    raw::load(code, memtype::x, resexttype::uns, indexttype::lsl, true, idx,
+              elements, function_ptr);
+
+    auto uninitialized_trap = code;
+    raw::cbz(code, true, 0, function_ptr);
+
+    auto rttype = runtime::FunctionType(type);
+    uint64_t p1;
+    uint32_t p2;
+    std::memcpy(&p1, &rttype, sizeof(p1));
+    std::memcpy(&p2, (char *)&rttype + sizeof(p1), sizeof(p2));
+    static_assert(sizeof(p1) + sizeof(p2) == sizeof(rttype));
+
+    masm::mov(code, p1, expected_sig);
+    raw::ldr(code, true, offsetof(runtime::FunctionInfo, type), function_ptr,
+             given_sig);
+    raw::cmp(code, true, expected_sig, given_sig);
+
+    masm::mov(code, p2, expected_sig);
+    raw::ldr(code, false, offsetof(runtime::FunctionInfo, type) + sizeof(p1),
+             function_ptr, given_sig);
+
+    raw::ccmp(code, false, expected_sig, cond::eq, given_sig, 0);
+    auto type_mismatch_trap = code;
+    raw::bcond(code, 0, cond::ne);
+
+    raw::ldr(code, true, offsetof(runtime::FunctionInfo, signature),
+             function_ptr, function_ptr);
+
+    // todo: make this work with stack_size larger than 1 << 12
+    raw::add(code, true, stackreg, stackreg, stack_size);
+    raw::blr(code, function_ptr);
+    raw::sub(code, true, stackreg, stackreg, stack_size);
+
+    auto traps = code;
+    raw::b(code, 0);
+
+    amend_br_if(undefined_trap, code);
+    trap<runtime::TrapKind::undefined_element>(code);
+    amend_br_if(uninitialized_trap, code);
+    trap<runtime::TrapKind::uninitialized_element>(code);
+    amend_br_if(type_mismatch_trap, code);
+    trap<runtime::TrapKind::indirect_call_type_mismatch>(code);
+
+    amend_br(traps, code);
+
+    for (int i = 0; i < type.results.size(); i++) {
+        push(value::stack(stack_size));
+    }
+}
 void Arm64::drop(SHARED_PARAMS, valtype type) {
     values--;
     stack_size -= sizeof(runtime::WasmValue);
@@ -1686,11 +1781,11 @@ void Arm64::f64const(SHARED_PARAMS, double cons) {
     finalize(code, res.as<freg>());
 }
 
-template <memtype mtype, extendtype etype, bool is_float = false>
+template <memtype mtype, resexttype etype, bool is_float = false>
 void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
     using MemTypeType = decltype(mtype);
 
-    constexpr bool is_store = etype == extendtype::str;
+    constexpr bool is_store = etype == resexttype::str;
 
     using IWantTy = std::conditional_t<is_float, iwant::freg, iwant::ireg>;
     using RegTy = std::conditional_t<is_float, freg, ireg>;
@@ -1706,81 +1801,81 @@ void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
     if (offset)
         raw::add(code, true, addr.template as<ireg>(), addr.template as<ireg>(),
                  offset);
-    raw::load(code, mtype, etype, addr.template as<ireg>(), memreg,
-              res.template as<RegTy>());
+    raw::load(code, mtype, etype, indexttype::sxtw, false,
+              addr.template as<ireg>(), memreg, res.template as<RegTy>());
 
     if constexpr (!is_store)
         finalize(code, res.template as<RegTy>());
 }
 
 void Arm64::i32load(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::w, extendtype::uns>(code, stack, offset);
+    abstract_memop<memtype::w, resexttype::uns>(code, stack, offset);
 }
 void Arm64::i64load(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::x, extendtype::uns>(code, stack, offset);
+    abstract_memop<memtype::x, resexttype::uns>(code, stack, offset);
 }
 void Arm64::f32load(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::w, extendtype::uns, true>(code, stack, offset);
+    abstract_memop<memtype::w, resexttype::uns, true>(code, stack, offset);
 }
 void Arm64::f64load(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::x, extendtype::uns, true>(code, stack, offset);
+    abstract_memop<memtype::x, resexttype::uns, true>(code, stack, offset);
 }
 void Arm64::i32load8_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::b, extendtype::wse>(code, stack, offset);
+    abstract_memop<memtype::b, resexttype::wse>(code, stack, offset);
 }
 void Arm64::i32load8_u(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::b, extendtype::uns>(code, stack, offset);
+    abstract_memop<memtype::b, resexttype::uns>(code, stack, offset);
 }
 void Arm64::i32load16_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::h, extendtype::wse>(code, stack, offset);
+    abstract_memop<memtype::h, resexttype::wse>(code, stack, offset);
 }
 void Arm64::i32load16_u(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::h, extendtype::uns>(code, stack, offset);
+    abstract_memop<memtype::h, resexttype::uns>(code, stack, offset);
 }
 void Arm64::i64load8_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::b, extendtype::dse>(code, stack, offset);
+    abstract_memop<memtype::b, resexttype::dse>(code, stack, offset);
 }
 void Arm64::i64load8_u(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::b, extendtype::uns>(code, stack, offset);
+    abstract_memop<memtype::b, resexttype::uns>(code, stack, offset);
 }
 void Arm64::i64load16_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::h, extendtype::dse>(code, stack, offset);
+    abstract_memop<memtype::h, resexttype::dse>(code, stack, offset);
 }
 void Arm64::i64load16_u(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::h, extendtype::uns>(code, stack, offset);
+    abstract_memop<memtype::h, resexttype::uns>(code, stack, offset);
 }
 void Arm64::i64load32_s(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::w, extendtype::dse>(code, stack, offset);
+    abstract_memop<memtype::w, resexttype::dse>(code, stack, offset);
 }
 void Arm64::i64load32_u(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::w, extendtype::uns>(code, stack, offset);
+    abstract_memop<memtype::w, resexttype::uns>(code, stack, offset);
 }
 void Arm64::i32store(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::w, extendtype::str>(code, stack, offset);
+    abstract_memop<memtype::w, resexttype::str>(code, stack, offset);
 }
 void Arm64::i64store(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::x, extendtype::str>(code, stack, offset);
+    abstract_memop<memtype::x, resexttype::str>(code, stack, offset);
 }
 void Arm64::f32store(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::w, extendtype::str, true>(code, stack, offset);
+    abstract_memop<memtype::w, resexttype::str, true>(code, stack, offset);
 }
 void Arm64::f64store(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::x, extendtype::str, true>(code, stack, offset);
+    abstract_memop<memtype::x, resexttype::str, true>(code, stack, offset);
 }
 void Arm64::i32store8(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::b, extendtype::str>(code, stack, offset);
+    abstract_memop<memtype::b, resexttype::str>(code, stack, offset);
 }
 void Arm64::i32store16(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::h, extendtype::str>(code, stack, offset);
+    abstract_memop<memtype::h, resexttype::str>(code, stack, offset);
 }
 void Arm64::i64store8(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::b, extendtype::str>(code, stack, offset);
+    abstract_memop<memtype::b, resexttype::str>(code, stack, offset);
 }
 void Arm64::i64store16(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::h, extendtype::str>(code, stack, offset);
+    abstract_memop<memtype::h, resexttype::str>(code, stack, offset);
 }
 void Arm64::i64store32(SHARED_PARAMS, uint64_t offset, uint64_t) {
-    abstract_memop<memtype::w, extendtype::str>(code, stack, offset);
+    abstract_memop<memtype::w, resexttype::str>(code, stack, offset);
 }
 void Arm64::i32eqz(SHARED_PARAMS) {
     clobber_flags(code);

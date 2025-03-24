@@ -205,9 +205,9 @@ struct ElementSegment {
 };
 
 struct WasmTable {
-    uint32_t current;
-    uint32_t maximum;
+    size_t current;
     WasmValue *elements;
+    size_t maximum;
     valtype type;
 
     WasmTable(valtype type, uint32_t initial, uint32_t maximum)

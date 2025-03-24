@@ -162,7 +162,7 @@ class Arm64 {
 
     void exit_function(SHARED_PARAMS, ControlFlow &flow);
 
-    template <memtype mtype, extendtype etype, bool is_float>
+    template <memtype mtype, resexttype etype, bool is_float>
     void abstract_memop(SHARED_PARAMS, uint64_t offset);
 
   public:
