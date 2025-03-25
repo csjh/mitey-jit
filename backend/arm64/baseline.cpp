@@ -1793,7 +1793,9 @@ void Arm64::memorysize(SHARED_PARAMS) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::memorygrow(SHARED_PARAMS) {
-    // placeholder
+    runtime_call<runtime::memorygrow>(code, stack,
+                                      std::to_array({valtype::i32}),
+                                      std::to_array({valtype::i32}));
 }
 void Arm64::i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
 void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
@@ -2853,49 +2855,76 @@ void Arm64::i64_trunc_sat_f64_u(SHARED_PARAMS) {
     raw::fcvtzu(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
+
+template <runtime::Signature func, size_t NP, size_t NR>
+void Arm64::runtime_call(std::byte *&code, WasmStack &stack,
+                         std::array<valtype, NP> params,
+                         std::array<valtype, NR> results,
+                         std::optional<uint64_t> temp1,
+                         std::optional<uint64_t> temp2) {
+    intregs.begin();
+
+    clobber_flags(code);
+    clobber_registers(code);
+
+    auto vparams = valtype_vector(params), vresults = valtype_vector(results);
+    stackify(code, stack, vparams);
+
+    masm::add(code, intregs, stack_size + vparams.bytesize(), stackreg,
+              stackreg);
+    if (temp1)
+        masm::mov(code, *temp1, ireg::x3);
+    if (temp2)
+        masm::mov(code, *temp2, ireg::x4);
+    masm::mov(code, reinterpret_cast<uint64_t>(func), ireg::x5);
+    raw::blr(code, ireg::x5);
+
+    masm::sub(code, intregs, stack_size + vresults.bytesize(), stackreg,
+              stackreg);
+
+    for (auto &result : results)
+        push(value::stack(stack_size));
+}
+
 void Arm64::memory_init(SHARED_PARAMS, uint64_t misc_offset) {
-    // placeholder
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
+    runtime_call<runtime::memory_init>(
+        code, stack, std::to_array({valtype::i32, valtype::i32, valtype::i32}),
+        std::array<valtype, 0>{}, misc_offset);
 }
 void Arm64::data_drop(SHARED_PARAMS, uint64_t misc_offset) {
-    // placeholder
+    runtime_call<runtime::data_drop>(code, stack, std::array<valtype, 0>{},
+                                     std::array<valtype, 0>{}, misc_offset);
 }
 void Arm64::memory_copy(SHARED_PARAMS) {
-    // placeholder
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
+    runtime_call<runtime::memory_copy>(
+        code, stack, std::to_array({valtype::i32, valtype::i32, valtype::i32}),
+        std::array<valtype, 0>{});
 }
 void Arm64::memory_fill(SHARED_PARAMS) {
-    // placeholder
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
+    runtime_call<runtime::memory_fill>(
+        code, stack, std::to_array({valtype::i32, valtype::i32, valtype::i32}),
+        std::array<valtype, 0>{});
 }
 void Arm64::table_init(SHARED_PARAMS, uint64_t seg_offset,
                        uint64_t table_offset) {
-    // placeholder
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
+    runtime_call<runtime::table_init>(
+        code, stack, std::to_array({valtype::i32, valtype::i32, valtype::i32}),
+        std::array<valtype, 0>{}, seg_offset, table_offset);
 }
 void Arm64::elem_drop(SHARED_PARAMS, uint64_t misc_offset) {
-    // placeholder
+    runtime_call<runtime::elem_drop>(code, stack, std::array<valtype, 0>{},
+                                     std::array<valtype, 0>{}, misc_offset);
 }
 void Arm64::table_copy(SHARED_PARAMS, uint64_t dst_offset,
                        uint64_t src_offset) {
-    // placeholder
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
+    runtime_call<runtime::table_copy>(
+        code, stack, std::to_array({valtype::i32, valtype::i32, valtype::i32}),
+        std::array<valtype, 0>{}, dst_offset, src_offset);
 }
 void Arm64::table_grow(SHARED_PARAMS, uint64_t misc_offset) {
-    // placeholder
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
+    runtime_call<runtime::table_grow>(
+        code, stack, std::to_array({valtype::i32, valtype::externref}),
+        std::to_array({valtype::i32}), misc_offset);
 }
 void Arm64::table_size(SHARED_PARAMS, uint64_t misc_offset) {
     auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
@@ -2906,10 +2935,10 @@ void Arm64::table_size(SHARED_PARAMS, uint64_t misc_offset) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::table_fill(SHARED_PARAMS, uint64_t misc_offset) {
-    // placeholder
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::i32);
+    runtime_call<runtime::table_fill>(
+        code, stack,
+        std::to_array({valtype::i32, valtype::externref, valtype::i32}),
+        std::array<valtype, 0>{}, misc_offset);
 }
 
 } // namespace arm64

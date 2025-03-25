@@ -165,6 +165,13 @@ class Arm64 {
     template <memtype mtype, resexttype etype, bool is_float>
     void abstract_memop(SHARED_PARAMS, uint64_t offset);
 
+    template <runtime::Signature func, size_t NP, size_t NR>
+    void runtime_call(std::byte *&code, WasmStack &stack,
+                      std::array<valtype, NP> params,
+                      std::array<valtype, NR> results,
+                      std::optional<uint64_t> temp1 = std::nullopt,
+                      std::optional<uint64_t> temp2 = std::nullopt);
+
   public:
     // todo: figure out what values for these
     static constexpr size_t function_overhead = 100 * sizeof(uint32_t);
