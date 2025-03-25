@@ -253,8 +253,8 @@ struct WasmMemory {
     static Allocation (*default_make_memory)(size_t, AllocationKind);
     static int (*default_grow_memory)(runtime::WasmMemory &, size_t);
 
-    uint32_t current;
-    uint32_t maximum;
+    size_t current;
+    size_t maximum;
     // todo: make this be passed around in calling convetion
     // can be updated after memory.grow or unknown calls
     Allocation memory;

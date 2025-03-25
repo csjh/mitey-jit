@@ -1784,8 +1784,13 @@ void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
     }
 }
 void Arm64::memorysize(SHARED_PARAMS) {
-    // placeholder
-    push(value::imm(1));
+    auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+
+    raw::ldr(code, true, 0, miscreg, res.as<ireg>());
+    raw::ldr(code, true, offsetof(runtime::WasmMemory, current), res.as<ireg>(),
+             res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
 }
 void Arm64::memorygrow(SHARED_PARAMS) {
     // placeholder
@@ -2893,8 +2898,12 @@ void Arm64::table_grow(SHARED_PARAMS, uint64_t misc_offset) {
     drop(code, stack, valtype::i32);
 }
 void Arm64::table_size(SHARED_PARAMS, uint64_t misc_offset) {
-    // placeholder
-    push(value::imm(0));
+    auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+
+    raw::ldr(code, true, misc_offset * sizeof(void *), miscreg, res.as<ireg>());
+    raw::ldr(code, true, 0, res.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
 }
 void Arm64::table_fill(SHARED_PARAMS, uint64_t misc_offset) {
     // placeholder
