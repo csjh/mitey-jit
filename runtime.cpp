@@ -42,7 +42,7 @@ static inline void gas(auto call) {
               uint64_t tmp2)
 #define TEMPLESS_PARAMS memory, misc, stack
 #define PARAMS TEMPLESS_PARAMS, tmp1, tmp2
-#define PRELUDE auto &memheader = MISC_GET(WasmMemory, 0)
+#define PRELUDE auto memheader = &MISC_GET(WasmMemory, 0)
 #define POSTLUDE [[clang::musttail]] return dummy(PARAMS)
 #define MISC_GET(type, idx) (*reinterpret_cast<type *>(misc[idx]))
 #define byteadd(ptr, n)                                                        \
@@ -286,12 +286,12 @@ HANDLER(globalset) {
 }
 HANDLER(memorysize) {
     PRELUDE;
-    *stack++ = memheader.size();
+    *stack++ = memheader->size();
     POSTLUDE;
 }
 HANDLER(memorygrow) {
     PRELUDE;
-    stack[-1].u32 = memheader.grow(stack[-1].u32);
+    stack[-1].u32 = memheader->grow(stack[-1].u32);
     POSTLUDE;
 }
 HANDLER(ifXXconst) {
@@ -622,7 +622,7 @@ HANDLER(memory_init) {
     auto size = stack[2].u32;
     auto src = stack[1].u32;
     auto dest = stack[0].u32;
-    memheader.copy_into(dest, src, segment, size);
+    memheader->copy_into(dest, src, segment, size);
     POSTLUDE;
 }
 HANDLER(data_drop) {
@@ -638,7 +638,7 @@ HANDLER(memory_copy) {
     auto size = stack[2].u32;
     auto src = stack[1].u32;
     auto dst = stack[0].u32;
-    memheader.memcpy(dst, src, size);
+    memheader->memcpy(dst, src, size);
     POSTLUDE;
 }
 HANDLER(memory_fill) {
@@ -647,7 +647,7 @@ HANDLER(memory_fill) {
     auto size = stack[2].u32;
     auto value = stack[1].u32;
     auto ptr = stack[0].u32;
-    memheader.memset(ptr, value, size);
+    memheader->memset(ptr, value, size);
     POSTLUDE;
 }
 HANDLER(table_init) {
