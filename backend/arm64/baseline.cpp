@@ -732,18 +732,20 @@ void add(std::byte *&code, Arm64::int_manager &intregs, uint32_t imm, ireg src,
     }
 }
 
-void sub(std::byte *&code, Arm64::int_manager &intregs, ireg src, ireg dst,
-         uint32_t imm) {
-    if (imm >= 1 << 24) {
-        auto tmp = intregs.temporary(code);
-        mov(code, imm, tmp);
-        raw::sub(code, true, dst, src, tmp);
-    } else {
+void sub(std::byte *&code, Arm64::int_manager &intregs, uint32_t imm, ireg src,
+         ireg dst) {
+    if (imm == 0) {
+        return;
+    } else if (imm < 1 << 24) {
         raw::sub(code, true, dst, src, imm & 0xfff);
         imm >>= 12;
         if (imm) {
             raw::sub(code, true, dst, dst, imm, true);
         }
+    } else {
+        auto tmp = intregs.temporary(code);
+        mov(code, imm, tmp);
+        raw::sub(code, true, dst, src, tmp);
     }
 }
 
