@@ -2497,7 +2497,7 @@ void Arm64::f32add(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fadd(code, ftype::single, p1.as<freg>(), p2.as<freg>(),
+    raw::fadd(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2505,7 +2505,7 @@ void Arm64::f64add(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fadd(code, ftype::double_, p1.as<freg>(), p2.as<freg>(),
+    raw::fadd(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2513,7 +2513,7 @@ void Arm64::f32sub(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fsub(code, ftype::single, p1.as<freg>(), p2.as<freg>(),
+    raw::fsub(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2521,7 +2521,7 @@ void Arm64::f64sub(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fsub(code, ftype::double_, p1.as<freg>(), p2.as<freg>(),
+    raw::fsub(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2529,7 +2529,7 @@ void Arm64::f32mul(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fmul(code, ftype::single, p1.as<freg>(), p2.as<freg>(),
+    raw::fmul(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2537,7 +2537,7 @@ void Arm64::f64mul(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fmul(code, ftype::double_, p1.as<freg>(), p2.as<freg>(),
+    raw::fmul(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2545,7 +2545,7 @@ void Arm64::f32div(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fdiv(code, ftype::single, p1.as<freg>(), p2.as<freg>(),
+    raw::fdiv(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2553,7 +2553,7 @@ void Arm64::f64div(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fdiv(code, ftype::double_, p1.as<freg>(), p2.as<freg>(),
+    raw::fdiv(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2561,7 +2561,7 @@ void Arm64::f32min(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fmin(code, ftype::single, p1.as<freg>(), p2.as<freg>(),
+    raw::fmin(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2569,7 +2569,7 @@ void Arm64::f64min(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fmin(code, ftype::double_, p1.as<freg>(), p2.as<freg>(),
+    raw::fmin(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2577,7 +2577,7 @@ void Arm64::f32max(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fmax(code, ftype::single, p1.as<freg>(), p2.as<freg>(),
+    raw::fmax(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2585,7 +2585,7 @@ void Arm64::f64max(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    raw::fmax(code, ftype::double_, p1.as<freg>(), p2.as<freg>(),
+    raw::fmax(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
               res.as<freg>());
     finalize(code, res.as<freg>());
 }
@@ -2803,7 +2803,7 @@ void Arm64::ref_null(SHARED_PARAMS) {
 void Arm64::ref_is_null(SHARED_PARAMS) { i64eqz(code, stack); }
 void Arm64::ref_func(SHARED_PARAMS, uint64_t misc_offset) {
     auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
-    raw::ldr(code, true, misc_offset * sizeof(void *), res.as<ireg>(), miscreg);
+    raw::ldr(code, true, misc_offset * sizeof(void *), miscreg, res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
 void Arm64::ref_eq(SHARED_PARAMS) { i64eq(code, stack); }
