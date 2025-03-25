@@ -1712,12 +1712,48 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     localget(code, stack, fn, local_idx);
 }
 void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
-    // placeholder
+    auto [idx, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+    auto table_ptr = intregs.temporary(code),
+         elements = intregs.temporary(code), current = table_ptr;
+
+    raw::ldr(code, true, misc_offset * sizeof(void *), miscreg, table_ptr);
+
+    static_assert(offsetof(runtime::WasmTable, current) == 0);
+    static_assert(offsetof(runtime::WasmTable, elements) == 8);
+    raw::ldp(code, true, 0, elements, table_ptr, current);
+
+    raw::cmp(code, false, idx.as<ireg>(), current);
+    auto oob_trap = code;
+    raw::bcond(code, 0, cond::cc);
+    trap<runtime::TrapKind::out_of_bounds_table_access>(code);
+    amend_br_if(oob_trap, code);
+
+    raw::load(code, memtype::x, resexttype::uns, indexttype::lsl, true,
+              idx.as<ireg>(), elements, res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
 }
 void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
-    // placeholder
-    drop(code, stack, valtype::i32);
-    drop(code, stack, valtype::externref);
+    auto [idx, value] =
+        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>>(code);
+    auto table_ptr = intregs.temporary(code),
+         elements = intregs.temporary(code), current = table_ptr;
+
+    raw::ldr(code, true, misc_offset * sizeof(void *), miscreg, table_ptr);
+
+    static_assert(offsetof(runtime::WasmTable, current) == 0);
+    static_assert(offsetof(runtime::WasmTable, elements) == 8);
+    raw::ldp(code, true, 0, elements, table_ptr, current);
+
+    raw::cmp(code, false, idx.as<ireg>(), current);
+    auto oob_trap = code;
+    raw::bcond(code, 0, cond::ls);
+    trap<runtime::TrapKind::out_of_bounds_table_access>(code);
+    amend_br_if(oob_trap, code);
+
+    raw::load(code, memtype::x, resexttype::str, indexttype::lsl, true,
+              idx.as<ireg>(), elements, value.as<ireg>());
 }
 void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
     if (type == valtype::f32 || type == valtype::f64) {
