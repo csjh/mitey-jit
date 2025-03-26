@@ -749,18 +749,33 @@ void sub(std::byte *&code, Arm64::int_manager &intregs, uint32_t imm, ireg src,
     }
 }
 
-}; // namespace masm
+template <size_t N>
+std::array<std::byte *, N> trap(std::byte *&code,
+                                std::array<runtime::TrapKind, N> kinds) {
+    static_assert(N > 0);
 
-template <runtime::TrapKind kind> void trap(std::byte *&code) {
+    auto first = code;
+    // move first kind to x0
+    masm::mov(code, static_cast<uint64_t>(kinds.front()), ireg::x0);
+    auto trap = code;
     // put address of runtime::trap in x1
-    raw::ldr(code, true, sizeof(inst) * 3, ireg::x1);
+    masm::mov(code, reinterpret_cast<uint64_t>(&runtime::trap), ireg::x1);
+    raw::blr(code, ireg::x1);
+
+    std::array<std::byte *, N> labels = {first};
+    for (int i = 1; i < N; i++) {
+        auto kind = kinds[i];
+        labels[i] = code;
     // put kind in x0
-    raw::mov(code, true, true, false, 0, static_cast<uint64_t>(kind), ireg::x0);
-    // br x1
-    raw::br(code, ireg::x1);
-    // put address for pc-relative load
-    put(code, reinterpret_cast<uint64_t>(&runtime::trap));
+        masm::mov(code, static_cast<uint64_t>(kind), ireg::x0);
+        raw::b(code, trap - code);
+    }
+    return labels;
 }
+
+void trap(std::byte *&code, runtime::TrapKind kind) { trap<1>(code, {kind}); }
+
+}; // namespace masm
 
 template <size_t Bits, size_t Offset>
 void put_immediate(std::byte *base, std::byte *to) {
@@ -1256,7 +1271,7 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
 }
 
 void Arm64::unreachable(SHARED_PARAMS) {
-    trap<runtime::TrapKind::unreachable>(code);
+    masm::trap(code, runtime::TrapKind::unreachable);
 }
 void Arm64::nop(SHARED_PARAMS) { put(code, noop); }
 void Arm64::block(SHARED_PARAMS, WasmSignature &sig) {}
@@ -1575,12 +1590,15 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     auto traps = code;
     raw::b(code, 0);
 
-    amend_br_if(undefined_trap, code);
-    trap<runtime::TrapKind::undefined_element>(code);
-    amend_br_if(uninitialized_trap, code);
-    trap<runtime::TrapKind::uninitialized_element>(code);
-    amend_br_if(type_mismatch_trap, code);
-    trap<runtime::TrapKind::indirect_call_type_mismatch>(code);
+    auto [undefined_loc, uninitialized_loc, type_mismatch_loc] =
+        masm::trap(code, std::to_array({
+                             runtime::TrapKind::undefined_element,
+                             runtime::TrapKind::uninitialized_element,
+                             runtime::TrapKind::indirect_call_type_mismatch,
+                         }));
+    amend_br_if(undefined_trap, undefined_loc);
+    amend_br_if(uninitialized_trap, uninitialized_loc);
+    amend_br_if(type_mismatch_trap, type_mismatch_loc);
 
     amend_br(traps, code);
 
@@ -1726,7 +1744,7 @@ void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
     raw::cmp(code, false, idx.as<ireg>(), current);
     auto oob_trap = code;
     raw::bcond(code, 0, cond::cc);
-    trap<runtime::TrapKind::out_of_bounds_table_access>(code);
+    masm::trap(code, runtime::TrapKind::out_of_bounds_table_access);
     amend_br_if(oob_trap, code);
 
     raw::load(code, memtype::x, resexttype::uns, indexttype::lsl, true,
@@ -1748,8 +1766,8 @@ void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
 
     raw::cmp(code, false, idx.as<ireg>(), current);
     auto oob_trap = code;
-    raw::bcond(code, 0, cond::ls);
-    trap<runtime::TrapKind::out_of_bounds_table_access>(code);
+    raw::bcond(code, 0, cond::cc);
+    masm::trap(code, runtime::TrapKind::out_of_bounds_table_access);
     amend_br_if(oob_trap, code);
 
     raw::load(code, memtype::x, resexttype::str, indexttype::lsl, true,
