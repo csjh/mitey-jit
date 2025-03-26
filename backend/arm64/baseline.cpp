@@ -227,9 +227,19 @@ void add(std::byte *&code, bool sf, ireg rd, ireg rn, uint16_t imm12,
     addsub(code, sf, false, false, shift, imm12, rn, rd);
 }
 
+void adds(std::byte *&code, bool sf, ireg rd, ireg rn, uint16_t imm12,
+          bool shift = false) {
+    addsub(code, sf, false, true, shift, imm12, rn, rd);
+}
+
 void add(std::byte *&code, bool sf, ireg rd, ireg rm, ireg rn,
          shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
     addsub(code, sf, false, false, shift, rm, shift_n, rn, rd);
+}
+
+void adds(std::byte *&code, bool sf, ireg rd, ireg rm, ireg rn,
+          shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
+    addsub(code, sf, false, true, shift, rm, shift_n, rn, rd);
 }
 
 void sub(std::byte *&code, bool sf, ireg rd, ireg rn, uint16_t imm12,
@@ -265,10 +275,29 @@ void cmp(std::byte *&code, bool sf, ireg rn, uint16_t imm12) {
     subs(code, sf, ireg::xzr, rn, imm12);
 }
 
+void cmn(std::byte *&code, bool sf, ireg rn, ireg rm,
+         shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
+    adds(code, sf, ireg::xzr, rn, rm, shift, shift_n);
+}
+
+void cmn(std::byte *&code, bool sf, ireg rn, uint16_t imm12) {
+    adds(code, sf, ireg::xzr, rn, imm12);
+}
+
 void ccmp(std::byte *&code, bool sf, ireg rm, cond c, ireg rn, uint8_t nzcv) {
     put(code, 0b01111010010000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(rm) << 16) |
+                  (static_cast<uint32_t>(c) << 12) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(nzcv) << 0));
+}
+
+void ccmp(std::byte *&code, bool sf, uint8_t imm, cond c, ireg rn,
+          uint8_t nzcv) {
+    put(code, 0b01111010010000000000100000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(imm) << 16) |
                   (static_cast<uint32_t>(c) << 12) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(nzcv) << 0));
@@ -766,7 +795,7 @@ std::array<std::byte *, N> trap(std::byte *&code,
     for (int i = 1; i < N; i++) {
         auto kind = kinds[i];
         labels[i] = code;
-    // put kind in x0
+        // put kind in x0
         masm::mov(code, static_cast<uint64_t>(kind), ireg::x0);
         raw::b(code, trap - code);
     }
@@ -2143,6 +2172,17 @@ void Arm64::i32div_s(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
+
+    auto zero_check = code;
+    raw::cbnz(code, false, 0, p2.as<ireg>());
+    auto [_, overflow_trap] = masm::trap(
+        code, std::to_array({runtime::TrapKind::integer_divide_by_zero,
+                             runtime::TrapKind::integer_overflow}));
+    amend_br_if(zero_check, code);
+    raw::cmn(code, false, p2.as<ireg>(), 1);
+    raw::ccmp(code, false, 1, cond::eq, p1.as<ireg>(), 0);
+    raw::bcond(code, overflow_trap - code, cond::vs);
+
     raw::sdiv(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
@@ -2150,6 +2190,17 @@ void Arm64::i64div_s(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
+
+    auto zero_check = code;
+    raw::cbnz(code, true, 0, p2.as<ireg>());
+    auto [_, overflow_trap] = masm::trap(
+        code, std::to_array({runtime::TrapKind::integer_divide_by_zero,
+                             runtime::TrapKind::integer_overflow}));
+    amend_br_if(zero_check, code);
+    raw::cmn(code, true, p2.as<ireg>(), 1);
+    raw::ccmp(code, true, 1, cond::eq, p1.as<ireg>(), 0);
+    raw::bcond(code, overflow_trap - code, cond::vs);
+
     raw::sdiv(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
@@ -2157,6 +2208,12 @@ void Arm64::i32div_u(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
+
+    auto zero_check = code;
+    raw::cbnz(code, false, 0, p2.as<ireg>());
+    masm::trap(code, runtime::TrapKind::integer_divide_by_zero);
+    amend_br_if(zero_check, code);
+
     raw::udiv(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
@@ -2164,6 +2221,12 @@ void Arm64::i64div_u(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
+
+    auto zero_check = code;
+    raw::cbnz(code, true, 0, p2.as<ireg>());
+    masm::trap(code, runtime::TrapKind::integer_divide_by_zero);
+    amend_br_if(zero_check, code);
+
     raw::udiv(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
@@ -2172,6 +2235,12 @@ void Arm64::i32rem_s(SHARED_PARAMS) {
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
     auto v = intregs.temporary(code);
+
+    auto zero_check = code;
+    raw::cbnz(code, false, 0, p2.as<ireg>());
+    masm::trap(code, runtime::TrapKind::integer_divide_by_zero);
+    amend_br_if(zero_check, code);
+
     raw::sdiv(code, false, p2.as<ireg>(), p1.as<ireg>(), v);
     raw::msub(code, false, p2.as<ireg>(), p1.as<ireg>(), v, res.as<ireg>());
     finalize(code, res.as<ireg>());
@@ -2181,6 +2250,12 @@ void Arm64::i64rem_s(SHARED_PARAMS) {
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
     auto v = intregs.temporary(code);
+
+    auto zero_check = code;
+    raw::cbnz(code, true, 0, p2.as<ireg>());
+    masm::trap(code, runtime::TrapKind::integer_divide_by_zero);
+    amend_br_if(zero_check, code);
+
     raw::sdiv(code, true, p2.as<ireg>(), p1.as<ireg>(), v);
     raw::msub(code, true, p2.as<ireg>(), p1.as<ireg>(), v, res.as<ireg>());
     finalize(code, res.as<ireg>());
@@ -2190,6 +2265,12 @@ void Arm64::i32rem_u(SHARED_PARAMS) {
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
     auto v = intregs.temporary(code);
+
+    auto zero_check = code;
+    raw::cbnz(code, false, 0, p2.as<ireg>());
+    masm::trap(code, runtime::TrapKind::integer_divide_by_zero);
+    amend_br_if(zero_check, code);
+
     raw::udiv(code, false, p2.as<ireg>(), p1.as<ireg>(), v);
     raw::msub(code, false, p2.as<ireg>(), p1.as<ireg>(), v, res.as<ireg>());
     finalize(code, res.as<ireg>());
@@ -2199,6 +2280,12 @@ void Arm64::i64rem_u(SHARED_PARAMS) {
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
     auto v = intregs.temporary(code);
+
+    auto zero_check = code;
+    raw::cbnz(code, true, 0, p2.as<ireg>());
+    masm::trap(code, runtime::TrapKind::integer_divide_by_zero);
+    amend_br_if(zero_check, code);
+
     raw::udiv(code, true, p2.as<ireg>(), p1.as<ireg>(), v);
     raw::msub(code, true, p2.as<ireg>(), p1.as<ireg>(), v, res.as<ireg>());
     finalize(code, res.as<ireg>());
