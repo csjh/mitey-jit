@@ -1519,10 +1519,9 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     raw::ldr(code, true, offsetof(runtime::FunctionInfo, signature), ireg::x3,
              ireg::x3);
 
-    // todo: make this work with stack_size larger than 1 << 12
-    raw::add(code, true, stackreg, stackreg, stack_size);
+    masm::add(code, intregs, stack_size, stackreg, stackreg);
     raw::blr(code, ireg::x3);
-    raw::sub(code, true, stackreg, stackreg, stack_size);
+    masm::sub(code, intregs, stack_size, stackreg, stackreg);
 
     for (int i = 0; i < fn.type.results.size(); i++) {
         push(value::stack(stack_size));
@@ -1860,11 +1859,10 @@ void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
 
     auto [addr, res] = allocate_registers<Params, Result>(code);
 
-    /* todo: handle offsets larger than 1 << 12 */
     if (offset)
-        raw::add(code, true, addr.template as<ireg>(), addr.template as<ireg>(),
-                 offset);
-    raw::load(code, mtype, etype, indexttype::sxtw, false,
+        masm::add(code, intregs, offset, addr.template as<ireg>(),
+                  addr.template as<ireg>());
+    raw::load(code, mtype, etype, indexttype::uxtw, false,
               addr.template as<ireg>(), memreg, res.template as<RegTy>());
 
     if constexpr (!is_store)
@@ -2075,11 +2073,12 @@ void Arm64::i64popcnt(SHARED_PARAMS) {
 }
 void Arm64::i32add(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        raw::add(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<uint32_t>());
+        masm::add(code, intregs, p2.as<uint32_t>(), p1.as<ireg>(),
+                  res.as<ireg>());
     } else {
         raw::add(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
     }
@@ -2088,11 +2087,12 @@ void Arm64::i32add(SHARED_PARAMS) {
 }
 void Arm64::i64add(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        raw::add(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<uint32_t>());
+        masm::add(code, intregs, p2.as<uint32_t>(), p1.as<ireg>(),
+                  res.as<ireg>());
     } else {
         raw::add(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
     }
