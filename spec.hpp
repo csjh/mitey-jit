@@ -2,6 +2,7 @@
 
 #include "type-templates.hpp"
 #include <cstdint>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -156,6 +157,13 @@ class valtype_vector : protected std::vector<valtype> {
     valtype_vector(std::initializer_list<valtype> il)
         : std::vector<valtype>(il) {
         for (auto type : il) {
+            byte_size += valtype_size(type);
+        }
+    }
+
+    valtype_vector(std::span<valtype> span)
+        : std::vector<valtype>(span.begin(), span.end()) {
+        for (auto type : span) {
             byte_size += valtype_size(type);
         }
     }
