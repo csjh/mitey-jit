@@ -2611,14 +2611,28 @@ void Arm64::f32copysign(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    // todo: implement
+    auto i1 = intregs.temporary(code), i2 = intregs.temporary(code);
+
+    raw::mov(code, false, ftype::single, p1.as<freg>(), i1);
+    raw::mov(code, false, ftype::single, p2.as<freg>(), i2);
+    raw::and_(code, false, *tryLogicalImm(0x80000000), i2, i2);
+    raw::orr(code, false, shifttype::lsl, i2, 0, i1, i1);
+    raw::mov(code, false, ftype::single, i1, res.as<freg>());
+
     finalize(code, res.as<freg>());
 }
 void Arm64::f64copysign(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    // todo: implement
+    auto i1 = intregs.temporary(code), i2 = intregs.temporary(code);
+
+    raw::mov(code, true, ftype::double_, p1.as<freg>(), i1);
+    raw::mov(code, true, ftype::double_, p2.as<freg>(), i2);
+    raw::and_(code, true, *tryLogicalImm(0x8000000000000000ull), i2, i2);
+    raw::orr(code, true, shifttype::lsl, i2, 0, i1, i1);
+    raw::mov(code, true, ftype::double_, i1, res.as<freg>());
+
     finalize(code, res.as<freg>());
 }
 // noop
