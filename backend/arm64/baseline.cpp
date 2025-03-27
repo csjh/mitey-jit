@@ -1892,7 +1892,7 @@ void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
     if (offset)
         masm::add(code, intregs, offset, addr.template as<ireg>(),
                   addr.template as<ireg>());
-    raw::load(code, mtype, etype, indexttype::uxtw, false,
+    raw::load(code, mtype, etype, indexttype::lsl, false,
               addr.template as<ireg>(), memreg, res.template as<RegTy>());
 
     if constexpr (!is_store)
