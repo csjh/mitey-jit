@@ -98,5 +98,11 @@ enum class indexttype : uint8_t {
     sxtx = 0b111,
 };
 
+enum class enctype : uint8_t {
+    offset = 0b10,
+    preidx = 0b11,
+    pstidx = 0b01,
+};
+
 } // namespace arm64
 } // namespace mitey

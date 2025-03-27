@@ -665,10 +665,29 @@ void load(std::byte *&code, memtype ty, resexttype resext, indexttype indext,
                   (static_cast<uint32_t>(rt) << 0));
 }
 
-void ldp(std::byte *&code, bool sf, uint8_t imm, ireg rt2, ireg rn, ireg rt) {
-    put(code, 0b00101001010000000000000000000000 |
+void ldp(std::byte *&code, bool sf, enctype enc, int16_t imm, ireg rt2, ireg rn,
+         ireg rt) {
+    auto width = sf ? sizeof(uint64_t) : sizeof(uint32_t);
+    imm /= width;
+    auto imm7 = static_cast<uint8_t>(imm) & 0x7f;
+    put(code, 0b00101000010000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
-                  (static_cast<uint32_t>(imm) << 15) |
+                  (static_cast<uint32_t>(enc) << 23) |
+                  (static_cast<uint32_t>(imm7) << 15) |
+                  (static_cast<uint32_t>(rt2) << 10) |
+                  (static_cast<uint32_t>(rn) << 5) |
+                  (static_cast<uint32_t>(rt) << 0));
+}
+
+void stp(std::byte *&code, bool sf, enctype enc, int16_t imm, ireg rt2, ireg rn,
+         ireg rt) {
+    auto width = sf ? sizeof(uint64_t) : sizeof(uint32_t);
+    imm /= width;
+    auto imm7 = static_cast<uint8_t>(imm) & 0x7f;
+    put(code, 0b00101000000000000000000000000000 |
+                  (static_cast<uint32_t>(sf) << 31) |
+                  (static_cast<uint32_t>(enc) << 23) |
+                  (static_cast<uint32_t>(imm7) << 15) |
                   (static_cast<uint32_t>(rt2) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
@@ -1539,10 +1558,24 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     floatregs.begin();
 
     clobber_flags(code);
+    clobber_registers(code);
 
     stackify(code, stack, fn.type.params);
 
-    clobber_registers(code);
+    auto exhaust_ptr = ireg::x3, exhaust = ireg::x4;
+
+    masm::mov(code, reinterpret_cast<uint64_t>(&runtime::call_stack_depth),
+              exhaust_ptr);
+    raw::ldr(code, false, 0, exhaust_ptr, exhaust);
+    raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), exhaust,
+             ireg::xzr, exhaust_ptr);
+    raw::subs(code, false, exhaust, exhaust, 1);
+    raw::str(code, false, 0, exhaust_ptr, exhaust);
+
+    auto exhaustion = code;
+    raw::bcond(code, 0, cond::ne);
+    masm::trap(code, runtime::TrapKind::call_stack_exhausted);
+    amend_br_if(exhaustion, code);
 
     // load the FunctionInfo pointer
     raw::ldr(code, true, func_offset * sizeof(void *), miscreg, ireg::x3);
@@ -1552,6 +1585,10 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     masm::add(code, intregs, stack_size, stackreg, stackreg);
     raw::blr(code, ireg::x3);
     masm::sub(code, intregs, stack_size, stackreg, stackreg);
+
+    raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), exhaust,
+             ireg::xzr, exhaust_ptr);
+    raw::str(code, false, 0, exhaust_ptr, exhaust);
 
     for (int i = 0; i < fn.type.results.size(); i++) {
         push(value::stack(stack_size));
@@ -1565,18 +1602,33 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
          elements = intregs.temporary(code),
          function_ptr = intregs.temporary(code),
          expected_sig = intregs.temporary(code),
-         given_sig = intregs.temporary(code);
+         given_sig = intregs.temporary(code),
+         exhaust_ptr = intregs.temporary(code),
+         exhaust = intregs.temporary(code);
 
     clobber_flags(code);
     clobber_registers(code);
 
     stackify(code, stack, type.params);
 
+    masm::mov(code, reinterpret_cast<uint64_t>(&runtime::call_stack_depth),
+              exhaust_ptr);
+    raw::ldr(code, false, 0, exhaust_ptr, exhaust);
+    raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), exhaust,
+             ireg::xzr, exhaust_ptr);
+    raw::subs(code, false, exhaust, exhaust, 1);
+    raw::str(code, false, 0, exhaust_ptr, exhaust);
+
+    auto exhaustion = code;
+    raw::bcond(code, 0, cond::ne);
+    masm::trap(code, runtime::TrapKind::call_stack_exhausted);
+    amend_br_if(exhaustion, code);
+
     raw::ldr(code, true, table_offset * sizeof(void *), miscreg, table_ptr);
 
     static_assert(offsetof(runtime::WasmTable, current) == 0);
     static_assert(offsetof(runtime::WasmTable, elements) == 8);
-    raw::ldp(code, true, 0, elements, table_ptr, current);
+    raw::ldp(code, true, enctype::offset, 0, elements, table_ptr, current);
 
     raw::cmp(code, false, current, idx);
     auto undefined_trap = code;
@@ -1615,6 +1667,10 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     raw::add(code, true, stackreg, stackreg, stack_size);
     raw::blr(code, function_ptr);
     raw::sub(code, true, stackreg, stackreg, stack_size);
+
+    raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), exhaust,
+             ireg::xzr, exhaust_ptr);
+    raw::str(code, false, 0, exhaust_ptr, exhaust);
 
     auto traps = code;
     raw::b(code, 0);
@@ -1768,7 +1824,7 @@ void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
 
     static_assert(offsetof(runtime::WasmTable, current) == 0);
     static_assert(offsetof(runtime::WasmTable, elements) == 8);
-    raw::ldp(code, true, 0, elements, table_ptr, current);
+    raw::ldp(code, true, enctype::offset, 0, elements, table_ptr, current);
 
     raw::cmp(code, false, idx.as<ireg>(), current);
     auto oob_trap = code;
@@ -1791,7 +1847,7 @@ void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
 
     static_assert(offsetof(runtime::WasmTable, current) == 0);
     static_assert(offsetof(runtime::WasmTable, elements) == 8);
-    raw::ldp(code, true, 0, elements, table_ptr, current);
+    raw::ldp(code, true, enctype::offset, 0, elements, table_ptr, current);
 
     raw::cmp(code, false, idx.as<ireg>(), current);
     auto oob_trap = code;
