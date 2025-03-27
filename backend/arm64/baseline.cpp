@@ -1364,11 +1364,9 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
     if (std::holds_alternative<If>(flow.construct)) {
         amend_br_if(std::get<If>(flow.construct).else_jump, code);
 
-        if (!stack.polymorphism()) {
-            // move the duplicated params into their proper positions
-            stack_size += flow.sig.params.bytesize();
-            stackify(code, stack, flow.sig.results);
-        }
+        // move the duplicated params into their proper positions
+        stack_size += flow.sig.params.bytesize();
+        stackify(code, stack, flow.sig.results);
     }
 
     for (auto ty : flow.sig.results) {
