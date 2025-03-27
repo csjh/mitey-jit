@@ -1250,7 +1250,10 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
 
             locals[i] = value::reg(reg);
         } else {
-            raw::str(code, true, offset, stackreg, ireg::xzr);
+            if (!is_param) {
+                raw::str(code, true, offset, stackreg, ireg::xzr);
+            }
+
             locals[i] = value::stack(offset);
         }
     }
