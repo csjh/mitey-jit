@@ -26,7 +26,12 @@ struct LogicalImm {
     uint32_t immr : 6;
     uint32_t imms : 6;
     uint32_t postfix : 10;
+
+    LogicalImm(uint32_t N, uint32_t immr, uint32_t imms)
+        : prefix(0), N(N), immr(immr), imms(imms), postfix(0) {}
+    LogicalImm(uint32_t v) { *this = std::bit_cast<LogicalImm>(v); }
 };
+
 static_assert(sizeof(LogicalImm) == sizeof(uint32_t));
 
 namespace raw {
@@ -115,15 +120,15 @@ void sbfm(std::byte *&code, bool sf, LogicalImm imm, ireg rn, ireg rd) {
 }
 
 void sxtb(std::byte *&code, bool sf, ireg rn, ireg rd) {
-    sbfm(code, sf, LogicalImm{.N = sf, .immr = 0, .imms = 7}, rn, rd);
+    sbfm(code, sf, LogicalImm(sf, 0, 7), rn, rd);
 }
 
 void sxth(std::byte *&code, bool sf, ireg rn, ireg rd) {
-    sbfm(code, sf, LogicalImm{.N = sf, .immr = 0, .imms = 15}, rn, rd);
+    sbfm(code, sf, LogicalImm(sf, 0, 15), rn, rd);
 }
 
 void sxtw(std::byte *&code, ireg rn, ireg rd) {
-    sbfm(code, true, LogicalImm{.N = true, .immr = 0, .imms = 31}, rn, rd);
+    sbfm(code, true, LogicalImm(true, 0, 31), rn, rd);
 }
 
 void lsl(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
@@ -131,7 +136,7 @@ void lsl(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
     shift_imm %= width;
     auto imms = width - shift_imm - 1;
     auto immr = imms + 1;
-    ubfm(code, sf, LogicalImm{.N = sf, .immr = immr, .imms = imms}, rn, rd);
+    ubfm(code, sf, LogicalImm(sf, immr, imms), rn, rd);
 }
 
 void lsl(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
@@ -145,9 +150,7 @@ void lsl(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
 void lsr(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
     auto width = sf ? 64 : 32;
     shift_imm %= width;
-    ubfm(code, sf,
-         LogicalImm{.N = sf, .immr = shift_imm, .imms = 0b011111u | sf << 5},
-         rn, rd);
+    ubfm(code, sf, LogicalImm(sf, shift_imm, 0b011111u | sf << 5), rn, rd);
 }
 
 void lsr(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
@@ -161,9 +164,7 @@ void lsr(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
 void asr(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
     auto width = sf ? 64 : 32;
     shift_imm %= width;
-    sbfm(code, sf,
-         LogicalImm{.N = sf, .immr = shift_imm, .imms = 0b011111u | sf << 5},
-         rn, rd);
+    sbfm(code, sf, LogicalImm(sf, shift_imm, 0b011111u | sf << 5), rn, rd);
 }
 
 void asr(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
@@ -847,9 +848,8 @@ std::optional<LogicalImm> tryLogicalImm(uint64_t val) {
     if (std::rotr(val, size & 63) != val)
         return std::nullopt;
 
-    return LogicalImm{.N = (size >> 6),
-                      .immr = -rotation & (size - 1),
-                      .imms = (-(size << 1) | (ones - 1)) & 0x3f};
+    return LogicalImm(size >> 6, -rotation & (size - 1),
+                      (-(size << 1) | (ones - 1)) & 0x3f);
 }
 
 std::optional<LogicalImm> tryLogicalImm(uint32_t val) {
@@ -995,7 +995,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
             if (imm < To::threshold)
                 return v;
         if constexpr (std::is_same_v<To, iwant::bitmask>)
-            if (auto mask = tryLogicalImm(imm); mask)
+            if (auto mask = tryLogicalImm(imm))
                 return value::imm(std::bit_cast<uint32_t>(*mask));
 
         auto reg = intregs.temporary(code);
