@@ -197,9 +197,6 @@ template <auto func> runtime::TemplessSignature *wasm_functionify() {
 }
 
 template <auto func> runtime::FunctionInfo internalize() {
-    static void *misc[] = {&runtime::WasmMemory::empty};
-    auto memory = runtime::WasmMemory::empty.memory.get();
-
     constexpr auto has_nontrivial_args = check_arg_triviality<func>();
     using WasmType = std::conditional_t<
         has_nontrivial_args,

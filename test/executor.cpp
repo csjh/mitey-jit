@@ -1,6 +1,4 @@
 #include "../backend/arm64/baseline.hpp"
-#include "../backend/arm64/minimal.hpp"
-#include "../backend/minimal/composer.hpp"
 #include "../instance.hpp"
 #include "../interfacing.hpp"
 #include "../module.hpp"

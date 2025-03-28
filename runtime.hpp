@@ -211,10 +211,9 @@ struct WasmTable {
     valtype type;
 
     WasmTable(valtype type, uint32_t initial, uint32_t maximum)
-        : current(initial), maximum(maximum),
-          elements(
-              static_cast<WasmValue *>(calloc(initial, sizeof(WasmValue)))),
-          type(type) {}
+        : current(initial), elements(static_cast<WasmValue *>(
+                                calloc(initial, sizeof(WasmValue)))),
+          maximum(maximum), type(type) {}
 
     WasmTable() = delete;
     WasmTable(const WasmTable &) = delete;

@@ -5,7 +5,8 @@
 
 namespace mitey {
 
-#define SHARED_PARAMS std::byte *&code, WasmStack &stack
+#define SHARED_PARAMS                                                          \
+    [[maybe_unused]] std::byte *&code, [[maybe_unused]] WasmStack &stack
 
 template <typename Target> class Composer {
 #define nilary(name)                                                           \
@@ -25,7 +26,8 @@ template <typename Target> class Composer {
     }
 
 #define memop(name)                                                            \
-    void name(SHARED_PARAMS, uint64_t offset, uint64_t align) {                \
+    void name(SHARED_PARAMS, uint64_t offset,                                  \
+              [[maybe_unused]] uint64_t align) {                               \
         Target::put_temp1(code, offset);                                       \
         Target::put_call(code, runtime::name);                                 \
     }
@@ -63,9 +65,9 @@ template <typename Target> class Composer {
 
     nilary(unreachable);
     void nop(SHARED_PARAMS) {}
-    void block(SHARED_PARAMS, WasmSignature &sig) {}
-    void loop(SHARED_PARAMS, WasmSignature &sig) {}
-    std::byte *if_(SHARED_PARAMS, WasmSignature &sig) {
+    void block(SHARED_PARAMS, WasmSignature &) {}
+    void loop(SHARED_PARAMS, WasmSignature &) {}
+    std::byte *if_(SHARED_PARAMS, WasmSignature &) {
         return Target::put_if(code);
     }
     void else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
@@ -150,8 +152,6 @@ template <typename Target> class Composer {
         Target::put_temp2(t2_addr, std::bit_cast<uint64_t>(info));
 
         for (auto depth : targets) {
-            auto &target = control_stack[base - depth].expected;
-
             auto &flow = control_stack[base - depth];
             auto offset = static_cast<int32_t>(flow.stack_offset - stack.sp());
             if (std::holds_alternative<Loop>(flow.construct)) {

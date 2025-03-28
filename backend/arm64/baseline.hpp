@@ -42,7 +42,8 @@ class value {
     template <location loc> bool is() const { return where() == loc; }
 };
 
-#define SHARED_PARAMS std::byte *&code, WasmStack &stack
+#define SHARED_PARAMS                                                          \
+    [[maybe_unused]] std::byte *&code, [[maybe_unused]] WasmStack &stack
 
 class Arm64 {
   public:
@@ -77,18 +78,18 @@ class Arm64 {
         // <result> = <temp1> + <temp2>
         // <result> = <result> + <temp1> (bad)
         // because <result> might alias temp1
-        RegType result(std::byte *&code);
+        RegType result();
         // adds the spill metadata for a given (result) register
         void claim(RegType, metadata);
         // takes the least recently used register
         // spills the register if necessary
-        RegType temporary(std::byte *&code);
+        RegType temporary();
         // dumps a register, throws away the metadata
         void surrender(RegType reg);
         // ends a transaction
         void commit();
 
-        void clobber_all(std::byte *&code);
+        void clobber_all();
         bool check_spill(RegType reg, std::byte *code);
     };
 
@@ -115,7 +116,7 @@ class Arm64 {
     value *values = values_start.get();
 
     void clobber_flags(std::byte *&code);
-    void clobber_registers(std::byte *&code);
+    void clobber_registers();
 
     void push(value v);
 
@@ -139,10 +140,9 @@ class Arm64 {
     ireg adapt_value_into(std::byte *&code, value v, std::optional<ireg> &reg);
     freg adapt_value_into(std::byte *&code, value v, std::optional<freg> &reg);
 
-    void stackify(std::byte *&code, WasmStack &stack, valtype_vector &values);
-    bool move_results(std::byte *&code, WasmStack &stack,
-                      valtype_vector &copied_values, uint32_t copy_to,
-                      bool discard_copied);
+    void stackify(std::byte *&code, valtype_vector &values);
+    bool move_results(std::byte *&code, valtype_vector &copied_values,
+                      uint32_t copy_to, bool discard_copied);
     void discard(std::byte *&code, WasmStack &stack, uint32_t skip,
                  uint32_t discard_to);
 
@@ -166,8 +166,7 @@ class Arm64 {
     void abstract_memop(SHARED_PARAMS, uint64_t offset);
 
     template <runtime::Signature func, size_t NP, size_t NR>
-    void runtime_call(std::byte *&code, WasmStack &stack,
-                      std::array<valtype, NP> params,
+    void runtime_call(std::byte *&code, std::array<valtype, NP> params,
                       std::array<valtype, NR> results,
                       std::optional<uint64_t> temp1 = std::nullopt,
                       std::optional<uint64_t> temp2 = std::nullopt);
