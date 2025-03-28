@@ -747,6 +747,8 @@ void ldr(std::byte *&code, bool sf, uint32_t offset, ireg rn, freg rt) {
                   (static_cast<uint32_t>(rt) << 0));
 }
 
+void ret(std::byte *&code) { put(code, 0b11010110010111110000001111000000); }
+
 }; // namespace raw
 
 namespace masm {
@@ -1225,9 +1227,9 @@ void Arm64::finalize(std::byte *&code, Args... results) {
 }
 
 void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
-    // stp     x29, x30, [sp, #-0x10]!
-    // mov     x29, sp
-    put(code, std::array<uint32_t, 2>{0xa9bf7bfd, 0x910003fd});
+    raw::stp(code, true, enctype::preidx, -0x10, ireg::x30, ireg::sp,
+             ireg::x29);
+    raw::add(code, true, ireg::x29, ireg::sp, 0);
 
     locals = std::span(new value[fn.locals.size()], fn.locals.size());
 
@@ -1313,9 +1315,8 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
         }
     }
 
-    // ldp     x29, x30, [sp], #0x10
-    // ret
-    put(code, std::array<uint32_t, 2>{0xa8c17bfd, 0xd65f03c0});
+    raw::ldp(code, true, enctype::pstidx, 0x10, ireg::x30, ireg::sp, ireg::x29);
+    raw::ret(code);
 
     delete[] locals.data();
 }
