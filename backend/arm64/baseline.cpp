@@ -1555,19 +1555,19 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     intregs.begin();
     floatregs.begin();
+    auto exhaust_ptr = intregs.temporary(), exhaust = intregs.temporary(),
+         function_ptr = exhaust_ptr, signature = exhaust;
 
     clobber_flags(code);
     clobber_registers();
 
     stackify(code, fn.type.params);
 
-    auto exhaust_ptr = ireg::x3, exhaust = ireg::x4;
-
     masm::mov(code, reinterpret_cast<uint64_t>(&runtime::call_stack_depth),
               exhaust_ptr);
     raw::ldr(code, false, 0, exhaust_ptr, exhaust);
     raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), exhaust,
-             ireg::xzr, exhaust_ptr);
+             ireg::sp, exhaust_ptr);
     raw::subs(code, false, exhaust, exhaust, 1);
     raw::str(code, false, 0, exhaust_ptr, exhaust);
 
@@ -1577,16 +1577,33 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     amend_br_if(exhaustion, code);
 
     // load the FunctionInfo pointer
-    raw::ldr(code, true, func_offset * sizeof(void *), miscreg, ireg::x3);
-    raw::ldr(code, true, offsetof(runtime::FunctionInfo, signature), ireg::x3,
-             ireg::x3);
+    raw::ldr(code, true, func_offset * sizeof(void *), miscreg, function_ptr);
+    if (fn.import) {
+        static_assert(offsetof(runtime::FunctionInfo, memory) +
+                          sizeof(void *) ==
+                      offsetof(runtime::FunctionInfo, misc));
+
+        raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t),
+                 miscreg, ireg::sp, memreg);
+        raw::ldp(code, true, enctype::offset,
+                 offsetof(runtime::FunctionInfo, memory), miscreg, function_ptr,
+                 memreg);
+    }
+
+    raw::ldr(code, true, offsetof(runtime::FunctionInfo, signature),
+             function_ptr, signature);
 
     masm::add(code, intregs, stack_size, stackreg, stackreg);
-    raw::blr(code, ireg::x3);
+    raw::blr(code, signature);
     masm::sub(code, intregs, stack_size, stackreg, stackreg);
 
+    if (fn.import) {
+        raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), miscreg,
+                 ireg::sp, memreg);
+    }
+
     raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), exhaust,
-             ireg::xzr, exhaust_ptr);
+             ireg::sp, exhaust_ptr);
     raw::str(code, false, 0, exhaust_ptr, exhaust);
 
     for ([[maybe_unused]] auto result : fn.type.results) {
@@ -1611,7 +1628,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
               exhaust_ptr);
     raw::ldr(code, false, 0, exhaust_ptr, exhaust);
     raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), exhaust,
-             ireg::xzr, exhaust_ptr);
+             ireg::sp, exhaust_ptr);
     raw::subs(code, false, exhaust, exhaust, 1);
     raw::str(code, false, 0, exhaust_ptr, exhaust);
 
@@ -1656,6 +1673,12 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     auto type_mismatch_trap = code;
     raw::bcond(code, 0, cond::ne);
 
+    raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), miscreg,
+             ireg::sp, memreg);
+    raw::ldp(code, true, enctype::offset,
+             offsetof(runtime::FunctionInfo, memory), miscreg, function_ptr,
+             memreg);
+
     raw::ldr(code, true, offsetof(runtime::FunctionInfo, signature),
              function_ptr, function_ptr);
 
@@ -1664,8 +1687,11 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     raw::blr(code, function_ptr);
     raw::sub(code, true, stackreg, stackreg, stack_size);
 
+    raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), miscreg,
+             ireg::sp, memreg);
+
     raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), exhaust,
-             ireg::xzr, exhaust_ptr);
+             ireg::sp, exhaust_ptr);
     raw::str(code, false, 0, exhaust_ptr, exhaust);
 
     auto traps = code;
