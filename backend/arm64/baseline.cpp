@@ -38,6 +38,8 @@ namespace raw {
 
 void orr(std::byte *&code, bool sf, shifttype shift, ireg rm, uint8_t shift_imm,
          ireg rn, ireg rd) {
+    assert(shift_imm < (sf ? 64 : 32));
+
     put(code, 0b00101010000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(shift) << 22) |
@@ -59,6 +61,8 @@ void orr(std::byte *&code, bool sf, LogicalImm imm, ireg rn, ireg rd) {
 
 void and_(std::byte *&code, bool sf, shifttype shift, ireg rm,
           uint8_t shift_imm, ireg rn, ireg rd) {
+    assert(shift_imm < (sf ? 64 : 32));
+
     put(code, 0b00001010000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(shift) << 22) |
@@ -80,6 +84,8 @@ void and_(std::byte *&code, bool sf, LogicalImm imm, ireg rn, ireg rd) {
 
 void eor(std::byte *&code, bool sf, shifttype shift, ireg rm, uint8_t shift_imm,
          ireg rn, ireg rd) {
+    assert(shift_imm < (sf ? 64 : 32));
+
     put(code, 0b01001010000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(shift) << 22) |
@@ -201,6 +207,8 @@ void ror(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
 
 void addsub(std::byte *&code, bool sf, bool sub, bool setflags, bool shift,
             uint16_t imm12, ireg rn, ireg rd) {
+    assert(imm12 < 1 << 12);
+
     put(code, 0b00010001000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(sub) << 30) |
@@ -213,6 +221,8 @@ void addsub(std::byte *&code, bool sf, bool sub, bool setflags, bool shift,
 
 void addsub(std::byte *&code, bool sf, bool sub, bool setflags, shifttype shift,
             ireg rm, uint8_t shift_n, ireg rn, ireg rd) {
+    assert(shift_n < (sf ? 64 : 32));
+
     put(code, 0b00001011000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(sub) << 30) |
@@ -298,6 +308,8 @@ void ccmp(std::byte *&code, bool sf, ireg rm, cond c, ireg rn, uint8_t nzcv) {
 
 void ccmp(std::byte *&code, bool sf, uint8_t imm, cond c, ireg rn,
           uint8_t nzcv) {
+    assert(imm < 1 << 5);
+
     put(code, 0b01111010010000000000100000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(imm) << 16) |
@@ -345,7 +357,9 @@ void udiv(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
 }
 
 void b(std::byte *&code, int32_t _imm26) {
-    uint32_t imm26 = _imm26 / sizeof(uint32_t);
+    assert(std::abs(_imm26) < (1 << 26) * sizeof(inst));
+
+    uint32_t imm26 = _imm26 / sizeof(inst);
     imm26 &= 0x3ffffff;
 
     put(code, 0b00010100000000000000000000000000 |
@@ -353,7 +367,9 @@ void b(std::byte *&code, int32_t _imm26) {
 }
 
 void bcond(std::byte *&code, int32_t _imm19, cond c) {
-    uint32_t imm19 = _imm19 /= sizeof(uint32_t);
+    assert(std::abs(_imm19) < (1 << 19) * sizeof(inst));
+
+    uint32_t imm19 = _imm19 /= sizeof(inst);
     imm19 &= 0x7ffff;
 
     put(code, 0b01010100000000000000000000000000 |
@@ -372,7 +388,9 @@ void blr(std::byte *&code, ireg rn) {
 }
 
 void cbnz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
-    uint32_t imm19 = _imm19 /= sizeof(uint32_t);
+    assert(std::abs(_imm19) < (1 << 19) * sizeof(inst));
+
+    uint32_t imm19 = _imm19 /= sizeof(inst);
     imm19 &= 0x7ffff;
 
     put(code, 0b00110101000000000000000000000000 |
@@ -382,7 +400,9 @@ void cbnz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
 }
 
 void cbz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
-    uint32_t imm19 = _imm19 /= sizeof(uint32_t);
+    assert(std::abs(_imm19) < (1 << 19) * sizeof(inst));
+
+    uint32_t imm19 = _imm19 /= sizeof(inst);
     imm19 &= 0x7ffff;
 
     put(code, 0b00110100000000000000000000000000 |
@@ -486,6 +506,8 @@ void mov(std::byte *&code, ftype ft, freg src, freg dst) {
 
 void mov(std::byte *&code, bool sf, bool notneg, bool keep, uint8_t hw,
          uint16_t imm, ireg rd) {
+    assert(hw < 4);
+
     put(code, 0b00010010100000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(notneg) << 30) |
@@ -496,7 +518,8 @@ void mov(std::byte *&code, bool sf, bool notneg, bool keep, uint8_t hw,
 }
 
 void adr(std::byte *&code, int32_t imm, ireg rd) {
-    // assume imm fits
+    assert(std::abs(imm) < (1 << 21) * sizeof(inst));
+
     auto immlo = imm & 0b11;
     auto immhi = imm >> 2;
 
@@ -669,6 +692,9 @@ void load(std::byte *&code, memtype ty, resexttype resext, indexttype indext,
 
 void ldp(std::byte *&code, bool sf, enctype enc, int16_t imm, ireg rt2, ireg rn,
          ireg rt) {
+    assert(imm % 8 == 0);
+    assert(imm >= -128 && imm <= 127);
+
     auto width = sf ? sizeof(uint64_t) : sizeof(uint32_t);
     imm /= width;
     auto imm7 = static_cast<uint8_t>(imm) & 0x7f;
@@ -683,6 +709,9 @@ void ldp(std::byte *&code, bool sf, enctype enc, int16_t imm, ireg rt2, ireg rn,
 
 void stp(std::byte *&code, bool sf, enctype enc, int16_t imm, ireg rt2, ireg rn,
          ireg rt) {
+    assert(imm % 8 == 0);
+    assert(imm >= -128 && imm <= 127);
+
     auto width = sf ? sizeof(uint64_t) : sizeof(uint32_t);
     imm /= width;
     auto imm7 = static_cast<uint8_t>(imm) & 0x7f;
@@ -695,24 +724,26 @@ void stp(std::byte *&code, bool sf, enctype enc, int16_t imm, ireg rt2, ireg rn,
                   (static_cast<uint32_t>(rt) << 0));
 }
 
-void ldpsw(std::byte *&code, uint8_t imm, ireg rt2, ireg rn, ireg rt) {
+void ldpsw(std::byte *&code, int8_t imm, ireg rt2, ireg rn, ireg rt) {
+    assert(imm % 8 == 0);
+    assert(imm >= -128 && imm <= 127);
+
+    imm /= sizeof(uint32_t);
+    auto imm7 = static_cast<uint8_t>(imm) & 0x7f;
     put(code, 0b01101001010000000000000000000000 |
-                  (static_cast<uint32_t>(imm) << 15) |
+                  (static_cast<uint32_t>(imm7) << 15) |
                   (static_cast<uint32_t>(rt2) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
 }
 
-[[maybe_unused]] void ldr(std::byte *&code, bool sf, uint32_t imm19, ireg rt) {
-    imm19 /= sizeof(inst);
-    put(code, 0b00011000000000000000000000000000 |
-                  (static_cast<uint32_t>(sf) << 30) |
-                  (static_cast<uint32_t>(imm19) << 5) |
-                  (static_cast<uint32_t>(rt) << 0));
-}
-
 void str(std::byte *&code, bool sf, uint32_t offset, ireg rn, ireg rt) {
-    offset /= sf ? 8 : 4;
+    auto width = sf ? sizeof(uint64_t) : sizeof(uint32_t);
+
+    assert(offset % width == 0);
+    assert(offset < (1 << 12) * width);
+
+    offset /= width;
     put(code, 0b10111001000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 30) |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -721,7 +752,12 @@ void str(std::byte *&code, bool sf, uint32_t offset, ireg rn, ireg rt) {
 }
 
 void str(std::byte *&code, bool sf, uint32_t offset, ireg rn, freg rt) {
-    offset /= sf ? 8 : 4;
+    auto width = sf ? sizeof(uint64_t) : sizeof(uint32_t);
+
+    assert(offset % width == 0);
+    assert(offset < (1 << 12) * width);
+
+    offset /= width;
     put(code, 0b10111101000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 30) |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -729,8 +765,18 @@ void str(std::byte *&code, bool sf, uint32_t offset, ireg rn, freg rt) {
                   (static_cast<uint32_t>(rt) << 0));
 }
 
+template <typename RegType>
+void str(std::byte *&code, bool sf, ireg rn, RegType rt) {
+    str(code, sf, 0, rn, rt);
+}
+
 void ldr(std::byte *&code, bool sf, uint32_t offset, ireg rn, ireg rt) {
-    offset /= sf ? 8 : 4;
+    auto width = sf ? sizeof(uint64_t) : sizeof(uint32_t);
+
+    assert(offset % width == 0);
+    assert(offset < (1 << 12) * width);
+
+    offset /= width;
     put(code, 0b10111001010000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 30) |
                   (static_cast<uint32_t>(offset) << 10) |
@@ -739,12 +785,22 @@ void ldr(std::byte *&code, bool sf, uint32_t offset, ireg rn, ireg rt) {
 }
 
 void ldr(std::byte *&code, bool sf, uint32_t offset, ireg rn, freg rt) {
-    offset /= sf ? 8 : 4;
+    auto width = sf ? sizeof(uint64_t) : sizeof(uint32_t);
+
+    assert(offset % width == 0);
+    assert(offset < (1 << 12) * width);
+
+    offset /= width;
     put(code, 0b10111101010000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 30) |
                   (static_cast<uint32_t>(offset) << 10) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rt) << 0));
+}
+
+template <typename RegType>
+void ldr(std::byte *&code, bool sf, ireg rn, RegType rt) {
+    ldr(code, sf, 0, rn, rt);
 }
 
 void ret(std::byte *&code) { put(code, 0b11010110010111110000001111000000); }
