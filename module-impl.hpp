@@ -1628,9 +1628,12 @@ template <typename Pager, typename Target>
 std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
                                         std::byte *code, FunctionShell &fn) {
     auto stack = WasmStack();
+    stack.set_sp(fn.locals.bytesize());
+
     auto jit = Target();
-    auto control_stack = std::vector<ControlFlow>({ControlFlow(
-        fn.type.results, {}, {}, {}, fn.type, false, 0, Function(fn))});
+    auto control_stack = std::vector<ControlFlow>(
+        {ControlFlow(fn.type.results, {}, {}, {}, fn.type, false, stack.sp(),
+                     Function(fn))});
 
     _(start_function, fn);
 
