@@ -1036,6 +1036,7 @@ template <typename RegType, size_t First, size_t Last>
 void Arm64::reg_manager<RegType, First, Last>::clobber_all() {
     for (size_t i = 0; i < Last - First; i++) {
         spill(from_index(i));
+        surrender(from_index(i));
     }
 }
 
