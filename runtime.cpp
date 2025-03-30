@@ -42,7 +42,7 @@ static inline void gas(auto call) {
               uint64_t tmp2)
 #define TEMPLESS_PARAMS memory, misc, stack
 #define PARAMS TEMPLESS_PARAMS, tmp1, tmp2
-#define PRELUDE auto memheader = &MISC_GET(WasmMemory, 0)
+#define PRELUDE [[maybe_unused]] auto memheader = &MISC_GET(WasmMemory, 0)
 #define POSTLUDE [[clang::musttail]] return dummy(PARAMS)
 #define MISC_GET(type, idx) (*reinterpret_cast<type *>(misc[idx]))
 #define byteadd(ptr, n)                                                        \
