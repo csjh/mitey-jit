@@ -177,14 +177,16 @@ union WasmValue {
 
     WasmValue() : u64(0) {}
 
-    WasmValue(int32_t i32) : i32(i32) {}
-    WasmValue(uint32_t u32) : u32(u32) {}
-    WasmValue(int64_t i64) : i64(i64) {}
-    WasmValue(uint64_t u64) : u64(u64) {}
-    WasmValue(float f32) : f32(f32) {}
-    WasmValue(double f64) : f64(f64) {}
-    WasmValue(Funcref funcref) : funcref(funcref) {}
-    WasmValue(Externref externref) : externref(externref) {}
+    WasmValue(int32_t i32) : WasmValue() { this->i32 = i32; }
+    WasmValue(uint32_t u32) : WasmValue() { this->u32 = u32; }
+    WasmValue(int64_t i64) : WasmValue() { this->i64 = i64; }
+    WasmValue(uint64_t u64) : WasmValue() { this->u64 = u64; }
+    WasmValue(float f32) : WasmValue() { this->f32 = f32; }
+    WasmValue(double f64) : WasmValue() { this->f64 = f64; }
+    WasmValue(Funcref funcref) : WasmValue() { this->funcref = funcref; }
+    WasmValue(Externref externref) : WasmValue() {
+        this->externref = externref;
+    }
 
     operator int() { return i32; }
     operator unsigned() { return u32; }
