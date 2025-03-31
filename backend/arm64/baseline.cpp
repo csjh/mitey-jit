@@ -1785,9 +1785,9 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
              function_ptr, function_ptr);
 
     // todo: make this work with stack_size larger than 1 << 12
-    raw::add(code, true, stackreg, stackreg, stack_size);
+    masm::add(code, intregs, true, stack_size, stackreg, stackreg);
     raw::blr(code, function_ptr);
-    raw::sub(code, true, stackreg, stackreg, stack_size);
+    masm::sub(code, intregs, true, stack_size, stackreg, stackreg);
 
     raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), miscreg,
              ireg::sp, memreg);
