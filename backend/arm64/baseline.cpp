@@ -1210,6 +1210,8 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
     std::optional<ireg> intreg = std::nullopt;
     std::optional<freg> floatreg = std::nullopt;
 
+    auto start = code;
+
     auto expected = values - copied_values.size();
     auto dest = stack_offset;
     for (size_t i = 0; i < copied_values.size(); i++) {
@@ -1231,13 +1233,15 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
         }
     }
 
+    auto has_move = start != code;
+
     if (!discard_copied)
-        return true;
+        return has_move;
 
     values -= copied_values.size();
     stack_size -= copied_values.bytesize();
 
-    return true;
+    return has_move;
 }
 
 void Arm64::discard(std::byte *&code, WasmStack &stack, uint32_t skip,
