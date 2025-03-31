@@ -1213,6 +1213,12 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
     auto expected = values - copied_values.size();
     auto dest = stack_offset;
     for (size_t i = 0; i < copied_values.size(); i++) {
+        if (expected[i].is<value::location::stack>() &&
+            expected[i].as<uint32_t>() == dest) {
+            dest += sizeof(runtime::WasmValue);
+            continue;
+        }
+
         auto v = copied_values[i];
         if (v == valtype::f32 || v == valtype::f64) {
             auto reg = adapt_value_into(code, expected[i], floatreg);
