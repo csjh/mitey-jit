@@ -1425,6 +1425,12 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
 }
 
 void Arm64::unreachable(SHARED_PARAMS) {
+    auto v = stack.rbegin();
+    while (*v != valtype::null) {
+        drop(code, stack, *v);
+        v++;
+    }
+
     masm::trap(code, runtime::TrapKind::unreachable);
 }
 void Arm64::nop(SHARED_PARAMS) { put(code, noop); }
