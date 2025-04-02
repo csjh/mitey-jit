@@ -1857,7 +1857,7 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
             condition = value::flag(cond::ne);
         }
 
-        raw::csel(code, type == valtype::f64, v2.as<freg>(),
+        raw::csel(code, type != valtype::f32, v2.as<freg>(),
                   condition.as<cond>(), v1.as<freg>(), reg.as<freg>());
 
         finalize(code, reg.as<freg>());
@@ -1872,7 +1872,7 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
             condition = value::flag(cond::ne);
         }
 
-        raw::csel(code, type == valtype::f64, v2.as<ireg>(),
+        raw::csel(code, type != valtype::i32, v2.as<ireg>(),
                   condition.as<cond>(), v1.as<ireg>(), reg.as<ireg>());
 
         finalize(code, reg.as<ireg>());
