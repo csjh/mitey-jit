@@ -147,6 +147,11 @@ class Arm64 {
     void discard(std::byte *&code, WasmStack &stack, uint32_t skip,
                  uint32_t discard_to);
 
+
+    template <typename FloatType>
+    void validate_trunc(std::byte *&code, freg v, FloatType lower,
+                        FloatType upper);
+
     // eventually i'll have to support multivalue here
     // honestly i don't think it'll even be that difficult (single digit lines)
     // 🤞 but there's no multivalue instructions (yet)

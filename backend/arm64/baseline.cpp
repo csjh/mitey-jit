@@ -2933,52 +2933,124 @@ void Arm64::i64extend_i32_u(SHARED_PARAMS) {
 
     finalize(code, res.as<ireg>());
 }
+
+template <typename FloatType>
+void Arm64::validate_trunc(std::byte *&code, freg v, FloatType lower,
+                           FloatType upper) {
+    using IntType = std::conditional_t<std::is_same_v<FloatType, float>,
+                                       uint32_t, uint64_t>;
+    constexpr auto ft =
+        std::is_same_v<FloatType, float> ? ftype::single : ftype::double_;
+    constexpr auto sf = ft == ftype::double_;
+    constexpr IntType nonfinite_value =
+        ft == ftype::single ? 0x7F80'0000 : 0x7FF0'0000'0000'0000;
+    constexpr IntType signless_bits =
+        ft == ftype::single ? 0x7FFF'FFFF : 0x7FFF'FFFF'FFFF'FFFF;
+    static_assert(tryLogicalImm(signless_bits) != std::nullopt);
+
+    auto int_bits = intregs.temporary(), int_comparison = intregs.temporary();
+    auto float_comparison = floatregs.temporary();
+
+    raw::mov(code, sf, ft, v, int_bits);
+    masm::mov(code, nonfinite_value, int_comparison);
+    raw::and_(code, sf, *tryLogicalImm(signless_bits), int_bits, int_bits);
+    raw::cmp(code, sf, int_bits, int_comparison);
+
+    auto isfinite_check = code;
+    raw::bcond(code, 0, cond::lt);
+    raw::fcmp(code, sf, v, v);
+
+    auto nan_check = code;
+    raw::bcond(code, 0, cond::eq);
+    auto [_, overflow_trap] = masm::trap(
+        code, std::to_array({runtime::TrapKind::invalid_conversion_to_integer,
+                             runtime::TrapKind::integer_overflow}));
+    amend_br_if(nan_check, overflow_trap);
+    amend_br_if(isfinite_check, code);
+
+    masm::mov(code, std::bit_cast<IntType>(lower), int_comparison);
+    raw::mov(code, sf, ft, int_comparison, float_comparison);
+    raw::fcmp(code, sf, v, float_comparison);
+    raw::bcond(code, overflow_trap - code, cond::ls);
+
+    masm::mov(code, std::bit_cast<IntType>(upper), int_comparison);
+    raw::mov(code, sf, ft, int_comparison, float_comparison);
+    raw::fcmp(code, sf, v, float_comparison);
+    raw::bcond(code, overflow_trap - code, cond::ge);
+}
+
 void Arm64::i32trunc_f32_s(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+
+    validate_trunc(code, p1.as<freg>(), -2147483904.f, 2147483647.f);
     raw::fcvtzs(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
+
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64trunc_f32_s(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+
+    validate_trunc(code, p1.as<freg>(), -9223373136366404000.f,
+                   9223372036854776000.f);
     raw::fcvtzs(code, true, ftype::single, p1.as<freg>(), res.as<ireg>());
+
     finalize(code, res.as<ireg>());
 }
 void Arm64::i32trunc_f32_u(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+
+    validate_trunc(code, p1.as<freg>(), -1.f, 4294967296.f);
     raw::fcvtzu(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
+
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64trunc_f32_u(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+
+    validate_trunc(code, p1.as<freg>(), -1.f, 18446744073709552000.f);
     raw::fcvtzu(code, true, ftype::single, p1.as<freg>(), res.as<ireg>());
+
     finalize(code, res.as<ireg>());
 }
 void Arm64::i32trunc_f64_s(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+
+    validate_trunc(code, p1.as<freg>(), -2147483649., 2147483648.);
     raw::fcvtzs(code, false, ftype::double_, p1.as<freg>(), res.as<ireg>());
+
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64trunc_f64_s(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+
+    validate_trunc(code, p1.as<freg>(), -9223372036854777856.,
+                   9223372036854776000.);
     raw::fcvtzs(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
+
     finalize(code, res.as<ireg>());
 }
 void Arm64::i32trunc_f64_u(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+
+    validate_trunc(code, p1.as<freg>(), -1., 4294967296.);
     raw::fcvtzu(code, false, ftype::double_, p1.as<freg>(), res.as<ireg>());
+
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64trunc_f64_u(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
+
+    validate_trunc(code, p1.as<freg>(), -1., 18446744073709552000.);
     raw::fcvtzu(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
+
     finalize(code, res.as<ireg>());
 }
 void Arm64::f32convert_i32_s(SHARED_PARAMS) {
