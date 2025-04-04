@@ -2660,8 +2660,8 @@ void Arm64::i32rotl(SHARED_PARAMS) {
         raw::ror(code, false, 32 - (p2.as<uint32_t>() & 31), p1.as<ireg>(),
                  res.as<ireg>());
     } else {
-        raw::neg(code, false, p2.as<ireg>(), res.as<ireg>());
-        raw::ror(code, false, res.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+        raw::neg(code, false, p2.as<ireg>(), p2.as<ireg>());
+        raw::ror(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
 
     finalize(code, res.as<ireg>());
@@ -2675,8 +2675,8 @@ void Arm64::i64rotl(SHARED_PARAMS) {
         raw::ror(code, true, 64 - (p2.as<uint32_t>() & 63), p1.as<ireg>(),
                  res.as<ireg>());
     } else {
-        raw::neg(code, true, p2.as<ireg>(), res.as<ireg>());
-        raw::ror(code, true, res.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
+        raw::neg(code, true, p2.as<ireg>(), p2.as<ireg>());
+        raw::ror(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
 
     finalize(code, res.as<ireg>());
