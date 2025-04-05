@@ -167,6 +167,29 @@ int32_t random_get(void *buf,          // Buffer to fill with random bytes
                    wasm_size_t buf_len // Buffer length
 );
 
+int32_t poll_oneoff(__WASM_MEMORY,  // non-standard: wasm memory passed in
+                    const char *in, // Input buffer
+                    char *out,      // Output buffer
+                    wasm_size_t nsubscriptions, // Number of subscriptions
+                    wasm_size_t *nevents        // Number of events
+);
+
+int32_t fd_tell(__WASM_MEMORY,   // non-standard: wasm memory passed in
+                int32_t fd,      // File descriptor
+                wasm_size_t *out // Output position
+);
+
+int32_t path_readlink(__WASM_MEMORY, int32_t fd, char *path,
+                      wasm_size_t path_len, char *buf, wasm_size_t buf_len,
+                      wasm_size_t *read_len);
+
+int32_t path_symlink(__WASM_MEMORY, char *old_path, wasm_size_t old_path_len,
+                     int32_t fd, char *new_path, wasm_size_t new_path_len);
+
+int32_t path_rename(__WASM_MEMORY, int32_t old_fd, char *old_path,
+                    wasm_size_t old_path_len, int32_t new_fd, char *new_path,
+                    wasm_size_t new_path_len);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

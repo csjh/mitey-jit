@@ -64,6 +64,11 @@ int main(int argc, const char **argv) {
         {"path_unlink_file", internalize<path_unlink_file>()},
         {"proc_exit", internalize<proc_exit>()},
         {"random_get", internalize<random_get>()},
+        {"poll_oneoff", internalize<poll_oneoff>()},
+        {"path_readlink", internalize<path_readlink>()},
+        {"path_symlink", internalize<path_symlink>()},
+        {"path_rename", internalize<path_rename>()},
+        {"fd_tell", internalize<fd_tell>()},
     };
     auto imports = runtime::Imports{{"wasi_snapshot_preview1", wasi}};
 
@@ -74,11 +79,14 @@ int main(int argc, const char **argv) {
 
     auto path = "/tmp/jit-sandbox/";
     auto fd = open(path, O_RDONLY | O_DIRECTORY, 0666);
-
     register_preopen(fd, "/");
 
-    externalize<void()>(std::get<runtime::FunctionInfo>(
-        instance->get_exports().at("_start")))();
+    try {
+        externalize<void()>(std::get<runtime::FunctionInfo>(
+            instance->get_exports().at("_start")))();
+    } catch (const std::exception &e) {
+        printf("Exception: %s\n", e.what());
+    }
 
     return 0;
 }

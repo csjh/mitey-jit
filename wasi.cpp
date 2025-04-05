@@ -1,5 +1,6 @@
 #include "./wasi.hpp"
 
+#include <cassert>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -14,6 +15,9 @@
 
 #define PATH_MAX 4096
 #define MAX_PREOPENS 32
+
+#define assert_alignment(ptr)                                                  \
+    assert(((uintptr_t)(ptr) % alignof(decltype(*(ptr)))) == 0)
 
 typedef struct {
     uint8_t pr_type;
@@ -62,6 +66,9 @@ int32_t register_preopen(int32_t fd, const char *path) {
 
 int32_t fd_write(__WASM_MEMORY, int32_t fd, const iovec *iovs,
                  wasm_size_t iovs_len, wasm_size_t *nwritten) {
+    assert_alignment(iovs);
+    assert_alignment(nwritten);
+
     wasm_size_t total_written = 0;
 
     for (wasm_size_t i = 0; i < iovs_len; i++) {
@@ -77,6 +84,8 @@ int32_t fd_write(__WASM_MEMORY, int32_t fd, const iovec *iovs,
 }
 
 int32_t args_get(__WASM_MEMORY, wasm_ptr_t *argv, char *argv_buf) {
+    assert_alignment(argv);
+
     if (!g_argv || !g_argc) {
         return 28;
     }
@@ -93,6 +102,9 @@ int32_t args_get(__WASM_MEMORY, wasm_ptr_t *argv, char *argv_buf) {
 }
 
 int32_t args_sizes_get(wasm_size_t *argc, wasm_size_t *argv_buf_size) {
+    assert_alignment(argc);
+    assert_alignment(argv_buf_size);
+
     if (!g_argv || !g_argc) {
         return 28;
     }
@@ -108,6 +120,8 @@ int32_t args_sizes_get(wasm_size_t *argc, wasm_size_t *argv_buf_size) {
 }
 
 int32_t environ_get(__WASM_MEMORY, char **environ, char *environ_buf) {
+    assert_alignment(environ);
+
     wasm_size_t buf_offset = 0;
     for (wasm_size_t i = 0; i < g_environ_count; i++) {
         wasm_size_t len = strlen(g_environ[i]) + 1;
@@ -121,6 +135,9 @@ int32_t environ_get(__WASM_MEMORY, char **environ, char *environ_buf) {
 
 int32_t environ_sizes_get(wasm_size_t *environ_count,
                           wasm_size_t *environ_buf_size) {
+    assert_alignment(environ_count);
+    assert_alignment(environ_buf_size);
+
     *environ_count = g_environ_count;
     wasm_size_t total_size = 0;
     for (wasm_size_t i = 0; i < g_environ_count; i++) {
@@ -132,6 +149,8 @@ int32_t environ_sizes_get(wasm_size_t *environ_count,
 }
 
 int32_t clock_res_get(int32_t clock_id, uint64_t *resolution) {
+    assert_alignment(resolution);
+
     struct timespec res;
     if (clock_getres(CLOCK_MONOTONIC, &res) != 0) {
         return 28;
@@ -142,6 +161,8 @@ int32_t clock_res_get(int32_t clock_id, uint64_t *resolution) {
 }
 
 int32_t clock_time_get(int32_t clock_id, uint64_t precision, uint64_t *time) {
+    assert_alignment(time);
+
     struct timespec tp;
     if (clock_gettime(CLOCK_MONOTONIC, &tp) != 0) {
         return 28;
@@ -160,6 +181,8 @@ int32_t fd_close(int32_t fd) {
 
 int32_t fd_fdstat_get(int32_t fd, void *stat) {
     fd_fdstat_t *fdstat = (fd_fdstat_t *)stat;
+    assert_alignment(fdstat);
+
     struct stat native_stat;
 
     if (fstat(fd, &native_stat) != 0) {
@@ -193,6 +216,8 @@ int32_t fd_fdstat_set_flags(int32_t fd, int32_t flags) {
 
 int32_t fd_filestat_get(int32_t fd, void *buf) {
     filestat_t *filestat = (filestat_t *)buf;
+    assert_alignment(filestat);
+
     struct stat native_stat;
 
     if (fstat(fd, &native_stat) != 0) {
@@ -215,6 +240,7 @@ int32_t fd_filestat_get(int32_t fd, void *buf) {
 
 int32_t fd_prestat_get(int32_t fd, void *buf) {
     prestat_t *prestat = (prestat_t *)buf;
+    assert_alignment(prestat);
 
     // Search for the fd in preopens array
     for (size_t i = 0; i < num_preopens; i++) {
@@ -246,6 +272,9 @@ int32_t fd_prestat_dir_name(int32_t fd, char *path, wasm_size_t path_len) {
 
 int32_t fd_read(__WASM_MEMORY, int32_t fd, const iovec *iovs,
                 wasm_size_t iovs_len, wasm_size_t *nread) {
+    assert_alignment(iovs);
+    assert_alignment(nread);
+
     wasm_size_t total_read = 0;
 
     for (wasm_size_t i = 0; i < iovs_len; i++) {
@@ -265,6 +294,8 @@ int32_t fd_read(__WASM_MEMORY, int32_t fd, const iovec *iovs,
 
 int32_t fd_readdir(int32_t fd, void *buf, wasm_size_t buf_len, uint64_t cookie,
                    wasm_size_t *bufused) {
+    assert_alignment(bufused);
+
     DIR *dir = fdopendir(fd);
     if (!dir) {
         return 28;
@@ -305,6 +336,8 @@ int32_t fd_readdir(int32_t fd, void *buf, wasm_size_t buf_len, uint64_t cookie,
 
 int32_t fd_seek(int32_t fd, int64_t offset, int32_t whence,
                 uint64_t *newoffset) {
+    assert_alignment(newoffset);
+
     off_t new_pos = lseek(fd, offset, whence);
     if (new_pos < 0) {
         return 28;
@@ -349,6 +382,8 @@ int32_t path_open(int32_t fd, int32_t dirflags, const char *path,
                   wasm_size_t path_len, int32_t oflags, uint64_t fs_rights_base,
                   uint64_t fs_rights_inheriting, int32_t fdflags,
                   int32_t *opened_fd) {
+    assert_alignment(opened_fd);
+
     char path_buf[PATH_MAX];
     if (path_len >= PATH_MAX) {
         return ENAMETOOLONG;
@@ -357,7 +392,8 @@ int32_t path_open(int32_t fd, int32_t dirflags, const char *path,
     memcpy(path_buf, path, path_len);
     path_buf[path_len] = '\0';
 
-    int flags = O_CLOEXEC; // Always set O_CLOEXEC
+    // insecure but idrgaf
+    int flags = O_RDWR | O_CLOEXEC; // Always set O_CLOEXEC
 
     // Convert WASI flags to native flags
     if (oflags & 1)
@@ -368,15 +404,6 @@ int32_t path_open(int32_t fd, int32_t dirflags, const char *path,
         flags |= O_EXCL;
     if (oflags & 8)
         flags |= O_TRUNC;
-
-    // Handle read/write flags
-    if ((fs_rights_base & 4) && (fs_rights_base & 2)) {
-        flags |= O_RDWR;
-    } else if (fs_rights_base & 4) {
-        flags |= O_RDONLY;
-    } else if (fs_rights_base & 2) {
-        flags |= O_WRONLY;
-    }
 
     int new_fd = openat(fd, path_buf, flags, 0666);
     if (new_fd < 0) {
@@ -446,5 +473,88 @@ int32_t random_get(void *buf, wasm_size_t buf_len) {
     }
 
     close(fd);
+    return 0;
+}
+
+int32_t poll_oneoff(__WASM_MEMORY, const char *in, char *out,
+                    wasm_size_t nsubscriptions, wasm_size_t *nevents) {
+    assert_alignment(nevents);
+    printf("poll_oneoff");
+    return 0;
+}
+
+int32_t fd_tell(__WASM_MEMORY, int32_t fd, wasm_size_t *out) {
+    assert_alignment(out);
+
+    off_t pos = lseek(fd, 0, SEEK_CUR);
+    if (pos < 0) {
+        return errno;
+    }
+    *out = static_cast<wasm_size_t>(pos);
+    return 0;
+}
+
+int32_t path_readlink(__WASM_MEMORY, int32_t fd, char *path,
+                      wasm_size_t path_len, char *buf, wasm_size_t buf_len,
+                      wasm_size_t *read_len) {
+    assert_alignment(read_len);
+
+    char path_buf[PATH_MAX];
+    if (path_len >= PATH_MAX) {
+        return ENAMETOOLONG;
+    }
+    memcpy(path_buf, path, path_len);
+    path_buf[path_len] = '\0';
+
+    ssize_t len = readlinkat(fd, path_buf, buf, buf_len);
+    if (len < 0) {
+        return errno;
+    }
+    *read_len = static_cast<wasm_size_t>(len);
+    return 0;
+}
+
+int32_t path_symlink(__WASM_MEMORY, char *old_path, wasm_size_t old_path_len,
+                     int32_t fd, char *new_path, wasm_size_t new_path_len) {
+    char old_path_buf[PATH_MAX];
+    if (old_path_len >= PATH_MAX) {
+        return ENAMETOOLONG;
+    }
+    memcpy(old_path_buf, old_path, old_path_len);
+    old_path_buf[old_path_len] = '\0';
+
+    char new_path_buf[PATH_MAX];
+    if (new_path_len >= PATH_MAX) {
+        return ENAMETOOLONG;
+    }
+    memcpy(new_path_buf, new_path, new_path_len);
+    new_path_buf[new_path_len] = '\0';
+
+    if (symlinkat(old_path_buf, fd, new_path_buf) != 0) {
+        return errno;
+    }
+    return 0;
+}
+
+int32_t path_rename(__WASM_MEMORY, int32_t old_fd, char *old_path,
+                    wasm_size_t old_path_len, int32_t new_fd, char *new_path,
+                    wasm_size_t new_path_len) {
+    char old_path_buf[PATH_MAX];
+    if (old_path_len >= PATH_MAX) {
+        return ENAMETOOLONG;
+    }
+    memcpy(old_path_buf, old_path, old_path_len);
+    old_path_buf[old_path_len] = '\0';
+
+    char new_path_buf[PATH_MAX];
+    if (new_path_len >= PATH_MAX) {
+        return ENAMETOOLONG;
+    }
+    memcpy(new_path_buf, new_path, new_path_len);
+    new_path_buf[new_path_len] = '\0';
+
+    if (renameat(old_fd, old_path_buf, new_fd, new_path_buf) != 0) {
+        return errno;
+    }
     return 0;
 }
