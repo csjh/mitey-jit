@@ -147,6 +147,7 @@ class Arm64 {
     void discard(std::byte *&code, WasmStack &stack, uint32_t skip,
                  uint32_t discard_to);
 
+    void pad_spill(std::byte *&code, uint32_t stack_size);
 
     template <typename FloatType>
     void validate_trunc(std::byte *&code, freg v, FloatType lower,

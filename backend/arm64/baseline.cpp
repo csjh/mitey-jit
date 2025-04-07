@@ -876,6 +876,20 @@ void ldr(std::byte *&code, Arm64::int_manager &intregs, bool sf,
 }
 
 template <typename RegType>
+void str_no_temp(std::byte *&code, bool sf, uint32_t offset, ireg rn,
+                 RegType rt) {
+    assert(offset < (1 << 24));
+
+    if (offset < 1 << 12) {
+        raw::str(code, sf, offset, rn, rt);
+    } else if (offset < 1 << 24) {
+        raw::add(code, true, rn, rn, offset >> 12, true);
+        raw::str(code, sf, offset & 0xfff, rn, rt);
+        raw::sub(code, true, rn, rn, offset >> 12, true);
+    }
+}
+
+template <typename RegType>
 void str(std::byte *&code, Arm64::int_manager &intregs, bool sf,
          uint32_t offset, ireg rn, RegType rt) {
     if (offset < 1 << 12) {
@@ -947,7 +961,7 @@ void put_immediate(std::byte *base, std::byte *to) {
 
 // based on
 // https://dougallj.wordpress.com/2021/10/30/bit-twiddling-optimising-aarch64-logical-immediate-encoding-and-decoding/
-std::optional<LogicalImm> tryLogicalImm(uint64_t val) {
+constexpr std::optional<LogicalImm> tryLogicalImm(uint64_t val) {
     if (val == 0 || ~val == 0)
         return std::nullopt;
 
@@ -965,7 +979,7 @@ std::optional<LogicalImm> tryLogicalImm(uint64_t val) {
                       (-(size << 1) | (ones - 1)) & 0x3f);
 }
 
-std::optional<LogicalImm> tryLogicalImm(uint32_t val) {
+constexpr std::optional<LogicalImm> tryLogicalImm(uint32_t val) {
     uint64_t val64 = ((uint64_t)val << 32) | val;
     return tryLogicalImm(val64);
 }
@@ -979,7 +993,7 @@ template <typename RegType, size_t First, size_t Last>
 void Arm64::reg_manager<RegType, First, Last>::spill(RegType reg) {
     auto [addr, v, offset] = data[to_index(reg)];
     if (addr) {
-        raw::str(addr, true, offset, stackreg, reg);
+        masm::str_no_temp(addr, true, offset, stackreg, reg);
         *v = value::stack(offset);
     }
 }
@@ -1057,7 +1071,8 @@ void Arm64::clobber_flags(std::byte *&code) {
     // step 3. set register metadata (for spilling)
     intregs.claim(
         reg, decltype(intregs)::metadata(code, flag.val, flag.stack_offset));
-    put(code, noop);
+
+    pad_spill(code, flag.stack_offset);
 
     *flag.val = value::reg(reg);
     flag.val = nullptr;
@@ -1255,6 +1270,16 @@ void Arm64::discard(std::byte *&code, WasmStack &stack, uint32_t skip,
     }
 }
 
+void Arm64::pad_spill(std::byte *&code, uint32_t stack_size) {
+    if (stack_size < 1 << 12) {
+        put(code, noop);
+    } else {
+        put(code, noop);
+        put(code, noop);
+        put(code, noop);
+    }
+}
+
 void Arm64::amend_br(std::byte *br, std::byte *target) {
     put_immediate<26, 6>(br, target);
 }
@@ -1313,8 +1338,7 @@ void Arm64::finalize(std::byte *&code, Args... results) {
         else
             floatregs.claim(result, decltype(floatregs)::metadata(code, values,
                                                                   stack_size));
-        // buffer area for spilling
-        put(code, noop);
+        pad_spill(code, stack_size);
 
         push(value::reg(result));
     };
