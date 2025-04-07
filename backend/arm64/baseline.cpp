@@ -1329,8 +1329,6 @@ Arm64::allocate_registers(std::byte *&code) {
 
 template <typename... Args>
 void Arm64::finalize(std::byte *&code, Args... results) {
-    static_assert(sizeof...(Args) > 0);
-
     auto finalize = [&](auto result) {
         if constexpr (std::is_same_v<decltype(result), ireg>)
             intregs.claim(
@@ -1345,8 +1343,9 @@ void Arm64::finalize(std::byte *&code, Args... results) {
 
     (finalize(results), ...);
 
-    if constexpr ((std::is_same_v<Args, ireg> || ...))
-        intregs.commit();
+    // always commit intregs because there could be a spilled flag
+    // this could be optimized but like i really doubt it's a bottleneck
+    intregs.commit();
     if constexpr ((std::is_same_v<Args, freg> || ...))
         floatregs.commit();
 }
@@ -1683,6 +1682,8 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
             code += sizeof(offset);
         }
     }
+
+    finalize(code);
 }
 void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
@@ -1745,6 +1746,8 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     for ([[maybe_unused]] auto result : fn.type.results) {
         push(value::stack(stack_size));
     }
+
+    finalize(code);
 }
 void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
                           WasmSignature &type) {
@@ -1849,6 +1852,8 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     for ([[maybe_unused]] auto result : type.results) {
         push(value::stack(stack_size));
     }
+
+    finalize(code);
 }
 void Arm64::drop(SHARED_PARAMS, valtype type) {
     values--;
@@ -1979,6 +1984,8 @@ void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
     auto table_ptr = intregs.temporary(), elements = intregs.temporary(),
          current = table_ptr;
 
+    clobber_flags(code);
+
     masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
               table_ptr);
 
@@ -2003,6 +2010,8 @@ void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
     auto table_ptr = intregs.temporary(), elements = intregs.temporary(),
          current = table_ptr;
 
+    clobber_flags(code);
+
     masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
               table_ptr);
 
@@ -2018,6 +2027,8 @@ void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
 
     raw::load(code, memtype::x, resexttype::str, indexttype::lsl, true,
               idx.as<ireg>(), elements, value.as<ireg>());
+
+    finalize(code);
 }
 void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
     if (type == valtype::f32 || type == valtype::f64) {
@@ -2191,6 +2202,8 @@ void Arm64::i32eqz(SHARED_PARAMS) {
 
     raw::cmp(code, false, p.as<ireg>(), ireg::xzr);
     push(value::flag(cond::eq));
+
+    finalize(code);
 }
 void Arm64::i64eqz(SHARED_PARAMS) {
     auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
@@ -2198,6 +2211,8 @@ void Arm64::i64eqz(SHARED_PARAMS) {
 
     raw::cmp(code, true, p.as<ireg>(), ireg::xzr);
     push(value::flag(cond::eq));
+
+    finalize(code);
 }
 
 #define COMPARISON(is_64, op)                                                  \
@@ -2211,6 +2226,7 @@ void Arm64::i64eqz(SHARED_PARAMS) {
             raw::cmp(code, is_64, p1.as<ireg>(), p2.as<ireg>());               \
         }                                                                      \
         push(value::flag(cond::op));                                           \
+        finalize(code);                                                        \
     } while (0)
 
 void Arm64::i32eq(SHARED_PARAMS) { COMPARISON(false, eq); }
@@ -2241,6 +2257,7 @@ void Arm64::i64ge_u(SHARED_PARAMS) { COMPARISON(true, cs); }
         clobber_flags(code);                                                   \
         raw::fcmp(code, is_64, p1.as<freg>(), p2.as<freg>());                  \
         push(value::flag(cond::op));                                           \
+        finalize(code);                                                        \
     } while (0)
 
 void Arm64::f32eq(SHARED_PARAMS) { COMPARISON(false, eq); }
@@ -2391,6 +2408,8 @@ void Arm64::i32div_s(SHARED_PARAMS) {
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
 
+    clobber_flags(code);
+
     auto zero_check = code;
     raw::cbnz(code, false, 0, p2.as<ireg>());
     auto [_, overflow_trap] = masm::trap(
@@ -2408,6 +2427,8 @@ void Arm64::i64div_s(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
+
+    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, true, 0, p2.as<ireg>());
@@ -2427,6 +2448,8 @@ void Arm64::i32div_u(SHARED_PARAMS) {
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
 
+    clobber_flags(code);
+
     auto zero_check = code;
     raw::cbnz(code, false, 0, p2.as<ireg>());
     masm::trap(code, runtime::TrapKind::integer_divide_by_zero);
@@ -2439,6 +2462,8 @@ void Arm64::i64div_u(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
+
+    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, true, 0, p2.as<ireg>());
@@ -2453,6 +2478,7 @@ void Arm64::i32rem_s(SHARED_PARAMS) {
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
     auto v = intregs.temporary();
+    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, false, 0, p2.as<ireg>());
@@ -2468,6 +2494,7 @@ void Arm64::i64rem_s(SHARED_PARAMS) {
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
     auto v = intregs.temporary();
+    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, true, 0, p2.as<ireg>());
@@ -2483,6 +2510,7 @@ void Arm64::i32rem_u(SHARED_PARAMS) {
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
     auto v = intregs.temporary();
+    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, false, 0, p2.as<ireg>());
@@ -2498,6 +2526,7 @@ void Arm64::i64rem_u(SHARED_PARAMS) {
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
     auto v = intregs.temporary();
+    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, true, 0, p2.as<ireg>());
@@ -2973,6 +3002,8 @@ void Arm64::validate_trunc(std::byte *&code, freg v, FloatType lower,
         ft == ftype::single ? 0x7FFF'FFFF : 0x7FFF'FFFF'FFFF'FFFF;
     static_assert(tryLogicalImm(signless_bits) != std::nullopt);
 
+    clobber_flags(code);
+
     auto int_bits = intregs.temporary(), int_comparison = intregs.temporary();
     auto float_comparison = floatregs.temporary();
 
@@ -3293,6 +3324,8 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
 
     for ([[maybe_unused]] auto result : results)
         push(value::stack(stack_size));
+
+    finalize(code);
 }
 
 void Arm64::memory_init(SHARED_PARAMS, uint64_t misc_offset) {

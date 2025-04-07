@@ -99,8 +99,6 @@ template <uint8_t N> class reg_lru {
     // moves lasting registers to the top
     // this could be optimized but like it's basically always just gonna be once
     void commit() {
-        assert(current_lasting != head);
-        access(head);
         while (current_lasting != head) [[unlikely]] {
             access(head);
         }
