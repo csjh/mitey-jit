@@ -27,9 +27,9 @@ struct LogicalImm {
     uint32_t imms : 6;
     uint32_t postfix : 10;
 
-    LogicalImm(uint32_t N, uint32_t immr, uint32_t imms)
+    constexpr LogicalImm(uint32_t N, uint32_t immr, uint32_t imms)
         : prefix(0), N(N), immr(immr), imms(imms), postfix(0) {}
-    LogicalImm(uint32_t v) { *this = std::bit_cast<LogicalImm>(v); }
+    constexpr LogicalImm(uint32_t v) { *this = std::bit_cast<LogicalImm>(v); }
 };
 
 static_assert(sizeof(LogicalImm) == sizeof(uint32_t));
