@@ -130,10 +130,12 @@ class Arm64 {
         struct none : thresholdless {};
         struct ireg : thresholdless {};
         struct freg : thresholdless {};
-        template <uint64_t t> struct literal {
+        template <uint64_t t = 1ull << 32> struct literal {
             static constexpr uint64_t threshold = t;
         };
-        struct bitmask : thresholdless {};
+        template <typename T> struct bitmask : thresholdless {
+            using type = T;
+        };
         struct flags : thresholdless {};
     };
 

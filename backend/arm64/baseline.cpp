@@ -1123,8 +1123,8 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
         if constexpr (is_value_specialization_of<iwant::literal, To>)
             if (imm < To::threshold)
                 return v;
-        if constexpr (std::is_same_v<To, iwant::bitmask>)
-            if (auto mask = tryLogicalImm(imm))
+        if constexpr (is_specialization_of<iwant::bitmask, To>)
+            if (auto mask = tryLogicalImm((typename To::type)imm))
                 return value::imm(std::bit_cast<uint32_t>(*mask));
 
         auto reg = intregs.temporary();
@@ -2337,7 +2337,7 @@ void Arm64::i64popcnt(SHARED_PARAMS) {
 }
 void Arm64::i32add(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2351,7 +2351,7 @@ void Arm64::i32add(SHARED_PARAMS) {
 }
 void Arm64::i64add(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2539,7 +2539,7 @@ void Arm64::i64rem_u(SHARED_PARAMS) {
 }
 void Arm64::i32and(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint32_t>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2554,7 +2554,7 @@ void Arm64::i32and(SHARED_PARAMS) {
 }
 void Arm64::i64and(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint64_t>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2569,7 +2569,7 @@ void Arm64::i64and(SHARED_PARAMS) {
 }
 void Arm64::i32or(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint32_t>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2584,7 +2584,7 @@ void Arm64::i32or(SHARED_PARAMS) {
 }
 void Arm64::i64or(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint64_t>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2599,7 +2599,7 @@ void Arm64::i64or(SHARED_PARAMS) {
 }
 void Arm64::i32xor(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint32_t>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2614,7 +2614,7 @@ void Arm64::i32xor(SHARED_PARAMS) {
 }
 void Arm64::i64xor(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint64_t>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2629,7 +2629,7 @@ void Arm64::i64xor(SHARED_PARAMS) {
 }
 void Arm64::i32shl(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2642,7 +2642,7 @@ void Arm64::i32shl(SHARED_PARAMS) {
 }
 void Arm64::i64shl(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2655,7 +2655,7 @@ void Arm64::i64shl(SHARED_PARAMS) {
 }
 void Arm64::i32shr_s(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2668,7 +2668,7 @@ void Arm64::i32shr_s(SHARED_PARAMS) {
 }
 void Arm64::i64shr_s(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2681,7 +2681,7 @@ void Arm64::i64shr_s(SHARED_PARAMS) {
 }
 void Arm64::i32shr_u(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2694,7 +2694,7 @@ void Arm64::i32shr_u(SHARED_PARAMS) {
 }
 void Arm64::i64shr_u(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2707,7 +2707,7 @@ void Arm64::i64shr_u(SHARED_PARAMS) {
 }
 void Arm64::i32rotl(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2722,7 +2722,7 @@ void Arm64::i32rotl(SHARED_PARAMS) {
 }
 void Arm64::i64rotl(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2737,7 +2737,7 @@ void Arm64::i64rotl(SHARED_PARAMS) {
 }
 void Arm64::i32rotr(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
@@ -2750,7 +2750,7 @@ void Arm64::i32rotr(SHARED_PARAMS) {
 }
 void Arm64::i64rotr(SHARED_PARAMS) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1ull << 32>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
