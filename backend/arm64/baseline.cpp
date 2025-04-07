@@ -2996,10 +2996,12 @@ void Arm64::validate_trunc(std::byte *&code, freg v, FloatType lower,
     constexpr auto ft =
         std::is_same_v<FloatType, float> ? ftype::single : ftype::double_;
     constexpr auto sf = ft == ftype::double_;
-    constexpr IntType nonfinite_value =
-        ft == ftype::single ? 0x7F80'0000 : 0x7FF0'0000'0000'0000;
-    constexpr IntType signless_bits =
-        ft == ftype::single ? 0x7FFF'FFFF : 0x7FFF'FFFF'FFFF'FFFF;
+    constexpr auto nonfinite_value = ft == ftype::single
+                                         ? (IntType)0x7F80'0000
+                                         : (IntType)0x7FF0'0000'0000'0000;
+    constexpr auto signless_bits = ft == ftype::single
+                                       ? (IntType)0x7FFF'FFFF
+                                       : (IntType)0x7FFF'FFFF'FFFF'FFFF;
     static_assert(tryLogicalImm(signless_bits) != std::nullopt);
 
     clobber_flags(code);
