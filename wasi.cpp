@@ -150,9 +150,15 @@ int32_t environ_sizes_get(wasm_size_t *environ_count,
 
 int32_t clock_res_get(int32_t clock_id, uint64_t *resolution) {
     assert_alignment(resolution);
+    assert(clock_id >= 0 && clock_id <= 3);
+
+    clockid_t clock_id_native = clock_id == 0   ? CLOCK_REALTIME
+                                : clock_id == 1 ? CLOCK_MONOTONIC
+                                : clock_id == 2 ? CLOCK_PROCESS_CPUTIME_ID
+                                                : CLOCK_THREAD_CPUTIME_ID;
 
     struct timespec res;
-    if (clock_getres(CLOCK_MONOTONIC, &res) != 0) {
+    if (clock_getres(clock_id_native, &res) != 0) {
         return 28;
     }
 
@@ -162,9 +168,15 @@ int32_t clock_res_get(int32_t clock_id, uint64_t *resolution) {
 
 int32_t clock_time_get(int32_t clock_id, uint64_t precision, uint64_t *time) {
     assert_alignment(time);
+    assert(clock_id >= 0 && clock_id <= 3);
+
+    clockid_t clock_id_native = clock_id == 0   ? CLOCK_REALTIME
+                                : clock_id == 1 ? CLOCK_MONOTONIC
+                                : clock_id == 2 ? CLOCK_PROCESS_CPUTIME_ID
+                                                : CLOCK_THREAD_CPUTIME_ID;
 
     struct timespec tp;
-    if (clock_gettime(CLOCK_MONOTONIC, &tp) != 0) {
+    if (clock_gettime(clock_id_native, &tp) != 0) {
         return 28;
     }
 
