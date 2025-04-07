@@ -73,7 +73,7 @@ void and_(std::byte *&code, bool sf, shifttype shift, ireg rm,
 }
 
 void and_(std::byte *&code, bool sf, LogicalImm imm, ireg rn, ireg rd) {
-    put(code, 0b01110010000000000000000000000000 |
+    put(code, 0b00010010000000000000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(imm.N) << 22) |
                   (static_cast<uint32_t>(imm.immr) << 16) |
