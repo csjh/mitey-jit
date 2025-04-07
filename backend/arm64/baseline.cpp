@@ -1239,11 +1239,11 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
         auto v = copied_values[i];
         if (v == valtype::f32 || v == valtype::f64) {
             auto reg = adapt_value_into(code, expected[i], floatreg);
-            raw::str(code, true, dest, stackreg, reg);
+            masm::str(code, intregs, true, dest, stackreg, reg);
             dest += sizeof(runtime::WasmValue);
         } else {
             auto reg = adapt_value_into(code, expected[i], intreg);
-            raw::str(code, true, dest, stackreg, reg);
+            masm::str(code, intregs, true, dest, stackreg, reg);
             dest += sizeof(runtime::WasmValue);
         }
     }
@@ -1397,7 +1397,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             locals[i] = value::reg(reg);
         } else {
             if (!is_param) {
-                raw::str(code, true, offset, stackreg, ireg::xzr);
+                masm::str(code, intregs, true, offset, stackreg, ireg::xzr);
             }
 
             locals[i] = value::stack(offset);
@@ -1959,12 +1959,12 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     } else {
         if (ty == valtype::f32 || ty == valtype::f64) {
             auto [reg] = allocate_registers<std::tuple<iwant::freg>>(code);
-            raw::str(code, true, local.as<uint32_t>(), stackreg,
-                     reg.as<freg>());
+            masm::str(code, intregs, true, local.as<uint32_t>(), stackreg,
+                      reg.as<freg>());
         } else {
             auto [reg] = allocate_registers<std::tuple<iwant::ireg>>(code);
-            raw::str(code, true, local.as<uint32_t>(), stackreg,
-                     reg.as<ireg>());
+            masm::str(code, intregs, true, local.as<uint32_t>(), stackreg,
+                      reg.as<ireg>());
         }
     }
 }
