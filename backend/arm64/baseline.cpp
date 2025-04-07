@@ -2969,8 +2969,16 @@ void Arm64::f64copysign(SHARED_PARAMS) {
 
     finalize(code, res.as<freg>());
 }
-// noop
-void Arm64::i32wrap_i64(SHARED_PARAMS) {}
+// todo: this should probably be a noop?
+// the fact it isn't implies there's issues elsewhere
+void Arm64::i32wrap_i64(SHARED_PARAMS) {
+    auto [p1, res] =
+        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
+
+    raw::mov(code, false, p1.as<ireg>(), res.as<ireg>());
+
+    finalize(code, res.as<ireg>());
+}
 void Arm64::i64extend_i32_s(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
