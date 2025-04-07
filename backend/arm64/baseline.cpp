@@ -1607,12 +1607,13 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 }
 void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                      std::span<uint32_t> targets) {
+    auto [input] = allocate_registers<std::tuple<iwant::ireg>>(code);
+
     clobber_flags(code);
 
     auto base = control_stack.size() - 1;
     auto &wanted = control_stack[base - targets.back()].expected;
 
-    auto [input] = allocate_registers<std::tuple<iwant::ireg>>(code);
     auto depth = intregs.temporary();
     auto addr = intregs.temporary();
 
@@ -1687,8 +1688,8 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
 }
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
-    intregs.begin();
-    floatregs.begin();
+    allocate_registers<std::tuple<>>(code);
+
     auto exhaust_ptr = intregs.temporary(), exhaust = intregs.temporary(),
          function_ptr = exhaust_ptr, signature = exhaust;
 
@@ -1871,7 +1872,7 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
 }
 void Arm64::select(SHARED_PARAMS, valtype type) {
     if (type == valtype::f32 || type == valtype::f64) {
-        auto [v1, v2, condition, reg] = allocate_registers<
+        auto [v1, v2, condition, res] = allocate_registers<
             std::tuple<iwant::freg, iwant::freg, iwant::flags>, iwant::freg>(
             code);
 
@@ -1882,11 +1883,11 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
         }
 
         raw::csel(code, type != valtype::f32, v2.as<freg>(),
-                  condition.as<cond>(), v1.as<freg>(), reg.as<freg>());
+                  condition.as<cond>(), v1.as<freg>(), res.as<freg>());
 
-        finalize(code, reg.as<freg>());
+        finalize(code, res.as<freg>());
     } else {
-        auto [v1, v2, condition, reg] = allocate_registers<
+        auto [v1, v2, condition, res] = allocate_registers<
             std::tuple<iwant::ireg, iwant::ireg, iwant::flags>, iwant::ireg>(
             code);
 
@@ -1897,9 +1898,9 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
         }
 
         raw::csel(code, type != valtype::i32, v2.as<ireg>(),
-                  condition.as<cond>(), v1.as<ireg>(), reg.as<ireg>());
+                  condition.as<cond>(), v1.as<ireg>(), res.as<ireg>());
 
-        finalize(code, reg.as<ireg>());
+        finalize(code, res.as<ireg>());
     }
 }
 void Arm64::select_t(SHARED_PARAMS, valtype type) { select(code, stack, type); }
@@ -2185,25 +2186,25 @@ void Arm64::i64store32(SHARED_PARAMS, uint64_t offset, uint64_t) {
     abstract_memop<memtype::w, resexttype::str>(code, stack, offset);
 }
 void Arm64::i32eqz(SHARED_PARAMS) {
+    auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
     clobber_flags(code);
 
-    auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
     raw::cmp(code, false, p.as<ireg>(), ireg::xzr);
     push(value::flag(cond::eq));
 }
 void Arm64::i64eqz(SHARED_PARAMS) {
+    auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
     clobber_flags(code);
 
-    auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
     raw::cmp(code, true, p.as<ireg>(), ireg::xzr);
     push(value::flag(cond::eq));
 }
 
 #define COMPARISON(is_64, op)                                                  \
     do {                                                                       \
-        clobber_flags(code);                                                   \
         auto [p1, p2] = allocate_registers<                                    \
             std::tuple<iwant::ireg, iwant::literal<1 << 12>>>(code);           \
+        clobber_flags(code);                                                   \
         if (p2.is<value::location::imm>()) {                                   \
             raw::cmp(code, is_64, p1.as<ireg>(), p2.as<uint32_t>());           \
         } else {                                                               \
@@ -2235,9 +2236,9 @@ void Arm64::i64ge_u(SHARED_PARAMS) { COMPARISON(true, cs); }
 #undef COMPARISON
 #define COMPARISON(is_64, op)                                                  \
     do {                                                                       \
-        clobber_flags(code);                                                   \
         auto [p1, p2] =                                                        \
             allocate_registers<std::tuple<iwant::freg, iwant::freg>>(code);    \
+        clobber_flags(code);                                                   \
         raw::fcmp(code, is_64, p1.as<freg>(), p2.as<freg>());                  \
         push(value::flag(cond::op));                                           \
     } while (0)
@@ -3270,7 +3271,7 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
                          std::array<valtype, NR> results,
                          std::optional<uint64_t> temp1,
                          std::optional<uint64_t> temp2) {
-    intregs.begin();
+    allocate_registers<std::tuple<>>(code);
 
     clobber_flags(code);
     clobber_registers();
