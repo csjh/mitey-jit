@@ -1861,10 +1861,13 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
 
     switch (values->where()) {
     case value::location::reg:
-        if (type == valtype::f32 || type == valtype::f64)
-            floatregs.surrender(values->as<freg>());
-        else
-            intregs.surrender(values->as<ireg>());
+        if (type == valtype::f32 || type == valtype::f64) {
+            if (auto r = values->as<freg>(); is_volatile(r)) {
+                floatregs.surrender(r);
+            }
+        } else if (auto r = values->as<ireg>(); is_volatile(r)) {
+            intregs.surrender(r);
+        }
         break;
     case value::location::stack:
         break;
