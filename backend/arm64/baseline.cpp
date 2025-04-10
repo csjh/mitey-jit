@@ -824,8 +824,8 @@ void mov(std::byte *&code, uint64_t imm, ireg dst) {
     }
 }
 
-void add(std::byte *&code, Arm64::int_manager &intregs, bool sf, uint32_t imm,
-         ireg src, ireg dst) {
+void add(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
+         uint32_t imm, ireg src, ireg dst) {
     if (imm == 0) {
         raw::mov(code, sf, src, dst);
     } else if (imm < 1 << 24) {
@@ -841,8 +841,8 @@ void add(std::byte *&code, Arm64::int_manager &intregs, bool sf, uint32_t imm,
     }
 }
 
-void sub(std::byte *&code, Arm64::int_manager &intregs, bool sf, uint32_t imm,
-         ireg src, ireg dst) {
+void sub(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
+         uint32_t imm, ireg src, ireg dst) {
     if (imm == 0) {
         raw::mov(code, sf, src, dst);
     } else if (imm < 1 << 24) {
@@ -859,7 +859,7 @@ void sub(std::byte *&code, Arm64::int_manager &intregs, bool sf, uint32_t imm,
 }
 
 template <typename RegType>
-void ldr(std::byte *&code, Arm64::int_manager &intregs, bool sf,
+void ldr(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
          uint32_t offset, ireg rn, RegType rt) {
     if (offset < 1 << 12) {
         raw::ldr(code, sf, offset, rn, rt);
@@ -890,7 +890,7 @@ void str_no_temp(std::byte *&code, bool sf, uint32_t offset, ireg rn,
 }
 
 template <typename RegType>
-void str(std::byte *&code, Arm64::int_manager &intregs, bool sf,
+void str(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
          uint32_t offset, ireg rn, RegType rt) {
     if (offset < 1 << 12) {
         raw::str(code, sf, offset, rn, rt);
@@ -989,8 +989,8 @@ bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
 
 }; // namespace
 
-template <typename RegType, size_t First, size_t Last>
-void Arm64::reg_manager<RegType, First, Last>::spill(RegType reg) {
+template <auto registers>
+void Arm64::temp_reg_manager<registers>::spill(RegType reg) {
     auto [addr, v, offset] = data[to_index(reg)];
     if (addr) {
         masm::str_no_temp(addr, true, offset, stackreg, reg);
@@ -998,65 +998,65 @@ void Arm64::reg_manager<RegType, First, Last>::spill(RegType reg) {
     }
 }
 
-template <typename RegType, size_t First, size_t Last>
-uint8_t Arm64::reg_manager<RegType, First, Last>::to_index(RegType reg) {
+template <auto registers>
+uint8_t Arm64::temp_reg_manager<registers>::to_index(RegType reg) {
     return static_cast<uint8_t>(reg) - First;
 }
 
-template <typename RegType, size_t First, size_t Last>
-RegType Arm64::reg_manager<RegType, First, Last>::from_index(uint8_t idx) {
+template <auto registers>
+decltype(registers)::value_type
+Arm64::temp_reg_manager<registers>::from_index(uint8_t idx) {
     return static_cast<RegType>(idx + First);
 }
 
-template <typename RegType, size_t First, size_t Last>
-void Arm64::reg_manager<RegType, First, Last>::begin() {
+template <auto registers> void Arm64::temp_reg_manager<registers>::begin() {
     regs.begin();
 }
 
-template <typename RegType, size_t First, size_t Last>
-RegType Arm64::reg_manager<RegType, First, Last>::result() {
+template <auto registers>
+decltype(registers)::value_type Arm64::temp_reg_manager<registers>::result() {
     auto idx = regs.result();
     spill(from_index(idx));
     return from_index(idx);
 }
 
-template <typename RegType, size_t First, size_t Last>
-void Arm64::reg_manager<RegType, First, Last>::claim(RegType reg, metadata md) {
+template <auto registers>
+void Arm64::temp_reg_manager<registers>::claim(RegType reg, metadata md) {
     auto idx = to_index(reg);
     data[idx] = md;
 }
 
-template <typename RegType, size_t First, size_t Last>
-RegType Arm64::reg_manager<RegType, First, Last>::temporary() {
+template <auto registers>
+decltype(registers)::value_type
+Arm64::temp_reg_manager<registers>::temporary() {
     auto idx = regs.temporary();
     spill(from_index(idx));
     data[idx] = metadata(nullptr, 0);
     return from_index(idx);
 }
 
-template <typename RegType, size_t First, size_t Last>
-void Arm64::reg_manager<RegType, First, Last>::surrender(RegType reg) {
+template <auto registers>
+void Arm64::temp_reg_manager<registers>::surrender(RegType reg) {
     auto idx = to_index(reg);
     regs.surrender(idx);
     data[idx] = metadata(nullptr, 0);
 }
 
-template <typename RegType, size_t First, size_t Last>
-void Arm64::reg_manager<RegType, First, Last>::commit() {
+template <auto registers> void Arm64::temp_reg_manager<registers>::commit() {
     regs.commit();
 }
 
-template <typename RegType, size_t First, size_t Last>
-void Arm64::reg_manager<RegType, First, Last>::clobber_all() {
+template <auto registers>
+void Arm64::temp_reg_manager<registers>::clobber_all() {
     for (size_t i = 0; i < Last - First; i++) {
         spill(from_index(i));
         surrender(from_index(i));
     }
 }
 
-template <typename RegType, size_t First, size_t Last>
-bool Arm64::reg_manager<RegType, First, Last>::check_spill(RegType reg,
-                                                           std::byte *code) {
+template <auto registers>
+bool Arm64::temp_reg_manager<registers>::check_spill(RegType reg,
+                                                     std::byte *code) {
     return data[to_index(reg)].spilladdr == code;
 }
 
@@ -1913,21 +1913,21 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
 }
 void Arm64::select_t(SHARED_PARAMS, valtype type) { select(code, stack, type); }
 void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-    if (fn.locals[local_idx] == valtype::f32 ||
-        fn.locals[local_idx] == valtype::f64) {
-        auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
+        if (fn.locals[local_idx] == valtype::f32 ||
+            fn.locals[local_idx] == valtype::f64) {
+            auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
         auto r = std::make_optional(reg.as<freg>());
         auto t = adapt_value_into(code, locals[local_idx], r);
         if (*r != t)
             raw::mov(code, ftype::double_, t, *r);
-        finalize(code, reg.as<freg>());
-    } else {
-        auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+            finalize(code, reg.as<freg>());
+        } else {
+            auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
         auto r = std::make_optional(reg.as<ireg>());
         auto t = adapt_value_into(code, locals[local_idx], r);
         if (*r != t)
             raw::mov(code, true, t, *r);
-        finalize(code, reg.as<ireg>());
+            finalize(code, reg.as<ireg>());
     }
 }
 void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {

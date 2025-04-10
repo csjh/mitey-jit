@@ -8,12 +8,12 @@ namespace arm64 {
 
 // clang-format off
 enum class ireg : uint8_t {
-    x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16,
-    x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30, xzr, sp = 0b11111
+     x0,  x1,  x2,  x3,  x4,  x5,  x6,  x7,  x8,  x9, x10, x11, x12, x13, x14, x15,
+    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30, xzr, sp = xzr
 };
 
 enum class freg : uint8_t {
-    d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15,
+    d0,  d1,  d2,  d3,  d4,  d5,  d6,  d7,  d8,  d9,  d10, d11, d12, d13, d14, d15,
     d16, d17, d18, d19, d20, d21, d22, d23, d24, d25, d26, d27, d28, d29, d30, d31,
 };
 
@@ -22,14 +22,13 @@ constexpr auto icallee_saved = std::to_array({
     ireg::x24, ireg::x25, ireg::x26, ireg::x27, ireg::x28});
 
 constexpr auto fcallee_saved = std::to_array({
-    freg::d8, freg::d9, freg::d10, freg::d11, freg::d12, freg::d13, freg::d14, freg::d15,
+    freg::d8,  freg::d9,  freg::d10, freg::d11, freg::d12, freg::d13, freg::d14, freg::d15,
     freg::d16, freg::d17, freg::d18, freg::d19, freg::d20, freg::d21, freg::d22, freg::d23,
     freg::d24, freg::d25, freg::d26, freg::d27, freg::d28, freg::d29, freg::d30, freg::d31});
 
 constexpr auto icaller_saved = std::to_array({
-    ireg::x0, ireg::x1, ireg::x2, ireg::x3, ireg::x4, ireg::x5, ireg::x6, ireg::x7,
-    ireg::x8, ireg::x9, ireg::x10, ireg::x11, ireg::x12, ireg::x13, ireg::x14, ireg::x15,
-    ireg::x16, ireg::x17});
+    ireg::x3,  ireg::x4,  ireg::x5,  ireg::x6,  ireg::x7,  ireg::x8,  ireg::x9,
+    ireg::x10, ireg::x11, ireg::x12, ireg::x13, ireg::x14, ireg::x15, ireg::x16, ireg::x17});
 
 constexpr auto fcaller_saved = std::to_array({
     freg::d0, freg::d1, freg::d2, freg::d3, freg::d4, freg::d5, freg::d6, freg::d7});

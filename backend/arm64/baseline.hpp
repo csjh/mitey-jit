@@ -47,7 +47,11 @@ class value {
 
 class Arm64 {
   public:
-    template <typename RegType, size_t First, size_t Last> class reg_manager {
+    template <auto registers> class temp_reg_manager {
+        using RegType = decltype(registers)::value_type;
+        static constexpr auto First = (size_t)registers.front();
+        static constexpr auto Last = (size_t)registers.back();
+
       public:
         struct metadata {
             // when a register is inactive, this is a null pointer
@@ -93,15 +97,15 @@ class Arm64 {
         bool check_spill(RegType reg, std::byte *code);
     };
 
-    using int_manager = reg_manager<ireg, 3, icaller_saved.size()>;
-    using float_manager = reg_manager<freg, 0, fcaller_saved.size()>;
+    using temp_int_manager = temp_reg_manager<icaller_saved>;
+    using temp_float_manager = temp_reg_manager<fcaller_saved>;
 
   private:
     // callee saved registers
     std::span<value> locals;
     // caller saved registers
-    int_manager intregs;
-    float_manager floatregs;
+    temp_int_manager intregs;
+    temp_float_manager floatregs;
 
     struct flags {
         // offset to spill into
