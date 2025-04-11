@@ -137,20 +137,24 @@ void sxtw(std::byte *&code, ireg rn, ireg rd) {
     sbfm(code, true, LogicalImm(true, 0, 31), rn, rd);
 }
 
-void lsl(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
-    auto width = sf ? 64 : 32;
-    shift_imm %= width;
-    auto imms = width - shift_imm - 1;
-    auto immr = imms + 1;
-    ubfm(code, sf, LogicalImm(sf, immr, imms), rn, rd);
-}
-
 void lsl(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
     put(code, 0b00011010110000000010000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(rm) << 16) |
                   (static_cast<uint32_t>(rn) << 5) |
                   (static_cast<uint32_t>(rd) << 0));
+}
+
+void lsl(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
+    if (shift_imm == 0) {
+        lsl(code, sf, ireg::xzr, rn, rd);
+        return;
+    }
+    auto width = sf ? 64 : 32;
+    shift_imm %= width;
+    auto imms = width - shift_imm - 1;
+    auto immr = imms + 1;
+    ubfm(code, sf, LogicalImm(sf, immr, imms), rn, rd);
 }
 
 void lsr(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
