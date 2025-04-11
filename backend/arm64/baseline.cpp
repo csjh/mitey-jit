@@ -1069,8 +1069,7 @@ void Arm64::clobber_flags(std::byte *&code) {
     // step 2. spill into claimed register
     raw::cset(code, false, flag.val->as<cond>(), reg);
     // step 3. set register metadata (for spilling)
-    intregs.claim(
-        reg, decltype(intregs)::metadata(code, flag.val, flag.stack_offset));
+    intregs.claim(reg, {code, flag.val, flag.stack_offset});
 
     pad_spill(code, flag.stack_offset);
 
@@ -1331,11 +1330,9 @@ template <typename... Args>
 void Arm64::finalize(std::byte *&code, Args... results) {
     auto finalize = [&](auto result) {
         if constexpr (std::is_same_v<decltype(result), ireg>)
-            intregs.claim(
-                result, decltype(intregs)::metadata(code, values, stack_size));
+            intregs.claim(result, {code, values, stack_size});
         else
-            floatregs.claim(result, decltype(floatregs)::metadata(code, values,
-                                                                  stack_size));
+            floatregs.claim(result, {code, values, stack_size});
         pad_spill(code, stack_size);
 
         push(value::reg(result));
@@ -1951,7 +1948,7 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                 code -= sizeof(inst);
 
             auto reg = std::make_optional(local.as<freg>());
-            auto v = adapt_value_into(code, &values[0], reg);
+            auto v = adapt_value_into(code, values, reg);
             if (*reg != v)
                 raw::mov(code, ftype::double_, v, *reg);
         } else {
@@ -1961,10 +1958,12 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                 code -= sizeof(inst);
 
             auto reg = std::make_optional(local.as<ireg>());
-            auto v = adapt_value_into(code, &values[0], reg);
+            auto v = adapt_value_into(code, values, reg);
             if (*reg != v)
                 raw::mov(code, true, v, *reg);
         }
+
+        finalize(code);
     } else {
         if (ty == valtype::f32 || ty == valtype::f64) {
             auto [reg] = allocate_registers<std::tuple<iwant::freg>>(code);
