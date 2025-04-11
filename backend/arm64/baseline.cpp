@@ -2118,13 +2118,16 @@ void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
         std::tuple<iwant::ireg>{},
         std::conditional_t<is_store, std::tuple<IWantTy>, std::tuple<>>{}));
 
-    auto [addr, res] = allocate_registers<Params, Result>(code);
+    auto [base, res] = allocate_registers<Params, Result>(code);
 
-    if (offset)
-        masm::add(code, intregs, true, offset, addr.template as<ireg>(),
-                  addr.template as<ireg>());
-    raw::load(code, mtype, etype, indexttype::lsl, false,
-              addr.template as<ireg>(), memreg, res.template as<RegTy>());
+    auto addr = base.template as<ireg>();
+    if (offset) {
+        if (!is_volatile(addr))
+            addr = intregs.temporary();
+        masm::add(code, intregs, true, offset, base.template as<ireg>(), addr);
+    }
+    raw::load(code, mtype, etype, indexttype::lsl, false, addr, memreg,
+              res.template as<RegTy>());
 
     if constexpr (!is_store)
         finalize(code, res.template as<RegTy>());
