@@ -1048,9 +1048,9 @@ template <auto registers> void Arm64::temp_reg_manager<registers>::commit() {
 
 template <auto registers>
 void Arm64::temp_reg_manager<registers>::clobber_all() {
-    for (size_t i = 0; i < Last - First; i++) {
-        spill(from_index(i));
-        surrender(from_index(i));
+    for (auto reg : registers) {
+        spill(reg);
+        surrender(reg);
     }
 }
 
@@ -1090,22 +1090,22 @@ void Arm64::push(value v) {
     stack_size += sizeof(runtime::WasmValue);
 }
 
-template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
+template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
     using RegType =
         std::conditional_t<std::is_same_v<To, iwant::freg>, freg, ireg>;
 
-    switch (v.where()) {
+    switch (v->where()) {
     case value::location::reg: {
-        if (auto r = v.as<RegType>(); is_volatile(r)) {
+        if (auto r = v->as<RegType>(); is_volatile(r)) {
             if constexpr (std::is_same_v<To, iwant::freg>)
                 floatregs.surrender(r);
             else
                 intregs.surrender(r);
         }
-        return v;
+        return *v;
     }
     case value::location::stack: {
-        auto offset = v.as<uint32_t>();
+        auto offset = v->as<uint32_t>();
         RegType reg;
         if constexpr (std::is_same_v<To, iwant::freg>)
             reg = floatregs.temporary();
@@ -1118,11 +1118,11 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
         auto better_not = !std::is_same_v<To, iwant::freg>;
         assert(better_not);
 
-        auto imm = v.as<uint32_t>();
+        auto imm = v->as<uint32_t>();
 
         if constexpr (is_value_specialization_of<iwant::literal, To>)
             if (imm < To::threshold)
-                return v;
+                return *v;
         if constexpr (is_specialization_of<iwant::bitmask, To>)
             if (auto mask = tryLogicalImm((typename To::type)imm))
                 return value::imm(std::bit_cast<uint32_t>(*mask));
@@ -1138,10 +1138,10 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
         flag = flags();
 
         if constexpr (std::is_same_v<To, iwant::flags>) {
-            return v;
+            return *v;
         } else {
             auto reg = intregs.temporary();
-            raw::cset(code, false, v.as<cond>(), reg);
+            raw::cset(code, false, v->as<cond>(), reg);
             return value::reg(reg);
         }
     }
@@ -1150,35 +1150,35 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value v) {
     assert(false);
 }
 
-ireg Arm64::adapt_value_into(std::byte *&code, value v,
+ireg Arm64::adapt_value_into(std::byte *&code, value *v,
                              std::optional<ireg> &hint) {
-    if (v.is<value::location::reg>()) {
-        if (is_volatile(v.as<ireg>()))
-            intregs.surrender(v.as<ireg>());
-        return v.as<ireg>();
+    if (v->is<value::location::reg>()) {
+        if (is_volatile(v->as<ireg>()))
+            intregs.surrender(v->as<ireg>());
+        return v->as<ireg>();
     }
 
     if (!hint)
         hint = intregs.temporary();
     auto reg = *hint;
 
-    switch (v.where()) {
+    switch (v->where()) {
     case value::location::reg: {
         __builtin_unreachable();
     }
     case value::location::stack: {
-        auto offset = v.as<uint32_t>();
+        auto offset = v->as<uint32_t>();
         masm::ldr(code, intregs, true, offset, stackreg, reg);
         return reg;
     }
     case value::location::imm: {
-        auto imm = v.as<uint32_t>();
+        auto imm = v->as<uint32_t>();
         masm::mov(code, imm, reg);
         return reg;
     }
     case value::location::flags: {
         flag = flags();
-        raw::cset(code, false, v.as<cond>(), reg);
+        raw::cset(code, false, v->as<cond>(), reg);
         return reg;
     }
     }
@@ -1186,24 +1186,24 @@ ireg Arm64::adapt_value_into(std::byte *&code, value v,
     assert(false);
 }
 
-freg Arm64::adapt_value_into(std::byte *&code, value v,
+freg Arm64::adapt_value_into(std::byte *&code, value *v,
                              std::optional<freg> &hint) {
-    if (v.is<value::location::reg>()) {
-        if (is_volatile(v.as<freg>()))
-            floatregs.surrender(v.as<freg>());
-        return v.as<freg>();
+    if (v->is<value::location::reg>()) {
+        if (is_volatile(v->as<freg>()))
+            floatregs.surrender(v->as<freg>());
+        return v->as<freg>();
     }
 
     if (!hint)
         hint = floatregs.temporary();
     auto reg = *hint;
 
-    switch (v.where()) {
+    switch (v->where()) {
     case value::location::reg: {
         __builtin_unreachable();
     }
     case value::location::stack: {
-        auto offset = v.as<uint32_t>();
+        auto offset = v->as<uint32_t>();
         masm::ldr(code, intregs, true, offset, stackreg, reg);
         return reg;
     }
@@ -1238,11 +1238,11 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
 
         auto v = copied_values[i];
         if (v == valtype::f32 || v == valtype::f64) {
-            auto reg = adapt_value_into(code, expected[i], floatreg);
+            auto reg = adapt_value_into(code, &expected[i], floatreg);
             masm::str(code, intregs, true, dest, stackreg, reg);
             dest += sizeof(runtime::WasmValue);
         } else {
-            auto reg = adapt_value_into(code, expected[i], intreg);
+            auto reg = adapt_value_into(code, &expected[i], intreg);
             masm::str(code, intregs, true, dest, stackreg, reg);
             dest += sizeof(runtime::WasmValue);
         }
@@ -1312,7 +1312,7 @@ Arm64::allocate_registers(std::byte *&code) {
 
     [&]<std::size_t... I>(std::index_sequence<I...>) {
         ((ret[I] =
-              adapt_value<std::tuple_element_t<I, Params>>(code, values[I])),
+              adapt_value<std::tuple_element_t<I, Params>>(code, &values[I])),
          ...);
     }(std::make_index_sequence<nparams>{});
 
@@ -1638,13 +1638,13 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     for (size_t i = 0; i < wanted.size(); i++) {
         auto v = wanted[i];
         if (v == valtype::f32 || v == valtype::f64) {
-            auto reg = adapt_value_into(code, expected[i], floatreg);
+            auto reg = adapt_value_into(code, &expected[i], floatreg);
             raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                       result_offset, stackreg, reg);
             raw::add(code, true, result_offset, result_offset,
                      sizeof(runtime::WasmValue));
         } else {
-            auto reg = adapt_value_into(code, expected[i], intreg);
+            auto reg = adapt_value_into(code, &expected[i], intreg);
             raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                       result_offset, stackreg, reg);
             raw::add(code, true, result_offset, result_offset,
@@ -1913,21 +1913,21 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
 }
 void Arm64::select_t(SHARED_PARAMS, valtype type) { select(code, stack, type); }
 void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-        if (fn.locals[local_idx] == valtype::f32 ||
-            fn.locals[local_idx] == valtype::f64) {
-            auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
+    if (fn.locals[local_idx] == valtype::f32 ||
+        fn.locals[local_idx] == valtype::f64) {
+        auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
         auto r = std::make_optional(reg.as<freg>());
-        auto t = adapt_value_into(code, locals[local_idx], r);
+        auto t = adapt_value_into(code, &locals[local_idx], r);
         if (*r != t)
             raw::mov(code, ftype::double_, t, *r);
-            finalize(code, reg.as<freg>());
-        } else {
-            auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+        finalize(code, reg.as<freg>());
+    } else {
+        auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
         auto r = std::make_optional(reg.as<ireg>());
-        auto t = adapt_value_into(code, locals[local_idx], r);
+        auto t = adapt_value_into(code, &locals[local_idx], r);
         if (*r != t)
             raw::mov(code, true, t, *r);
-            finalize(code, reg.as<ireg>());
+        finalize(code, reg.as<ireg>());
     }
 }
 void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
@@ -1951,7 +1951,7 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                 code -= sizeof(inst);
 
             auto reg = std::make_optional(local.as<freg>());
-            auto v = adapt_value_into(code, values[0], reg);
+            auto v = adapt_value_into(code, &values[0], reg);
             if (*reg != v)
                 raw::mov(code, ftype::double_, v, *reg);
         } else {
@@ -1961,7 +1961,7 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                 code -= sizeof(inst);
 
             auto reg = std::make_optional(local.as<ireg>());
-            auto v = adapt_value_into(code, values[0], reg);
+            auto v = adapt_value_into(code, &values[0], reg);
             if (*reg != v)
                 raw::mov(code, true, v, *reg);
         }

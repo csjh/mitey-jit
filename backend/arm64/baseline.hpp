@@ -51,6 +51,8 @@ class Arm64 {
         using RegType = decltype(registers)::value_type;
         static constexpr auto First = (size_t)registers.front();
         static constexpr auto Last = (size_t)registers.back();
+        static constexpr auto N = registers.size();
+        static_assert(N == Last - First + 1, "registers must be contiguous");
 
       public:
         struct metadata {
@@ -65,8 +67,8 @@ class Arm64 {
         };
 
       private:
-        reg_lru<Last - First> regs;
-        metadata data[Last - First];
+        reg_lru<N> regs;
+        metadata data[N];
 
         void spill(RegType reg);
         uint8_t to_index(RegType reg);
@@ -143,9 +145,9 @@ class Arm64 {
         struct flags : thresholdless {};
     };
 
-    template <typename To> value adapt_value(std::byte *&code, value v);
-    ireg adapt_value_into(std::byte *&code, value v, std::optional<ireg> &reg);
-    freg adapt_value_into(std::byte *&code, value v, std::optional<freg> &reg);
+    template <typename To> value adapt_value(std::byte *&code, value *v);
+    ireg adapt_value_into(std::byte *&code, value *v, std::optional<ireg> &reg);
+    freg adapt_value_into(std::byte *&code, value *v, std::optional<freg> &reg);
 
     void stackify(std::byte *&code, valtype_vector &values);
     bool move_results(std::byte *&code, valtype_vector &copied_values,

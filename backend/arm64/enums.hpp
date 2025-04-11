@@ -21,6 +21,8 @@ constexpr auto icallee_saved = std::to_array({
     ireg::x19, ireg::x20, ireg::x21, ireg::x22, ireg::x23,
     ireg::x24, ireg::x25, ireg::x26, ireg::x27, ireg::x28});
 
+// these are wrong, i guess it's only d8-d15 that are callee saved
+// but reg_manager doesn't like gaps yet :(
 constexpr auto fcallee_saved = std::to_array({
     freg::d8,  freg::d9,  freg::d10, freg::d11, freg::d12, freg::d13, freg::d14, freg::d15,
     freg::d16, freg::d17, freg::d18, freg::d19, freg::d20, freg::d21, freg::d22, freg::d23,
