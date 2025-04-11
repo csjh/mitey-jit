@@ -1060,6 +1060,28 @@ bool Arm64::temp_reg_manager<registers>::check_spill(RegType reg,
     return data[to_index(reg)].spilladdr == code;
 }
 
+template <typename RegType, size_t N>
+void Arm64::lasting_reg_manager<RegType, N>::spill(RegType reg, size_t i) {}
+
+template <typename RegType, size_t N>
+void Arm64::lasting_reg_manager<RegType, N>::claim(RegType reg, metadata md) {}
+
+template <typename RegType, size_t N>
+void Arm64::lasting_reg_manager<RegType, N>::surrender(value *v) {}
+
+template <typename RegType, size_t N>
+void Arm64::lasting_reg_manager<RegType, N>::purge(RegType reg) {}
+
+template <auto registers>
+void Arm64::local_manager<registers>::claim(RegType reg,
+                                            sub_manager::metadata md) {}
+
+template <auto registers>
+void Arm64::local_manager<registers>::surrender(RegType reg, value *v) {}
+
+template <auto registers>
+void Arm64::local_manager<registers>::purge(RegType reg) {}
+
 void Arm64::clobber_flags(std::byte *&code) {
     if (!flag.val)
         return;
@@ -1095,11 +1117,17 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
 
     switch (v->where()) {
     case value::location::reg: {
-        if (auto r = v->as<RegType>(); is_volatile(r)) {
+        auto r = v->as<RegType>();
+        if (is_volatile(r)) {
             if constexpr (std::is_same_v<To, iwant::freg>)
                 floatregs.surrender(r);
             else
                 intregs.surrender(r);
+        } else {
+            // if constexpr (std::is_same_v<To, iwant::freg>)
+            //     floatlocals.surrender(r, v);
+            // else
+            //     intlocals.surrender(r, v);
         }
         return *v;
     }
@@ -1154,6 +1182,8 @@ ireg Arm64::adapt_value_into(std::byte *&code, value *v,
     if (v->is<value::location::reg>()) {
         if (is_volatile(v->as<ireg>()))
             intregs.surrender(v->as<ireg>());
+        // else
+        //     intlocals.surrender(v->as<ireg>(), v);
         return v->as<ireg>();
     }
 
@@ -1190,6 +1220,8 @@ freg Arm64::adapt_value_into(std::byte *&code, value *v,
     if (v->is<value::location::reg>()) {
         if (is_volatile(v->as<freg>()))
             floatregs.surrender(v->as<freg>());
+        // else
+        //     floatlocals.surrender(v->as<freg>(), v);
         return v->as<freg>();
     }
 
@@ -1859,11 +1891,19 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
     switch (values->where()) {
     case value::location::reg:
         if (type == valtype::f32 || type == valtype::f64) {
-            if (auto r = values->as<freg>(); is_volatile(r)) {
+            auto r = values->as<freg>();
+            if (is_volatile(r)) {
                 floatregs.surrender(r);
+            } else {
+                // floatlocals.surrender(r, values);
             }
-        } else if (auto r = values->as<ireg>(); is_volatile(r)) {
-            intregs.surrender(r);
+        } else {
+            auto r = values->as<ireg>();
+            if (is_volatile(r)) {
+                intregs.surrender(r);
+            } else {
+                // intlocals.surrender(r, values);
+            }
         }
         break;
     case value::location::stack:
@@ -1910,21 +1950,31 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
 }
 void Arm64::select_t(SHARED_PARAMS, valtype type) { select(code, stack, type); }
 void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-    if (fn.locals[local_idx] == valtype::f32 ||
-        fn.locals[local_idx] == valtype::f64) {
-        auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
-        auto r = std::make_optional(reg.as<freg>());
-        auto t = adapt_value_into(code, &locals[local_idx], r);
-        if (*r != t)
-            raw::mov(code, ftype::double_, t, *r);
-        finalize(code, reg.as<freg>());
+    auto ty = fn.locals[local_idx];
+    auto local = locals[local_idx];
+
+    if (local.is<value::location::stack>()) {
+        if (ty == valtype::f32 || ty == valtype::f64) {
+            auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
+            masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg,
+                      reg.as<freg>());
+            finalize(code, reg.as<freg>());
+        } else {
+            auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+            masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg,
+                      reg.as<ireg>());
+            finalize(code, reg.as<ireg>());
+        }
     } else {
-        auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
-        auto r = std::make_optional(reg.as<ireg>());
-        auto t = adapt_value_into(code, &locals[local_idx], r);
-        if (*r != t)
-            raw::mov(code, true, t, *r);
-        finalize(code, reg.as<ireg>());
+        if (ty == valtype::f32 || ty == valtype::f64) {
+            auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
+            raw::mov(code, ftype::double_, local.as<freg>(), reg.as<freg>());
+            finalize(code, reg.as<freg>());
+        } else {
+            auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+            raw::mov(code, true, local.as<ireg>(), reg.as<ireg>());
+            finalize(code, reg.as<ireg>());
+        }
     }
 }
 void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
@@ -1951,6 +2001,9 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             auto v = adapt_value_into(code, values, reg);
             if (*reg != v)
                 raw::mov(code, ftype::double_, v, *reg);
+
+            // sorry in flight locals! the set has purged the register ;(
+            // floatlocals.purge(*reg);
         } else {
             if (values->is<value::location::reg>() &&
                 is_volatile(values->as<ireg>()) &&
@@ -1961,6 +2014,8 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             auto v = adapt_value_into(code, values, reg);
             if (*reg != v)
                 raw::mov(code, true, v, *reg);
+
+            // intlocals.purge(*reg);
         }
 
         finalize(code);

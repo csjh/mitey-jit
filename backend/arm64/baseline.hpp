@@ -102,12 +102,56 @@ class Arm64 {
     using temp_int_manager = temp_reg_manager<icaller_saved>;
     using temp_float_manager = temp_reg_manager<fcaller_saved>;
 
+    template <typename RegType, size_t N> class lasting_reg_manager {
+      public:
+        struct metadata {
+            std::byte *spilladdr = nullptr;
+            value *value_offset = nullptr;
+            uint32_t stack_offset = 0;
+        };
+
+      private:
+        metadata data[N];
+        size_t count = 0;
+
+        void spill(RegType, size_t);
+
+      public:
+        void claim(RegType, metadata);
+        void surrender(value *);
+        void purge(RegType);
+    };
+
+    template <auto registers> class local_manager {
+        using RegType = decltype(registers)::value_type;
+        static constexpr auto First = (size_t)registers.front();
+        static constexpr auto Last = (size_t)registers.back();
+        static constexpr auto N = registers.size();
+        static_assert(N == Last - First + 1, "registers must be contiguous");
+
+        using sub_manager = lasting_reg_manager<RegType, 1>;
+
+        sub_manager locals[N];
+
+        sub_manager &get_manager_of(RegType reg) {
+            return locals[(size_t)reg - First];
+        }
+
+      public:
+        void claim(RegType, sub_manager::metadata);
+        void surrender(RegType, value *);
+        void purge(RegType);
+    };
+
   private:
-    // callee saved registers
-    std::span<value> locals;
     // caller saved registers
     temp_int_manager intregs;
     temp_float_manager floatregs;
+
+    // callee saved registers
+    std::span<value> locals;
+    local_manager<icallee_saved> intlocals;
+    local_manager<fcallee_saved> floatlocals;
 
     struct flags {
         // offset to spill into
