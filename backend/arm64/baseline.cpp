@@ -1090,17 +1090,19 @@ void Arm64::clobber_flags(std::byte *&code) {
     if (!flag.val)
         return;
 
+    // todo: this should go into a .result register (and stay there)
+    // but flag clobbering has to happen first thing after allocate_registers
+    // so the cset into the .result register could clobber a real value
+
     // step 1. claim a register, spilling if necessary
-    auto reg = intregs.result();
+    auto reg = intregs.temporary();
     // step 2. spill into claimed register
     raw::cset(code, false, flag.val->as<cond>(), reg);
-    // step 3. set register metadata (for spilling)
-    intregs.claim(reg, {code, flag.val, flag.stack_offset});
+    // step 3. spill into memory
+    masm::str(code, intregs, true, flag.stack_offset, stackreg, reg);
 
-    pad_spill(code, flag.stack_offset);
-
-    *flag.val = value::reg(reg);
-    flag.val = nullptr;
+    *flag.val = value::stack(flag.stack_offset);
+    flag = flags();
 }
 
 void Arm64::clobber_registers() {
