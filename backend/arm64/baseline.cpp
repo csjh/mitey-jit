@@ -2085,6 +2085,8 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                       reg.as<ireg>());
         }
     }
+
+    finalize(code);
 }
 void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     localset(code, stack, fn, local_idx);
@@ -2165,12 +2167,14 @@ void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
         masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
                   addr);
         raw::str(code, true, addr, val.as<freg>());
+        finalize(code);
     } else {
         auto [val] = allocate_registers<std::tuple<iwant::ireg>>(code);
         auto addr = intregs.temporary();
         masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
                   addr);
         raw::str(code, true, addr, val.as<ireg>());
+        finalize(code);
     }
 }
 void Arm64::memorysize(SHARED_PARAMS) {
