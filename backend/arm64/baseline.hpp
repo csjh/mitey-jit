@@ -120,6 +120,7 @@ class Arm64 {
         void claim(RegType, metadata);
         void surrender(value *);
         void purge(RegType);
+        bool check_spill(RegType reg, std::byte *code);
     };
 
     template <auto registers> class local_manager {
@@ -141,6 +142,7 @@ class Arm64 {
         void claim(RegType, sub_manager::metadata);
         void surrender(RegType, value *);
         void purge(RegType);
+        bool check_spill(RegType reg, std::byte *code);
     };
 
   private:
@@ -190,8 +192,10 @@ class Arm64 {
     };
 
     template <typename To> value adapt_value(std::byte *&code, value *v);
-    ireg adapt_value_into(std::byte *&code, value *v, std::optional<ireg> &reg);
-    freg adapt_value_into(std::byte *&code, value *v, std::optional<freg> &reg);
+    ireg adapt_value_into(std::byte *&code, value *v, std::optional<ireg> &reg,
+                          bool soft = false);
+    freg adapt_value_into(std::byte *&code, value *v, std::optional<freg> &reg,
+                          bool soft = false);
 
     void stackify(std::byte *&code, valtype_vector &values);
     bool move_results(std::byte *&code, valtype_vector &copied_values,
