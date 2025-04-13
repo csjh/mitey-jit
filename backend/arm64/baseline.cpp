@@ -1424,8 +1424,12 @@ void Arm64::finalize(std::byte *&code, Args... results) {
             intregs.claim(result, {code, values, stack_size});
         else
             floatregs.claim(result, {code, values, stack_size});
-        pad_spill(code, stack_size);
 
+        inst instruction;
+        std::memcpy(&instruction, code - sizeof(inst), sizeof(inst));
+        assert((instruction & 0b11111u) == (unsigned)result);
+
+        pad_spill(code, stack_size);
         push(value::reg(result));
     };
 
@@ -2017,11 +2021,15 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
             masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg,
                       reg.as<freg>());
+            // todo: this noop move is necessary because efficient local.set
+            // handling requires the last instruction to move into the result
+            raw::mov(code, ftype::double_, reg.as<freg>(), reg.as<freg>());
             finalize(code, reg.as<freg>());
         } else {
             auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
             masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg,
                       reg.as<ireg>());
+            raw::mov(code, true, reg.as<ireg>(), reg.as<ireg>());
             finalize(code, reg.as<ireg>());
         }
     } else {
@@ -2043,37 +2051,59 @@ void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
         // i don't like that this specializes allocate_registers
         // but tbf it's the only place i need to do it
 
-        intregs.begin();
-        floatregs.begin();
+        allocate_registers<std::tuple<>>(code);
 
         values -= 1;
         stack_size -= sizeof(runtime::WasmValue);
 
         if (ty == valtype::f32 || ty == valtype::f64) {
-            if (values->is<value::location::reg>() &&
-                is_volatile(values->as<freg>()) &&
-                floatregs.check_spill(values->as<freg>(), code - sizeof(inst)))
-                code -= sizeof(inst);
+            if (auto reg = values->as<freg>();
+                values->is<value::location::reg>() && is_volatile(reg) &&
+                floatregs.check_spill(reg, code - sizeof(inst))) {
+                code -= 2 * sizeof(inst);
 
+                inst instruction;
+                std::memcpy(&instruction, code, sizeof(inst));
+                assert((instruction & 0b11111u) ==
+                       (unsigned)values->as<freg>());
+                instruction &= ~0b11111u;
+                instruction |= (unsigned)local.as<freg>();
+                put(code, instruction);
+
+                floatregs.surrender(reg);
+            } else {
                 auto wrapped = std::make_optional(local.as<freg>());
                 auto v = adapt_value_into(code, values, wrapped);
                 if (*wrapped != v)
                     raw::mov(code, ftype::double_, v, *wrapped);
+            }
 
             // sorry in flight locals! the set has purged the register ;(
             floatlocals.purge(local.as<freg>());
         } else {
-            if (values->is<value::location::reg>() &&
-                is_volatile(values->as<ireg>()) &&
-                intregs.check_spill(values->as<ireg>(), code - sizeof(inst)))
-                code -= sizeof(inst);
+            if (auto reg = values->as<ireg>();
+                values->is<value::location::reg>() && is_volatile(reg) &&
+                intregs.check_spill(reg, code - sizeof(inst))) {
+                code -= 2 * sizeof(inst);
 
+                inst instruction;
+                std::memcpy(&instruction, code, sizeof(inst));
+                assert((instruction & 0b11111u) ==
+                       (unsigned)values->as<ireg>());
+                instruction &= ~0b11111u;
+                instruction |= (unsigned)local.as<ireg>();
+                put(code, instruction);
+
+                intregs.surrender(reg);
+            } else {
                 auto wrapped = std::make_optional(local.as<ireg>());
                 auto v = adapt_value_into(code, values, wrapped);
                 if (*wrapped != v)
                     raw::mov(code, true, v, *wrapped);
+            }
 
             intlocals.purge(local.as<ireg>());
+        }
     } else {
         if (ty == valtype::f32 || ty == valtype::f64) {
             auto [reg] = allocate_registers<std::tuple<iwant::freg>>(code);
