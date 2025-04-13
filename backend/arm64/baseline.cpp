@@ -1170,14 +1170,22 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
         auto r = v->as<RegType>();
         if (is_volatile(r)) {
             if constexpr (std::is_same_v<To, iwant::freg>) {
+                if (floatregs.check_spill(r, code - sizeof(inst)))
+                    code -= sizeof(inst);
                 floatregs.surrender(r);
             } else {
+                if (intregs.check_spill(r, code - sizeof(inst)))
+                    code -= sizeof(inst);
                 intregs.surrender(r);
             }
         } else {
             if constexpr (std::is_same_v<To, iwant::freg>) {
+                if (floatlocals.check_spill(r, code - sizeof(inst)))
+                    code -= sizeof(inst);
                 floatlocals.surrender(r, v);
             } else {
+                if (intlocals.check_spill(r, code - sizeof(inst)))
+                    code -= sizeof(inst);
                 intlocals.surrender(r, v);
             }
         }
@@ -1401,8 +1409,11 @@ Arm64::allocate_registers(std::byte *&code) {
     stack_size -= sizeof(runtime::WasmValue) * nparams;
 
     [&]<std::size_t... I>(std::index_sequence<I...>) {
-        ((ret[I] =
-              adapt_value<std::tuple_element_t<I, Params>>(code, &values[I])),
+        // going in reverse order allows for both parameters
+        //  to be hit by check_spill optimizations
+        ((ret[nparams - I - 1] =
+              adapt_value<std::tuple_element_t<nparams - I - 1, Params>>(
+                  code, &values[nparams - I - 1])),
          ...);
     }(std::make_index_sequence<nparams>{});
 
