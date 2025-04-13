@@ -1241,8 +1241,8 @@ ireg Arm64::adapt_value_into(std::byte *&code, value *v,
                              std::optional<ireg> &hint, bool soft) {
     if (v->is<value::location::reg>()) {
         if (!soft) {
-        if (is_volatile(v->as<ireg>()))
-            intregs.surrender(v->as<ireg>());
+            if (is_volatile(v->as<ireg>()))
+                intregs.surrender(v->as<ireg>());
             else
                 intlocals.surrender(v->as<ireg>(), v);
         }
@@ -1269,7 +1269,7 @@ ireg Arm64::adapt_value_into(std::byte *&code, value *v,
     }
     case value::location::flags: {
         if (!soft)
-        flag = flags();
+            flag = flags();
         raw::cset(code, false, v->as<cond>(), reg);
         return reg;
     }
@@ -1282,8 +1282,8 @@ freg Arm64::adapt_value_into(std::byte *&code, value *v,
                              std::optional<freg> &hint, bool soft) {
     if (v->is<value::location::reg>()) {
         if (!soft) {
-        if (is_volatile(v->as<freg>()))
-            floatregs.surrender(v->as<freg>());
+            if (is_volatile(v->as<freg>()))
+                floatregs.surrender(v->as<freg>());
             else
                 floatlocals.surrender(v->as<freg>(), v);
         }
@@ -1295,14 +1295,12 @@ freg Arm64::adapt_value_into(std::byte *&code, value *v,
     auto reg = *hint;
 
     switch (v->where()) {
-    case value::location::reg: {
-        __builtin_unreachable();
-    }
     case value::location::stack: {
         auto offset = v->as<uint32_t>();
         masm::ldr(code, intregs, true, offset, stackreg, reg);
         return reg;
     }
+    case value::location::reg:
     case value::location::imm:
     case value::location::flags:
         __builtin_unreachable();
