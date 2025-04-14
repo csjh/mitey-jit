@@ -1968,15 +1968,23 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
         if (type == valtype::f32 || type == valtype::f64) {
             auto r = values->as<freg>();
             if (is_volatile(r)) {
+                if (floatregs.check_spill(r, code - sizeof(inst)))
+                    code -= sizeof(inst);
                 floatregs.surrender(r);
             } else {
+                if (floatlocals.check_spill(r, code - sizeof(inst)))
+                    code -= sizeof(inst);
                 floatlocals.surrender(r, values);
             }
         } else {
             auto r = values->as<ireg>();
             if (is_volatile(r)) {
+                if (intregs.check_spill(r, code - sizeof(inst)))
+                    code -= sizeof(inst);
                 intregs.surrender(r);
             } else {
+                if (intlocals.check_spill(r, code - sizeof(inst)))
+                    code -= sizeof(inst);
                 intlocals.surrender(r, values);
             }
         }
