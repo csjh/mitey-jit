@@ -130,7 +130,7 @@ class Arm64 {
         static constexpr auto N = registers.size();
         static_assert(N == Last - First + 1, "registers must be contiguous");
 
-        using sub_manager = lasting_reg_manager<RegType, 1>;
+        using sub_manager = lasting_reg_manager<RegType, 4>;
 
         sub_manager locals[N];
 
@@ -488,6 +488,8 @@ class Arm64 {
 // - things that can't be clobbered in a block:
 //   - locals
 //   - the stack
+
+constexpr auto x = sizeof(Arm64);
 
 } // namespace arm64
 } // namespace mitey
