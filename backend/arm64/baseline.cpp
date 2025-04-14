@@ -2065,83 +2065,177 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     }
 }
 void Arm64::localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
+    localtee(code, stack, fn, local_idx);
+    drop(code, stack, fn.locals[local_idx]);
+}
+void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
+    // i don't like that this specializes allocate_registers
+    // but tbf it's the only place i need to do it
     auto ty = fn.locals[local_idx];
     auto local = locals[local_idx];
+    auto initial_values = values;
+    auto initial_stack_size = stack_size;
 
     if (local.is<value::location::reg>()) {
-        // i don't like that this specializes allocate_registers
-        // but tbf it's the only place i need to do it
-
-        allocate_registers<std::tuple<>>(code);
-
-        values -= 1;
+        auto v = *--values;
         stack_size -= sizeof(runtime::WasmValue);
 
+        intregs.begin();
         if (ty == valtype::f32 || ty == valtype::f64) {
-            if (auto reg = values->as<freg>();
-                values->is<value::location::reg>() && is_volatile(reg) &&
-                floatregs.check_spill(reg, code - sizeof(inst))) {
-                code -= 2 * sizeof(inst);
+            floatregs.begin();
 
-                inst instruction;
-                std::memcpy(&instruction, code, sizeof(inst));
-                assert((instruction & 0b11111u) ==
-                       (unsigned)values->as<freg>());
-                instruction &= ~0b11111u;
-                instruction |= (unsigned)local.as<freg>();
-                put(code, instruction);
+            auto locreg = local.as<freg>();
+            auto pushval = v;
 
-                floatregs.surrender(reg);
+            if (v.is<value::location::stack>()) {
+                masm::ldr(code, intregs, true, v.as<uint32_t>(), stackreg,
+                          locreg);
+                floatlocals.purge(locreg);
+                floatlocals.claim(locreg, {code, values, stack_size});
+                pushval = local;
+            } else if (v.is<value::location::reg>()) {
+                auto reg = v.as<freg>();
+                if (is_volatile(reg) &&
+                    floatregs.check_spill(reg, code - sizeof(inst))) {
+                    code -= 2 * sizeof(inst);
+
+                    inst instruction;
+                    std::memcpy(&instruction, code, sizeof(inst));
+                    assert((instruction & 0b11111u) == (unsigned)reg);
+                    instruction &= ~0b11111u;
+                    instruction |= (unsigned)locreg;
+                    put(code, instruction);
+
+                    floatregs.surrender(reg);
+                } else {
+                    if (!is_volatile(reg) &&
+                        floatlocals.check_spill(reg, code - sizeof(inst)))
+                        code -= sizeof(inst);
+
+                    auto wrapped = std::make_optional(locreg);
+                    auto as_reg = adapt_value_into(code, values, wrapped);
+                    if (*wrapped != as_reg)
+                        raw::mov(code, ftype::double_, as_reg, *wrapped);
+                }
+
+                floatlocals.purge(locreg);
+                floatlocals.claim(locreg, {code, values, stack_size});
+                pushval = local;
             } else {
-                auto wrapped = std::make_optional(local.as<freg>());
-                auto v = adapt_value_into(code, values, wrapped);
-                if (*wrapped != v)
-                    raw::mov(code, ftype::double_, v, *wrapped);
+                assert(false);
             }
 
-            // sorry in flight locals! the set has purged the register ;(
-            floatlocals.purge(local.as<freg>());
+            pad_spill(code, stack_size);
+            push(pushval);
+
+            floatregs.commit();
         } else {
-            if (auto reg = values->as<ireg>();
-                values->is<value::location::reg>() && is_volatile(reg) &&
-                intregs.check_spill(reg, code - sizeof(inst))) {
-                code -= 2 * sizeof(inst);
+            auto locreg = local.as<ireg>();
+            // certain value locations are better than a register
+            value pushval;
 
-                inst instruction;
-                std::memcpy(&instruction, code, sizeof(inst));
-                assert((instruction & 0b11111u) ==
-                       (unsigned)values->as<ireg>());
-                instruction &= ~0b11111u;
-                instruction |= (unsigned)local.as<ireg>();
-                put(code, instruction);
+            if (v.is<value::location::imm>()) {
+                masm::mov(code, v.as<uint32_t>(), locreg);
+                intlocals.purge(locreg);
+                pushval = v;
+            } else if (v.is<value::location::flags>()) {
+                raw::cset(code, true, v.as<cond>(), locreg);
+                intlocals.purge(locreg);
+                pushval = v;
+            } else if (v.is<value::location::stack>()) {
+                masm::ldr(code, intregs, true, v.as<uint32_t>(), stackreg,
+                          locreg);
+                intlocals.purge(locreg);
+                intlocals.claim(local.as<ireg>(), {code, values, stack_size});
+                pad_spill(code, stack_size);
+                pushval = local;
+            } else if (v.is<value::location::reg>()) {
+                auto reg = v.as<ireg>();
+                if (is_volatile(reg) &&
+                    intregs.check_spill(reg, code - sizeof(inst))) {
+                    code -= 2 * sizeof(inst);
 
-                intregs.surrender(reg);
+                    inst instruction;
+                    std::memcpy(&instruction, code, sizeof(inst));
+                    assert((instruction & 0b11111u) == (unsigned)reg);
+                    instruction &= ~0b11111u;
+                    instruction |= (unsigned)locreg;
+                    put(code, instruction);
+
+                    intregs.surrender(reg);
+                } else {
+                    if (!is_volatile(reg) &&
+                        intlocals.check_spill(reg, code - sizeof(inst)))
+                        code -= sizeof(inst);
+
+                    auto wrapped = std::make_optional(locreg);
+                    auto as_reg = adapt_value_into(code, values, wrapped);
+                    if (*wrapped != as_reg)
+                        raw::mov(code, true, as_reg, *wrapped);
+                }
+
+                intlocals.purge(locreg);
+                intlocals.claim(locreg, {code, values, stack_size});
+                pad_spill(code, stack_size);
+                pushval = local;
             } else {
-                auto wrapped = std::make_optional(local.as<ireg>());
-                auto v = adapt_value_into(code, values, wrapped);
-                if (*wrapped != v)
-                    raw::mov(code, true, v, *wrapped);
+                assert(false);
             }
 
-            intlocals.purge(local.as<ireg>());
+            push(pushval);
         }
+        intregs.commit();
     } else {
         if (ty == valtype::f32 || ty == valtype::f64) {
-            auto [reg] = allocate_registers<std::tuple<iwant::freg>>(code);
+            auto [in, out] =
+                allocate_registers<std::tuple<iwant::freg, iwant::freg>>(code);
+
             masm::str(code, intregs, true, local.as<uint32_t>(), stackreg,
-                      reg.as<freg>());
+                      in.as<freg>());
+            raw::mov(code, ftype::double_, in.as<freg>(), out.as<freg>());
+
+            finalize(code, out.as<freg>());
         } else {
-            auto [reg] = allocate_registers<std::tuple<iwant::ireg>>(code);
-            masm::str(code, intregs, true, local.as<uint32_t>(), stackreg,
-                      reg.as<ireg>());
+            auto v = *--values;
+            stack_size -= sizeof(runtime::WasmValue);
+            ireg reg;
+
+            intregs.begin();
+            if (v.is<value::location::imm>()) {
+                reg = intregs.temporary();
+                masm::mov(code, v.as<uint32_t>(), reg);
+                push(v);
+            } else if (v.is<value::location::flags>()) {
+                reg = intregs.temporary();
+                raw::cset(code, true, v.as<cond>(), reg);
+                push(v);
+            } else if (v.is<value::location::stack>()) {
+                reg = intregs.result();
+                masm::ldr(code, intregs, true, v.as<uint32_t>(), stackreg, reg);
+                // this one is actually redundant because the masm::str
+                // blocks off any chance at doing the check_spill
+                // optimization
+                raw::mov(code, true, reg, reg);
+                // this is also sketchy
+                finalize(code, reg);
+            } else if (v.is<value::location::reg>()) {
+                // todo: see how possible it is to steal the spill space
+                // from the register we're using here
+                // also it's very sketchy to passthrough like this even
+                // though there's no real reason it shouldn't work
+                // worst case scenario it just gets dumped earlier than
+                // usual
+                reg = v.as<ireg>();
+                push(value::reg(reg));
+            }
+            masm::str(code, intregs, true, local.as<uint32_t>(), stackreg, reg);
+
+            intregs.commit();
         }
     }
 
-    finalize(code);
-}
-void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-    localset(code, stack, fn, local_idx);
-    localget(code, stack, fn, local_idx);
+    assert(values == initial_values);
+    assert(stack_size == initial_stack_size);
 }
 void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
     auto [idx, res] =
