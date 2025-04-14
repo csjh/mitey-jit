@@ -1322,11 +1322,11 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
     auto start = code;
 
     auto expected = values - copied_values.size();
-    auto dest = stack_offset;
-    for (size_t i = 0; i < copied_values.size(); i++) {
+    for (auto i = ssize_t(copied_values.size()) - 1; i >= 0; i--) {
+        auto dest = stack_offset + i * sizeof(runtime::WasmValue);
+
         if (expected[i].is<value::location::stack>() &&
             expected[i].as<uint32_t>() == dest) {
-            dest += sizeof(runtime::WasmValue);
             continue;
         }
 
@@ -1335,12 +1335,10 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
             auto reg =
                 adapt_value_into(code, &expected[i], floatreg, !discard_copied);
             masm::str(code, intregs, true, dest, stackreg, reg);
-            dest += sizeof(runtime::WasmValue);
         } else {
             auto reg =
                 adapt_value_into(code, &expected[i], intreg, !discard_copied);
             masm::str(code, intregs, true, dest, stackreg, reg);
-            dest += sizeof(runtime::WasmValue);
         }
     }
 
@@ -1736,19 +1734,19 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     std::optional<freg> floatreg = std::nullopt;
 
     auto expected = values - wanted.size();
-    for (size_t i = 0; i < wanted.size(); i++) {
+    for (auto i = ssize_t(wanted.size()) - 1; i >= 0; i--) {
         auto v = wanted[i];
         if (v == valtype::f32 || v == valtype::f64) {
             auto reg = adapt_value_into(code, &expected[i], floatreg);
             raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                       result_offset, stackreg, reg);
-            raw::add(code, true, result_offset, result_offset,
+            raw::sub(code, true, result_offset, result_offset,
                      sizeof(runtime::WasmValue));
         } else {
             auto reg = adapt_value_into(code, &expected[i], intreg);
             raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                       result_offset, stackreg, reg);
-            raw::add(code, true, result_offset, result_offset,
+            raw::sub(code, true, result_offset, result_offset,
                      sizeof(runtime::WasmValue));
         }
     }
@@ -1769,7 +1767,12 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 
     for (auto depth : targets) {
         auto &flow = control_stack[base - depth];
-        auto offset = flow.stack_offset;
+        // note: location of last result, not first
+        int32_t offset =
+            flow.expected.size()
+                ? flow.stack_offset +
+                      (flow.expected.size() - 1) * sizeof(runtime::WasmValue)
+                : 0;
         if (std::holds_alternative<Loop>(flow.construct)) {
             auto target = runtime::BrTableTarget(
                 std::get<Loop>(flow.construct).start - relative_point, offset);
