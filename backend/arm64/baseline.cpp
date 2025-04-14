@@ -2042,7 +2042,8 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg,
                       reg.as<freg>());
             // todo: this noop move is necessary because efficient local.set
-            // handling requires the last instruction to move into the result
+            // handling requires the last instruction to move into the
+            // result and the masm above could have a sub afterwards
             raw::mov(code, ftype::double_, reg.as<freg>(), reg.as<freg>());
             finalize(code, reg.as<freg>());
         } else {
