@@ -83,6 +83,13 @@ int32_t fd_write(__WASM_MEMORY, int32_t fd, const iovec *iovs,
     return 0;
 }
 
+int32_t fd_sync(int32_t fd) {
+    if (fsync(fd) != 0) {
+        return 28;
+    }
+    return 0;
+}
+
 int32_t args_get(__WASM_MEMORY, wasm_ptr_t *argv, char *argv_buf) {
     assert_alignment(argv);
 

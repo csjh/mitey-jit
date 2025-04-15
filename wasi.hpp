@@ -48,6 +48,8 @@ int32_t fd_write(__WASM_MEMORY, // non-standard: wasm memory passed in
                  wasm_size_t *nwritten // Bytes written
 );
 
+int32_t fd_sync(int32_t fd);
+
 // Command line arguments
 int32_t args_get(__WASM_MEMORY, wasm_ptr_t *argv, // Buffer to store args
                  char *argv_buf                   // Buffer for arg string data

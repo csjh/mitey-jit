@@ -43,6 +43,7 @@ int main(int argc, const char **argv) {
 
     auto wasi = runtime::ModuleImports{
         {"fd_write", internalize<fd_write>()},
+        {"fd_sync", internalize<fd_sync>()},
         {"args_get", internalize<args_get>()},
         {"args_sizes_get", internalize<args_sizes_get>()},
         {"environ_get", internalize<environ_get>()},
