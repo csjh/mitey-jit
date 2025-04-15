@@ -2188,7 +2188,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     } else {
         if (ty == valtype::f32 || ty == valtype::f64) {
             auto [in, out] =
-                allocate_registers<std::tuple<iwant::freg, iwant::freg>>(code);
+                allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
 
             masm::str(code, intregs, true, local.as<uint32_t>(), stackreg,
                       in.as<freg>());
