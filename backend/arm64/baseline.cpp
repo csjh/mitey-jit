@@ -862,9 +862,22 @@ void sub(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
     }
 }
 
-template <typename RegType>
 void ldr(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
-         uint32_t offset, ireg rn, RegType rt) {
+         uint32_t offset, ireg rn, ireg rt) {
+    if (offset < 1 << 12) {
+        raw::ldr(code, sf, offset, rn, rt);
+    } else if (offset < 1 << 24) {
+        raw::add(code, true, rt, rn, offset >> 12, true);
+        raw::ldr(code, sf, offset & 0xfff, rt, rt);
+    } else {
+        masm::mov(code, offset, rt);
+        raw::load(code, memtype::x, resexttype::uns, indexttype::lsl, false, rt,
+                  rn, rt);
+    }
+}
+
+void ldr(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
+         uint32_t offset, ireg rn, freg rt) {
     if (offset < 1 << 12) {
         raw::ldr(code, sf, offset, rn, rt);
     } else if (offset < 1 << 24) {
