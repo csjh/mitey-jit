@@ -238,67 +238,67 @@ void addsub(std::byte *&code, bool sf, bool sub, bool setflags, shifttype shift,
                   (static_cast<uint32_t>(rd) << 0));
 }
 
-void add(std::byte *&code, bool sf, ireg rd, ireg rn, uint16_t imm12,
+void add(std::byte *&code, bool sf, uint16_t imm12, ireg rn, ireg rd,
          bool shift = false) {
     addsub(code, sf, false, false, shift, imm12, rn, rd);
 }
 
-void adds(std::byte *&code, bool sf, ireg rd, ireg rn, uint16_t imm12,
+void adds(std::byte *&code, bool sf, uint16_t imm12, ireg rn, ireg rd,
           bool shift = false) {
     addsub(code, sf, false, true, shift, imm12, rn, rd);
 }
 
-void add(std::byte *&code, bool sf, ireg rd, ireg rm, ireg rn,
+void add(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd,
          shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
     addsub(code, sf, false, false, shift, rm, shift_n, rn, rd);
 }
 
-void adds(std::byte *&code, bool sf, ireg rd, ireg rm, ireg rn,
+void adds(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd,
           shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
     addsub(code, sf, false, true, shift, rm, shift_n, rn, rd);
 }
 
-void sub(std::byte *&code, bool sf, ireg rd, ireg rn, uint16_t imm12,
+void sub(std::byte *&code, bool sf, uint16_t imm12, ireg rn, ireg rd,
          bool shift = false) {
     addsub(code, sf, true, false, shift, imm12, rn, rd);
 }
 
-void subs(std::byte *&code, bool sf, ireg rd, ireg rn, uint16_t imm12,
+void subs(std::byte *&code, bool sf, uint16_t imm12, ireg rn, ireg rd,
           bool shift = false) {
     addsub(code, sf, true, true, shift, imm12, rn, rd);
 }
 
-void sub(std::byte *&code, bool sf, ireg rd, ireg rn, ireg rm,
+void sub(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd,
          shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
     addsub(code, sf, true, false, shift, rm, shift_n, rn, rd);
 }
 
 void neg(std::byte *&code, bool sf, ireg rn, ireg rd) {
-    sub(code, sf, rd, ireg::xzr, rn);
+    sub(code, sf, rn, ireg::xzr, rd);
 }
 
-void subs(std::byte *&code, bool sf, ireg rd, ireg rn, ireg rm,
+void subs(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd,
           shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
     addsub(code, sf, true, true, shift, rm, shift_n, rn, rd);
 }
 
-void cmp(std::byte *&code, bool sf, ireg rn, ireg rm,
+void cmp(std::byte *&code, bool sf, ireg rm, ireg rn,
          shifttype shift = shifttype::lsl, uint8_t shift_n = 0) {
-    subs(code, sf, ireg::xzr, rn, rm, shift, shift_n);
+    subs(code, sf, rm, rn, ireg::xzr, shift, shift_n);
 }
 
-void cmp(std::byte *&code, bool sf, ireg rn, uint16_t imm12) {
-    subs(code, sf, ireg::xzr, rn, imm12);
+void cmp(std::byte *&code, bool sf, uint16_t imm12, ireg rn) {
+    subs(code, sf, imm12, rn, ireg::xzr);
 }
 
-[[maybe_unused]] void cmn(std::byte *&code, bool sf, ireg rn, ireg rm,
+[[maybe_unused]] void cmn(std::byte *&code, bool sf, ireg rm, ireg rn,
                           shifttype shift = shifttype::lsl,
                           uint8_t shift_n = 0) {
-    adds(code, sf, ireg::xzr, rn, rm, shift, shift_n);
+    adds(code, sf, rm, rn, ireg::xzr, shift, shift_n);
 }
 
-void cmn(std::byte *&code, bool sf, ireg rn, uint16_t imm12) {
-    adds(code, sf, ireg::xzr, rn, imm12);
+void cmn(std::byte *&code, bool sf, uint16_t imm12, ireg rn) {
+    adds(code, sf, imm12, rn, ireg::xzr);
 }
 
 void ccmp(std::byte *&code, bool sf, ireg rm, cond c, ireg rn, uint8_t nzcv) {
@@ -833,15 +833,15 @@ void add(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
     if (imm == 0) {
         raw::mov(code, sf, src, dst);
     } else if (imm < 1 << 24) {
-        raw::add(code, sf, dst, src, imm & 0xfff);
+        raw::add(code, sf, imm & 0xfff, src, dst);
         imm >>= 12;
         if (imm) {
-            raw::add(code, sf, dst, dst, imm, true);
+            raw::add(code, sf, imm, dst, dst, true);
         }
     } else {
         auto tmp = intregs.temporary();
         mov(code, imm, tmp);
-        raw::add(code, sf, dst, src, tmp);
+        raw::add(code, sf, tmp, src, dst);
     }
 }
 
@@ -850,15 +850,15 @@ void sub(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
     if (imm == 0) {
         raw::mov(code, sf, src, dst);
     } else if (imm < 1 << 24) {
-        raw::sub(code, sf, dst, src, imm & 0xfff);
+        raw::sub(code, sf, imm & 0xfff, src, dst);
         imm >>= 12;
         if (imm) {
-            raw::sub(code, sf, dst, dst, imm, true);
+            raw::sub(code, sf, imm, dst, dst, true);
         }
     } else {
         auto tmp = intregs.temporary();
         mov(code, imm, tmp);
-        raw::sub(code, sf, dst, src, tmp);
+        raw::sub(code, sf, tmp, src, dst);
     }
 }
 
@@ -867,7 +867,7 @@ void ldr(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
     if (offset < 1 << 12) {
         raw::ldr(code, sf, offset, rn, rt);
     } else if (offset < 1 << 24) {
-        raw::add(code, true, rt, rn, offset >> 12, true);
+        raw::add(code, true, offset >> 12, rn, rt, true);
         raw::ldr(code, sf, offset & 0xfff, rt, rt);
     } else {
         masm::mov(code, offset, rt);
@@ -881,9 +881,9 @@ void ldr(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
     if (offset < 1 << 12) {
         raw::ldr(code, sf, offset, rn, rt);
     } else if (offset < 1 << 24) {
-        raw::add(code, true, rn, rn, offset >> 12, true);
+        raw::add(code, true, offset >> 12, rn, rn, true);
         raw::ldr(code, sf, offset & 0xfff, rn, rt);
-        raw::sub(code, true, rn, rn, offset >> 12, true);
+        raw::sub(code, true, offset >> 12, rn, rn, true);
     } else {
         auto offsetreg = intregs.temporary();
         masm::mov(code, offset, offsetreg);
@@ -900,9 +900,9 @@ void str_no_temp(std::byte *&code, bool sf, uint32_t offset, ireg rn,
     if (offset < 1 << 12) {
         raw::str(code, sf, offset, rn, rt);
     } else if (offset < 1 << 24) {
-        raw::add(code, true, rn, rn, offset >> 12, true);
+        raw::add(code, true, offset >> 12, rn, rn, true);
         raw::str(code, sf, offset & 0xfff, rn, rt);
-        raw::sub(code, true, rn, rn, offset >> 12, true);
+        raw::sub(code, true, offset >> 12, rn, rn, true);
     }
 }
 
@@ -912,9 +912,9 @@ void str(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
     if (offset < 1 << 12) {
         raw::str(code, sf, offset, rn, rt);
     } else if (offset < 1 << 24) {
-        raw::add(code, true, rn, rn, offset >> 12, true);
+        raw::add(code, true, offset >> 12, rn, rn, true);
         raw::str(code, sf, offset & 0xfff, rn, rt);
-        raw::sub(code, true, rn, rn, offset >> 12, true);
+        raw::sub(code, true, offset >> 12, rn, rn, true);
     } else {
         auto offsetreg = intregs.temporary();
         masm::mov(code, offset, offsetreg);
@@ -1465,7 +1465,7 @@ void Arm64::finalize(std::byte *&code, Args... results) {
 void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
     raw::stp(code, true, enctype::preidx, -0x10, ireg::x30, ireg::sp,
              ireg::x29);
-    raw::add(code, true, ireg::x29, ireg::sp, 0);
+    raw::add(code, true, 0, ireg::sp, ireg::x29);
 
     locals = std::span(new value[fn.locals.size()], fn.locals.size());
 
@@ -1731,13 +1731,13 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     // put max depth (-1 for default target) in $depth
     masm::mov(code, targets.size() - 1, depth);
     // $depth = min($depth, $input)
-    raw::cmp(code, false, input.as<ireg>(), depth);
+    raw::cmp(code, false, depth, input.as<ireg>());
     raw::csel(code, false, depth, cond::cc, input.as<ireg>(), depth);
     // put table address in $addr
     auto adr_location = code;
     code += sizeof(inst);
     // $addr = $addr + $depth * sizeof(BrTableTarget)
-    raw::add(code, true, addr, depth, addr, shifttype::lsl, 3);
+    raw::add(code, true, depth, addr, addr, shifttype::lsl, 3);
     // reuse $addr & $depth into $result_offset & $jump_offset
     auto result_offset = addr, jump_offset = depth;
     // [$result_offset, $jump_offset] = ldpsw($addr)
@@ -1753,14 +1753,14 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
             auto reg = adapt_value_into(code, &expected[i], floatreg);
             raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                       result_offset, stackreg, reg);
-            raw::sub(code, true, result_offset, result_offset,
-                     sizeof(runtime::WasmValue));
+            raw::sub(code, true, sizeof(runtime::WasmValue), result_offset,
+                     result_offset);
         } else {
             auto reg = adapt_value_into(code, &expected[i], intreg);
             raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                       result_offset, stackreg, reg);
-            raw::sub(code, true, result_offset, result_offset,
-                     sizeof(runtime::WasmValue));
+            raw::sub(code, true, sizeof(runtime::WasmValue), result_offset,
+                     result_offset);
         }
     }
 
@@ -1773,7 +1773,7 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     // $jump = PC + $jump_offset
     auto jump = result_offset;
     raw::adr(code, 0, jump);
-    raw::add(code, true, jump, jump, jump_offset);
+    raw::add(code, true, jump_offset, jump, jump);
     raw::br(code, jump);
 
     raw::adr(adr_location, code - adr_location, addr);
@@ -1821,7 +1821,7 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     raw::ldr(code, false, exhaust_ptr, exhaust);
     raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), exhaust,
              ireg::sp, exhaust_ptr);
-    raw::subs(code, false, exhaust, exhaust, 1);
+    raw::subs(code, false, 1, exhaust, exhaust);
     raw::str(code, false, exhaust_ptr, exhaust);
 
     auto exhaustion = code;
@@ -1885,7 +1885,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     raw::ldr(code, false, exhaust_ptr, exhaust);
     raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), exhaust,
              ireg::sp, exhaust_ptr);
-    raw::subs(code, false, exhaust, exhaust, 1);
+    raw::subs(code, false, 1, exhaust, exhaust);
     raw::str(code, false, exhaust_ptr, exhaust);
 
     auto exhaustion = code;
@@ -1900,7 +1900,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     static_assert(offsetof(runtime::WasmTable, elements) == 8);
     raw::ldp(code, true, enctype::offset, 0, elements, table_ptr, current);
 
-    raw::cmp(code, false, current, idx);
+    raw::cmp(code, false, idx, current);
     auto undefined_trap = code;
     raw::bcond(code, 0, cond::ls);
 
@@ -1920,7 +1920,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     masm::mov(code, p1, expected_sig);
     raw::ldr(code, true, offsetof(runtime::FunctionInfo, type), function_ptr,
              given_sig);
-    raw::cmp(code, true, expected_sig, given_sig);
+    raw::cmp(code, true, given_sig, expected_sig);
 
     masm::mov(code, p2, expected_sig);
     raw::ldr(code, false, offsetof(runtime::FunctionInfo, type) + sizeof(p1),
@@ -2019,7 +2019,7 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
 
         if (!condition.is<value::location::flags>()) {
             clobber_flags(code);
-            raw::cmp(code, false, condition.as<ireg>(), ireg::xzr);
+            raw::cmp(code, false, ireg::xzr, condition.as<ireg>());
             condition = value::flag(cond::ne);
         }
 
@@ -2034,7 +2034,7 @@ void Arm64::select(SHARED_PARAMS, valtype type) {
 
         if (!condition.is<value::location::flags>()) {
             clobber_flags(code);
-            raw::cmp(code, false, condition.as<ireg>(), ireg::xzr);
+            raw::cmp(code, false, ireg::xzr, condition.as<ireg>());
             condition = value::flag(cond::ne);
         }
 
@@ -2265,7 +2265,7 @@ void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
     static_assert(offsetof(runtime::WasmTable, elements) == 8);
     raw::ldp(code, true, enctype::offset, 0, elements, table_ptr, current);
 
-    raw::cmp(code, false, idx.as<ireg>(), current);
+    raw::cmp(code, false, current, idx.as<ireg>());
     auto oob_trap = code;
     raw::bcond(code, 0, cond::cc);
     masm::trap(code, runtime::TrapKind::out_of_bounds_table_access);
@@ -2291,7 +2291,7 @@ void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
     static_assert(offsetof(runtime::WasmTable, elements) == 8);
     raw::ldp(code, true, enctype::offset, 0, elements, table_ptr, current);
 
-    raw::cmp(code, false, idx.as<ireg>(), current);
+    raw::cmp(code, false, current, idx.as<ireg>());
     auto oob_trap = code;
     raw::bcond(code, 0, cond::cc);
     masm::trap(code, runtime::TrapKind::out_of_bounds_table_access);
@@ -2478,7 +2478,7 @@ void Arm64::i32eqz(SHARED_PARAMS) {
     auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
     clobber_flags(code);
 
-    raw::cmp(code, false, p.as<ireg>(), ireg::xzr);
+    raw::cmp(code, false, ireg::xzr, p.as<ireg>());
     push(value::flag(cond::eq));
 
     finalize(code);
@@ -2487,7 +2487,7 @@ void Arm64::i64eqz(SHARED_PARAMS) {
     auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
     clobber_flags(code);
 
-    raw::cmp(code, true, p.as<ireg>(), ireg::xzr);
+    raw::cmp(code, true, ireg::xzr, p.as<ireg>());
     push(value::flag(cond::eq));
 
     finalize(code);
@@ -2499,9 +2499,9 @@ void Arm64::i64eqz(SHARED_PARAMS) {
             std::tuple<iwant::ireg, iwant::literal<1 << 12>>>(code);           \
         clobber_flags(code);                                                   \
         if (p2.is<value::location::imm>()) {                                   \
-            raw::cmp(code, is_64, p1.as<ireg>(), p2.as<uint32_t>());           \
+            raw::cmp(code, is_64, p2.as<uint32_t>(), p1.as<ireg>());           \
         } else {                                                               \
-            raw::cmp(code, is_64, p1.as<ireg>(), p2.as<ireg>());               \
+            raw::cmp(code, is_64, p2.as<ireg>(), p1.as<ireg>());               \
         }                                                                      \
         push(value::flag(cond::op));                                           \
         finalize(code);                                                        \
@@ -2622,7 +2622,7 @@ void Arm64::i32add(SHARED_PARAMS) {
         masm::add(code, intregs, false, p2.as<uint32_t>(), p1.as<ireg>(),
                   res.as<ireg>());
     } else {
-        raw::add(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+        raw::add(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
 
     finalize(code, res.as<ireg>());
@@ -2636,7 +2636,7 @@ void Arm64::i64add(SHARED_PARAMS) {
         masm::add(code, intregs, true, p2.as<uint32_t>(), p1.as<ireg>(),
                   res.as<ireg>());
     } else {
-        raw::add(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+        raw::add(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
 
     finalize(code, res.as<ireg>());
@@ -2647,9 +2647,9 @@ void Arm64::i32sub(SHARED_PARAMS) {
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        raw::sub(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<uint32_t>());
+        raw::sub(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
     } else {
-        raw::sub(code, false, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+        raw::sub(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
 
     finalize(code, res.as<ireg>());
@@ -2660,9 +2660,9 @@ void Arm64::i64sub(SHARED_PARAMS) {
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        raw::sub(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<uint32_t>());
+        raw::sub(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
     } else {
-        raw::sub(code, true, res.as<ireg>(), p1.as<ireg>(), p2.as<ireg>());
+        raw::sub(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
 
     finalize(code, res.as<ireg>());
@@ -2694,7 +2694,7 @@ void Arm64::i32div_s(SHARED_PARAMS) {
         code, std::to_array({runtime::TrapKind::integer_divide_by_zero,
                              runtime::TrapKind::integer_overflow}));
     amend_br_if(zero_check, code);
-    raw::cmn(code, false, p2.as<ireg>(), 1);
+    raw::cmn(code, false, 1, p2.as<ireg>());
     raw::ccmp(code, false, 1, cond::eq, p1.as<ireg>(), 0);
     raw::bcond(code, overflow_trap - code, cond::vs);
 
@@ -2714,7 +2714,7 @@ void Arm64::i64div_s(SHARED_PARAMS) {
         code, std::to_array({runtime::TrapKind::integer_divide_by_zero,
                              runtime::TrapKind::integer_overflow}));
     amend_br_if(zero_check, code);
-    raw::cmn(code, true, p2.as<ireg>(), 1);
+    raw::cmn(code, true, 1, p2.as<ireg>());
     raw::ccmp(code, true, 1, cond::eq, p1.as<ireg>(), 0);
     raw::bcond(code, overflow_trap - code, cond::vs);
 
@@ -3300,7 +3300,7 @@ void Arm64::validate_trunc(std::byte *&code, freg v, FloatType lower,
     raw::mov(code, sf, ft, v, int_bits);
     masm::mov(code, nonfinite_value, int_comparison);
     raw::and_(code, sf, *tryLogicalImm(signless_bits), int_bits, int_bits);
-    raw::cmp(code, sf, int_bits, int_comparison);
+    raw::cmp(code, sf, int_comparison, int_bits);
 
     auto isfinite_check = code;
     raw::bcond(code, 0, cond::lt);
