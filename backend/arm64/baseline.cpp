@@ -1072,13 +1072,8 @@ void Arm64::temp_reg_manager<registers>::reset_temporaries() {
 }
 
 template <auto registers>
-void Arm64::temp_reg_manager<registers>::reset_results() {
-    regs.reset_results();
-}
-
-template <auto registers>
 decltype(registers)::value_type Arm64::temp_reg_manager<registers>::result() {
-    auto idx = regs.result();
+    auto idx = regs.back();
     spill(from_index(idx));
     return from_index(idx);
 }
@@ -1087,6 +1082,7 @@ template <auto registers>
 void Arm64::temp_reg_manager<registers>::claim(RegType reg, metadata md) {
     auto idx = to_index(reg);
     data[idx] = md;
+    regs.claim(idx);
 }
 
 template <auto registers>
@@ -1103,10 +1099,6 @@ void Arm64::temp_reg_manager<registers>::surrender(RegType reg) {
     auto idx = to_index(reg);
     regs.surrender(idx);
     data[idx].spilladdr = nullptr;
-}
-
-template <auto registers> void Arm64::temp_reg_manager<registers>::commit() {
-    regs.commit();
 }
 
 template <auto registers>
@@ -1477,10 +1469,8 @@ Arm64::allocate_registers(std::byte *&code) {
     }(std::make_index_sequence<nparams>{});
 
     if constexpr (std::is_same_v<Result, iwant::ireg>) {
-        intregs.reset_results();
         ret.back() = value::reg(intregs.result());
     } else if constexpr (std::is_same_v<Result, iwant::freg>) {
-        floatregs.reset_results();
         ret.back() = value::reg(floatregs.result());
     } else {
         static_assert(std::is_same_v<Result, iwant::none>);
@@ -1506,11 +1496,6 @@ void Arm64::finalize(std::byte *&code, Args... results) {
     };
 
     (finalize(results), ...);
-
-    if constexpr ((std::is_same_v<Args, ireg> || ...))
-        intregs.commit();
-    if constexpr ((std::is_same_v<Args, freg> || ...))
-        floatregs.commit();
 }
 
 void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
@@ -2263,7 +2248,6 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             ireg reg;
 
             intregs.reset_temporaries();
-            intregs.reset_results();
             if (v.is<value::location::imm>()) {
                 reg = intregs.temporary();
                 masm::mov(code, v.as<uint32_t>(), reg);

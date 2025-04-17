@@ -20,7 +20,21 @@ template <uint8_t N> class reg_lru {
     uint8_t head;
     uint8_t tail;
 
-    void access(uint8_t n) {
+    uint8_t current_temporary;
+
+  public:
+    reg_lru() {
+        for (uint8_t i = 0; i < N; i++) {
+            prev[i] = (i == 0) ? dummy : i - 1;
+            next[i] = (i == N - 1) ? dummy : i + 1;
+        }
+        head = 0;
+        tail = N - 1;
+    }
+
+    void claim(uint8_t n) {
+        assert(n < N);
+
         if (n == tail) {
             return;
         }
@@ -41,7 +55,9 @@ template <uint8_t N> class reg_lru {
         tail = n;
     }
 
-    void discard(uint8_t n) {
+    void surrender(uint8_t n) {
+        assert(n < N);
+
         if (n == head) {
             return;
         }
@@ -63,21 +79,7 @@ template <uint8_t N> class reg_lru {
         head = n;
     }
 
-    uint8_t current_temporary;
-    uint8_t current_result;
-
-  public:
-    reg_lru() {
-        for (uint8_t i = 0; i < N; i++) {
-            prev[i] = (i == 0) ? dummy : i - 1;
-            next[i] = (i == N - 1) ? dummy : i + 1;
-        }
-        head = 0;
-        tail = N - 1;
-    }
-
     void reset_temporaries() { current_temporary = head; }
-    void reset_results() { current_result = dummy; }
     // takes the least recently used non-claimed register
     uint8_t temporary() {
         auto ret = current_temporary;
@@ -85,20 +87,7 @@ template <uint8_t N> class reg_lru {
         return ret;
     }
     // only allows one result
-    uint8_t result() {
-        assert(current_result == dummy);
-        current_result = head;
-        return current_result;
-    }
-    // demotes given register to a temporary
-    void surrender(uint8_t reg) { discard(reg); }
-
-    // moves lasting registers to the top
-    // this could be optimized but like it's basically always just gonna be once
-    void commit() {
-        assert(current_result != dummy);
-        access(current_result);
-    }
+    uint8_t back() { return head; }
 };
 
 } // namespace arm64

@@ -70,13 +70,11 @@ class Arm64 {
         reg_lru<N> regs;
         metadata data[N];
 
-        void spill(RegType reg);
         uint8_t to_index(RegType reg);
         RegType from_index(uint8_t idx);
 
       public:
         void reset_temporaries();
-        void reset_results();
         // takes the least recently used non-claimed register
         // spills the register if necessary
         // result should only used after all temporaries are consumed
@@ -92,8 +90,6 @@ class Arm64 {
         RegType temporary();
         // dumps a register, throws away the metadata
         void surrender(RegType reg);
-        // ends a transaction
-        void commit();
 
         void clobber_all();
         bool check_spill(RegType reg, std::byte *code);
