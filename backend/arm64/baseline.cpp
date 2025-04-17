@@ -811,21 +811,86 @@ void ret(std::byte *&code) { put(code, 0b11010110010111110000001111000000); }
 
 }; // namespace raw
 
+// based on
+// https://dougallj.wordpress.com/2021/10/30/bit-twiddling-optimising-aarch64-logical-immediate-encoding-and-decoding/
+constexpr std::optional<LogicalImm> tryLogicalImm(uint64_t val) {
+    if (val == 0 || ~val == 0)
+        return std::nullopt;
+
+    uint32_t rotation = std::countr_zero(val & (val + 1));
+    uint64_t normalized = std::rotr(val, rotation & 63);
+
+    uint32_t zeroes = std::countl_zero(normalized);
+    uint32_t ones = std::countr_one(normalized);
+    uint32_t size = zeroes + ones;
+
+    if (std::rotr(val, size & 63) != val)
+        return std::nullopt;
+
+    return LogicalImm(size >> 6, -rotation & (size - 1),
+                      (-(size << 1) | (ones - 1)) & 0x3f);
+}
+
+constexpr std::optional<LogicalImm> tryLogicalImm(uint32_t val) {
+    uint64_t val64 = ((uint64_t)val << 32) | val;
+    return tryLogicalImm(val64);
+}
+
 namespace masm {
 
-void mov(std::byte *&code, uint64_t imm, ireg dst) {
+void mov(std::byte *&code, uint32_t imm, ireg dst) {
     if (imm == 0) {
-        raw::mov(code, true, ireg::xzr, dst);
+        raw::mov(code, false, ireg::xzr, dst);
         return;
     }
 
+    if (auto logical = tryLogicalImm(imm)) {
+        raw::orr(code, false, *logical, ireg::xzr, dst);
+        return;
+    }
+
+    auto [immlo, immhi] = std::pair{static_cast<uint16_t>(imm & 0xffff),
+                                    static_cast<uint16_t>(imm >> 16)};
+
+    constexpr uint16_t ones = 0xffff;
+    if (!immlo) {
+        raw::mov(code, false, true, false, 1, immhi, dst);
+    } else if (!immhi) {
+        raw::mov(code, false, true, false, 0, immlo, dst);
+    } else if (immlo == ones) {
+        raw::mov(code, false, false, false, 1, immhi ^ ones, dst);
+    } else if (immhi == ones) {
+        raw::mov(code, false, false, false, 0, immlo ^ ones, dst);
+    } else {
+        raw::mov(code, false, true, false, 0, immlo, dst);
+        raw::mov(code, false, true, true, 1, immhi, dst);
+    }
+}
+
+bool mov(std::byte *&code, uint64_t imm, ireg dst) {
+    if (imm == 0) {
+        raw::mov(code, true, ireg::xzr, dst);
+        return true;
+    }
+
+    if (auto logical = tryLogicalImm(imm)) {
+        raw::orr(code, true, *logical, ireg::xzr, dst);
+        return true;
+    }
+
     bool keep = false;
-    for (size_t i = 0; i < sizeof(uint32_t) && imm; i++) {
+    for (size_t i = 0; i < 4; i++) {
         auto literal = imm & 0xffff;
         imm >>= 16;
+        if (literal == 0)
+            continue;
         raw::mov(code, true, true, keep, i, literal, dst);
+        if (!keep && !imm)
+            return true;
         keep = true;
     }
+
+    return false;
 }
 
 void add(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
@@ -974,31 +1039,6 @@ void put_immediate(std::byte *base, std::byte *to) {
 
     uint32_t result = high | (imm << low_len) | low;
     std::memcpy(base, &result, sizeof(result));
-}
-
-// based on
-// https://dougallj.wordpress.com/2021/10/30/bit-twiddling-optimising-aarch64-logical-immediate-encoding-and-decoding/
-constexpr std::optional<LogicalImm> tryLogicalImm(uint64_t val) {
-    if (val == 0 || ~val == 0)
-        return std::nullopt;
-
-    uint32_t rotation = std::countr_zero(val & (val + 1));
-    uint64_t normalized = std::rotr(val, rotation & 63);
-
-    uint32_t zeroes = std::countl_zero(normalized);
-    uint32_t ones = std::countr_one(normalized);
-    uint32_t size = zeroes + ones;
-
-    if (std::rotr(val, size & 63) != val)
-        return std::nullopt;
-
-    return LogicalImm(size >> 6, -rotation & (size - 1),
-                      (-(size << 1) | (ones - 1)) & 0x3f);
-}
-
-constexpr std::optional<LogicalImm> tryLogicalImm(uint32_t val) {
-    uint64_t val64 = ((uint64_t)val << 32) | val;
-    return tryLogicalImm(val64);
 }
 
 bool is_volatile(ireg reg) { return reg <= icaller_saved.back(); }
@@ -1740,7 +1780,7 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     auto addr = intregs.temporary();
 
     // put max depth (-1 for default target) in $depth
-    masm::mov(code, targets.size() - 1, depth);
+    masm::mov(code, (uint32_t)targets.size() - 1, depth);
     // $depth = min($depth, $input)
     raw::cmp(code, false, depth, input.as<ireg>());
     raw::csel(code, false, depth, cond::cc, input.as<ireg>(), depth);
@@ -2360,8 +2400,8 @@ void Arm64::i32const(SHARED_PARAMS, uint32_t cons) { push(value::imm(cons)); }
 void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
     if (cons > std::numeric_limits<uint32_t>::max()) {
         auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
-        masm::mov(code, cons, res.as<ireg>());
-        raw::mov(code, true, res.as<ireg>(), res.as<ireg>());
+        if (!masm::mov(code, cons, res.as<ireg>()))
+            raw::mov(code, true, res.as<ireg>(), res.as<ireg>());
         finalize(code, res.as<ireg>());
     } else {
         push(value::imm(cons));
