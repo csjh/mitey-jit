@@ -1054,7 +1054,7 @@ decltype(registers)::value_type
 Arm64::temp_reg_manager<registers>::temporary() {
     auto idx = regs.temporary();
     spill(from_index(idx));
-    data[idx] = metadata(nullptr, 0);
+    data[idx].spilladdr = nullptr;
     return from_index(idx);
 }
 
@@ -1062,7 +1062,7 @@ template <auto registers>
 void Arm64::temp_reg_manager<registers>::surrender(RegType reg) {
     auto idx = to_index(reg);
     regs.surrender(idx);
-    data[idx] = metadata(nullptr, 0);
+    data[idx].spilladdr = nullptr;
 }
 
 template <auto registers> void Arm64::temp_reg_manager<registers>::commit() {
@@ -1072,8 +1072,12 @@ template <auto registers> void Arm64::temp_reg_manager<registers>::commit() {
 template <auto registers>
 void Arm64::temp_reg_manager<registers>::clobber_all() {
     for (auto reg : registers) {
-        spill(reg);
-        surrender(reg);
+        auto [addr, v, offset] = data[to_index(reg)];
+        if (addr) {
+            masm::str_no_temp(addr, true, offset, stackreg, reg);
+            *v = value::stack(offset);
+            data[to_index(reg)].spilladdr = nullptr;
+        }
     }
 }
 
@@ -1104,14 +1108,14 @@ void Arm64::lasting_reg_manager<RegType, N>::surrender(value *v) {
     assert(count > 0);
     count--;
     assert(data[count % N].value_offset == v);
-    data[count % N] = metadata(nullptr, nullptr, 0);
+    data[count % N].spilladdr = nullptr;
 }
 
 template <typename RegType, size_t N>
 void Arm64::lasting_reg_manager<RegType, N>::purge(RegType reg) {
     for (auto i = 0; i < std::min(count, N); i++) {
         spill(reg, i);
-        data[i] = metadata(nullptr, nullptr, 0);
+        data[i].spilladdr = nullptr;
     }
     count = 0;
 }
