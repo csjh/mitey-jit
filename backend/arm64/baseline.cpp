@@ -853,14 +853,14 @@ void mov(std::byte *&code, uint32_t imm, ireg dst) {
                                     static_cast<uint16_t>(imm >> 16)};
 
     constexpr uint16_t ones = 0xffff;
-    if (!immlo) {
-        raw::mov(code, false, true, false, 1, immhi, dst);
-    } else if (!immhi) {
+    if (!immhi) {
         raw::mov(code, false, true, false, 0, immlo, dst);
-    } else if (immlo == ones) {
-        raw::mov(code, false, false, false, 1, immhi ^ ones, dst);
+    } else if (!immlo) {
+        raw::mov(code, false, true, false, 1, immhi, dst);
     } else if (immhi == ones) {
         raw::mov(code, false, false, false, 0, immlo ^ ones, dst);
+    } else if (immlo == ones) {
+        raw::mov(code, false, false, false, 1, immhi ^ ones, dst);
     } else {
         raw::mov(code, false, true, false, 0, immlo, dst);
         raw::mov(code, false, true, true, 1, immhi, dst);
