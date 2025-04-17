@@ -93,6 +93,7 @@ class Arm64 {
 
         void clobber_all();
         bool check_spill(RegType reg, std::byte *code);
+        void spill(RegType reg);
     };
 
     using temp_int_manager = temp_reg_manager<icaller_saved>;
@@ -110,13 +111,13 @@ class Arm64 {
         metadata data[N];
         size_t count = 0;
 
-        void spill(RegType, size_t);
-
       public:
         void claim(RegType, metadata);
         void surrender(value *);
         void purge(RegType);
         bool check_spill(RegType reg, std::byte *code);
+        void spill(RegType, size_t);
+        void spill(RegType, value *);
     };
 
     template <auto registers> class local_manager {
@@ -139,6 +140,7 @@ class Arm64 {
         void surrender(RegType, value *);
         void purge(RegType);
         bool check_spill(RegType reg, std::byte *code);
+        void spill(RegType reg, value *v);
     };
 
   private:
@@ -187,6 +189,7 @@ class Arm64 {
         struct flags : thresholdless {};
     };
 
+    template <typename To> void despill(std::byte *&code, value *v);
     template <typename To> value adapt_value(std::byte *&code, value *v);
     ireg adapt_value_into(std::byte *&code, value *v, std::optional<ireg> &reg,
                           bool soft = false);

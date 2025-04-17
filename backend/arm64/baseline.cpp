@@ -1129,6 +1129,20 @@ void Arm64::lasting_reg_manager<RegType, N>::spill(RegType reg, size_t i) {
 }
 
 template <typename RegType, size_t N>
+void Arm64::lasting_reg_manager<RegType, N>::spill(RegType reg, value *v) {
+    assert(count > 0);
+    count--;
+    assert(data[count % N].value_offset == v);
+    auto [addr, _, offset] = data[count % N];
+    if (addr) {
+        masm::str_no_temp(addr, true, offset, stackreg, reg);
+        *v = value::stack(offset);
+        // todo: why is next line necessary?
+        data[count % N].spilladdr = nullptr;
+    }
+}
+
+template <typename RegType, size_t N>
 void Arm64::lasting_reg_manager<RegType, N>::claim(RegType reg, metadata md) {
     spill(reg, count % N);
     data[count % N] = md;
@@ -1185,7 +1199,15 @@ bool Arm64::local_manager<registers>::check_spill(RegType reg,
     return get_manager_of(reg).check_spill(reg, code);
 }
 
+template <auto registers>
+void Arm64::local_manager<registers>::spill(RegType reg, value *v) {
+    assert(std::ranges::find(registers, reg) != registers.end());
+    get_manager_of(reg).spill(reg, v);
+}
+
 void Arm64::clobber_flags(std::byte *&code) {
+    // todo: check if this is vulnerable to being messed up by if/else
+
     if (!flag.val)
         return;
 
@@ -1216,6 +1238,30 @@ void Arm64::push(value v) {
     stack_size += sizeof(runtime::WasmValue);
 }
 
+template <typename To> void Arm64::despill(std::byte *&code, value *v) {
+    if (!v->is<value::location::reg>())
+        return;
+    if constexpr (std::is_same_v<To, iwant::freg>) {
+        auto reg = v->as<freg>();
+        if (is_volatile(reg)) {
+            if (floatregs.check_spill(reg, code - sizeof(inst)))
+                code -= sizeof(inst);
+        } else {
+            if (floatlocals.check_spill(reg, code - sizeof(inst)))
+                code -= sizeof(inst);
+        }
+    } else {
+        auto reg = v->as<ireg>();
+        if (is_volatile(reg)) {
+            if (intregs.check_spill(reg, code - sizeof(inst)))
+                code -= sizeof(inst);
+        } else {
+            if (intlocals.check_spill(reg, code - sizeof(inst)))
+                code -= sizeof(inst);
+        }
+    }
+}
+
 template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
     using RegType =
         std::conditional_t<std::is_same_v<To, iwant::freg>, freg, ireg>;
@@ -1225,22 +1271,14 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
         auto r = v->as<RegType>();
         if (is_volatile(r)) {
             if constexpr (std::is_same_v<To, iwant::freg>) {
-                if (floatregs.check_spill(r, code - sizeof(inst)))
-                    code -= sizeof(inst);
                 floatregs.surrender(r);
             } else {
-                if (intregs.check_spill(r, code - sizeof(inst)))
-                    code -= sizeof(inst);
                 intregs.surrender(r);
             }
         } else {
             if constexpr (std::is_same_v<To, iwant::freg>) {
-                if (floatlocals.check_spill(r, code - sizeof(inst)))
-                    code -= sizeof(inst);
                 floatlocals.surrender(r, v);
             } else {
-                if (intlocals.check_spill(r, code - sizeof(inst)))
-                    code -= sizeof(inst);
                 intlocals.surrender(r, v);
             }
         }
@@ -1377,23 +1415,76 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
     auto start = code;
 
     auto expected = values - copied_values.size();
-    for (auto i = ssize_t(copied_values.size()) - 1; i >= 0; i--) {
-        auto dest = stack_offset + i * sizeof(runtime::WasmValue);
+    if (stack_offset == stack_size - copied_values.bytesize()) {
+        for (auto i = ssize_t(copied_values.size()) - 1; i >= 0; i--) {
+            auto dest = stack_offset + i * sizeof(runtime::WasmValue);
 
-        if (expected[i].is<value::location::stack>() &&
-            expected[i].as<uint32_t>() == dest) {
-            continue;
+            auto v = copied_values[i];
+            if (v == valtype::f32 || v == valtype::f64) {
+                switch (expected[i].where()) {
+                case value::location::reg: {
+                    auto reg = expected[i].as<freg>();
+                    if (is_volatile(reg)) {
+                        floatregs.spill(reg);
+                        floatregs.surrender(reg);
+                    } else {
+                        floatlocals.spill(reg, &expected[i]);
+                    }
+                    break;
+                }
+                case value::location::stack:
+                    assert(expected[i].as<uint32_t>() == dest);
+                    break;
+                case value::location::flags:
+                case value::location::imm:
+                    __builtin_unreachable();
+                }
+            } else {
+                switch (expected[i].where()) {
+                case value::location::reg: {
+                    auto reg = expected[i].as<ireg>();
+                    if (is_volatile(reg)) {
+                        intregs.spill(reg);
+                        intregs.surrender(reg);
+                    } else {
+                        intlocals.spill(reg, &expected[i]);
+                    }
+                    break;
+                }
+                case value::location::flags:
+                    clobber_flags(code);
+                    break;
+                case value::location::stack:
+                    assert(expected[i].as<uint32_t>() == dest);
+                    break;
+                case value::location::imm:
+                    auto imm = expected[i].as<uint32_t>();
+                    intreg = intreg ? intreg : intregs.temporary();
+                    masm::mov(code, imm, *intreg);
+                    masm::str(code, intregs, true, dest, stackreg, *intreg);
+                    break;
+                }
+            }
         }
+    } else {
+        for (auto i = ssize_t(copied_values.size()) - 1; i >= 0; i--) {
+            auto dest = stack_offset + i * sizeof(runtime::WasmValue);
 
-        auto v = copied_values[i];
-        if (v == valtype::f32 || v == valtype::f64) {
-            auto reg =
-                adapt_value_into(code, &expected[i], floatreg, !discard_copied);
-            masm::str(code, intregs, true, dest, stackreg, reg);
-        } else {
-            auto reg =
-                adapt_value_into(code, &expected[i], intreg, !discard_copied);
-            masm::str(code, intregs, true, dest, stackreg, reg);
+            if (expected[i].is<value::location::stack>() &&
+                expected[i].as<uint32_t>() == dest) {
+                continue;
+            }
+
+            auto v = copied_values[i];
+            if (v == valtype::f32 || v == valtype::f64) {
+                auto reg = adapt_value_into(code, &expected[i], floatreg,
+                                            !discard_copied);
+                masm::str(code, intregs, true, dest, stackreg, reg);
+            } else {
+                auto reg = adapt_value_into(code, &expected[i], intreg,
+                                            !discard_copied);
+                masm::str(code, intregs, true, dest, stackreg, reg);
+            }
         }
     }
 
@@ -1460,8 +1551,9 @@ Arm64::allocate_registers(std::byte *&code) {
     stack_size -= sizeof(runtime::WasmValue) * nparams;
 
     [&]<std::size_t... I>(std::index_sequence<I...>) {
-        // going in reverse order allows for both parameters
-        //  to be hit by check_spill optimizations
+        (despill<std::tuple_element_t<nparams - I - 1, Params>>(
+             code, &values[nparams - I - 1]),
+         ...);
         ((ret[nparams - I - 1] =
               adapt_value<std::tuple_element_t<nparams - I - 1, Params>>(
                   code, &values[nparams - I - 1])),
@@ -2015,25 +2107,19 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
     switch (values->where()) {
     case value::location::reg:
         if (type == valtype::f32 || type == valtype::f64) {
+            despill<iwant::freg>(code, values);
             auto r = values->as<freg>();
             if (is_volatile(r)) {
-                if (floatregs.check_spill(r, code - sizeof(inst)))
-                    code -= sizeof(inst);
                 floatregs.surrender(r);
             } else {
-                if (floatlocals.check_spill(r, code - sizeof(inst)))
-                    code -= sizeof(inst);
                 floatlocals.surrender(r, values);
             }
         } else {
+            despill<iwant::ireg>(code, values);
             auto r = values->as<ireg>();
             if (is_volatile(r)) {
-                if (intregs.check_spill(r, code - sizeof(inst)))
-                    code -= sizeof(inst);
                 intregs.surrender(r);
             } else {
-                if (intlocals.check_spill(r, code - sizeof(inst)))
-                    code -= sizeof(inst);
                 intlocals.surrender(r, values);
             }
         }
