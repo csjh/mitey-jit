@@ -2070,7 +2070,6 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
             masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg,
                       reg.as<ireg>());
-            raw::mov(code, true, reg.as<ireg>(), reg.as<ireg>());
             finalize(code, reg.as<ireg>());
         }
     } else {
