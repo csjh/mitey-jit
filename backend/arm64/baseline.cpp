@@ -15,7 +15,7 @@ namespace {
 using inst = uint32_t;
 static constexpr inst noop = 0xd503201f;
 
-template <typename T> void put(std::byte *&code, const T &val) {
+template <typename T> void put(std::byte *&__restrict__ code, const T &val) {
     std::memcpy(code, &val, sizeof(T));
     code += sizeof(T);
 }
