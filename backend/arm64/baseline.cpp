@@ -1468,7 +1468,7 @@ void Arm64::finalize(std::byte *&code, Args... results) {
     (finalize(results), ...);
 
     if constexpr ((std::is_same_v<Args, ireg> || ...))
-    intregs.commit();
+        intregs.commit();
     if constexpr ((std::is_same_v<Args, freg> || ...))
         floatregs.commit();
 }
@@ -1819,13 +1819,13 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     allocate_registers<std::tuple<>>(code);
 
-    auto exhaust_ptr = intregs.temporary(), exhaust = intregs.temporary(),
-         function_ptr = exhaust_ptr, signature = exhaust;
-
     clobber_flags(code);
     clobber_registers();
 
     stackify(code, fn.type.params);
+
+    constexpr auto exhaust_ptr = ireg::x3, exhaust = ireg::x4,
+                   function_ptr = exhaust_ptr, signature = exhaust;
 
     masm::mov(code, reinterpret_cast<uint64_t>(&runtime::call_stack_depth),
               exhaust_ptr);
