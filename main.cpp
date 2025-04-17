@@ -82,9 +82,10 @@ int main(int argc, const char **argv) {
     auto fd = open(path, O_RDONLY | O_DIRECTORY, 0666);
     register_preopen(fd, "/");
 
+    auto func = externalize<void()>(
+        std::get<runtime::FunctionInfo>(instance->get_exports().at("_start")));
     try {
-        externalize<void()>(std::get<runtime::FunctionInfo>(
-            instance->get_exports().at("_start")))();
+        func();
     } catch (const std::exception &e) {
         printf("Exception: %s\n", e.what());
     }
