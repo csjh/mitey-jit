@@ -75,8 +75,8 @@ class Arm64 {
         RegType from_index(uint8_t idx);
 
       public:
-        // starts a transaction
-        void begin();
+        void reset_temporaries();
+        void reset_results();
         // takes the least recently used non-claimed register
         // spills the register if necessary
         // result should only used after all temporaries are consumed

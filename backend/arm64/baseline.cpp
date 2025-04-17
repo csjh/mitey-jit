@@ -1026,8 +1026,14 @@ Arm64::temp_reg_manager<registers>::from_index(uint8_t idx) {
     return static_cast<RegType>(idx + First);
 }
 
-template <auto registers> void Arm64::temp_reg_manager<registers>::begin() {
-    regs.begin();
+template <auto registers>
+void Arm64::temp_reg_manager<registers>::reset_temporaries() {
+    regs.reset_temporaries();
+}
+
+template <auto registers>
+void Arm64::temp_reg_manager<registers>::reset_results() {
+    regs.reset_results();
 }
 
 template <auto registers>
@@ -1411,8 +1417,8 @@ Arm64::allocate_registers(std::byte *&code) {
     std::array<value, nparams + !std::is_same_v<Result, Arm64::iwant::none>>
         ret;
 
-    intregs.begin();
-    floatregs.begin();
+    intregs.reset_temporaries();
+    floatregs.reset_temporaries();
 
     values -= nparams;
     stack_size -= sizeof(runtime::WasmValue) * nparams;
@@ -1427,8 +1433,10 @@ Arm64::allocate_registers(std::byte *&code) {
     }(std::make_index_sequence<nparams>{});
 
     if constexpr (std::is_same_v<Result, iwant::ireg>) {
+        intregs.reset_results();
         ret.back() = value::reg(intregs.result());
     } else if constexpr (std::is_same_v<Result, iwant::freg>) {
+        floatregs.reset_results();
         ret.back() = value::reg(floatregs.result());
     } else {
         static_assert(std::is_same_v<Result, iwant::none>);
@@ -1455,8 +1463,7 @@ void Arm64::finalize(std::byte *&code, Args... results) {
 
     (finalize(results), ...);
 
-    // always commit intregs because there could be a spilled flag
-    // this could be optimized but like i really doubt it's a bottleneck
+    if constexpr ((std::is_same_v<Args, ireg> || ...))
     intregs.commit();
     if constexpr ((std::is_same_v<Args, freg> || ...))
         floatregs.commit();
@@ -1617,8 +1624,8 @@ void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     //     push(value::stack(stack_size));
 }
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
-    intregs.begin();
-    floatregs.begin();
+    intregs.reset_temporaries();
+    floatregs.reset_temporaries();
 
     if (!stack.polymorphism()) {
         stackify(code, flow.sig.results);
@@ -1660,8 +1667,8 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     // for now, only support non-special case distances (+/- 128MB)
 
     // todo: check if these are necessary, or can they go back in move_results
-    intregs.begin();
-    floatregs.begin();
+    intregs.reset_temporaries();
+    floatregs.reset_temporaries();
 
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
@@ -2093,9 +2100,9 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
         auto v = *--values;
         stack_size -= sizeof(runtime::WasmValue);
 
-        intregs.begin();
         if (ty == valtype::f32 || ty == valtype::f64) {
-            floatregs.begin();
+            intregs.reset_temporaries();
+            floatregs.reset_temporaries();
 
             auto locreg = local.as<freg>();
             auto pushval = v;
@@ -2140,9 +2147,9 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
             pad_spill(code, stack_size);
             push(pushval);
-
-            floatregs.commit();
         } else {
+            intregs.reset_temporaries();
+
             auto locreg = local.as<ireg>();
             // certain value locations are better than a register
             value pushval;
@@ -2197,7 +2204,6 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
             push(pushval);
         }
-        intregs.commit();
     } else {
         if (ty == valtype::f32 || ty == valtype::f64) {
             auto [in, out] =
@@ -2213,7 +2219,8 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             stack_size -= sizeof(runtime::WasmValue);
             ireg reg;
 
-            intregs.begin();
+            intregs.reset_temporaries();
+            intregs.reset_results();
             if (v.is<value::location::imm>()) {
                 reg = intregs.temporary();
                 masm::mov(code, v.as<uint32_t>(), reg);
@@ -2242,8 +2249,6 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                 push(value::reg(reg));
             }
             masm::str(code, intregs, true, local.as<uint32_t>(), stackreg, reg);
-
-            intregs.commit();
         }
     }
 

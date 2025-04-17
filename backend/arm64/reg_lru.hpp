@@ -64,7 +64,7 @@ template <uint8_t N> class reg_lru {
     }
 
     uint8_t current_temporary;
-    uint8_t current_lasting;
+    uint8_t current_result;
 
   public:
     reg_lru() {
@@ -76,22 +76,19 @@ template <uint8_t N> class reg_lru {
         tail = N - 1;
     }
 
-    void begin() {
-        current_temporary = head;
-        current_lasting = head;
-    }
+    void reset_temporaries() { current_temporary = head; }
+    void reset_results() { current_result = dummy; }
     // takes the least recently used non-claimed register
     uint8_t temporary() {
         auto ret = current_temporary;
         current_temporary = next[ret];
         return ret;
     }
-    // takes the least recently used non-lasting register
-    // bumped up when committed
+    // only allows one result
     uint8_t result() {
-        auto ret = current_lasting;
-        current_lasting = next[ret];
-        return ret;
+        assert(current_result == dummy);
+        current_result = head;
+        return current_result;
     }
     // demotes given register to a temporary
     void surrender(uint8_t reg) { discard(reg); }
@@ -99,9 +96,8 @@ template <uint8_t N> class reg_lru {
     // moves lasting registers to the top
     // this could be optimized but like it's basically always just gonna be once
     void commit() {
-        while (current_lasting != head) [[unlikely]] {
-            access(head);
-        }
+        assert(current_result != dummy);
+        access(current_result);
     }
 };
 
