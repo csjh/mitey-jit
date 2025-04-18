@@ -1591,9 +1591,23 @@ void Arm64::finalize(std::byte *&code, Args... results) {
 }
 
 void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
-    raw::stp(code, true, enctype::preidx, -0x10, ireg::x30, ireg::sp,
+    raw::stp(code, true, enctype::preidx, -0x20, ireg::x30, ireg::sp,
              ireg::x29);
     raw::add(code, true, 0, ireg::sp, ireg::x29);
+
+    constexpr auto exhaust_ptr = ireg::x3, exhaust = ireg::x4;
+
+    masm::mov(code, reinterpret_cast<uint64_t>(&runtime::call_stack_depth),
+              exhaust_ptr);
+    raw::ldr(code, false, exhaust_ptr, exhaust);
+    raw::stp(code, true, enctype::offset, 0x10, exhaust, ireg::sp, exhaust_ptr);
+    raw::subs(code, false, 1, exhaust, exhaust);
+    raw::str(code, false, exhaust_ptr, exhaust);
+
+    auto exhaustion = code;
+    raw::bcond(code, 0, cond::ne);
+    masm::trap(code, runtime::TrapKind::call_stack_exhausted);
+    amend_br_if(exhaustion, code);
 
     locals = std::span(new value[fn.locals.size()], fn.locals.size());
 
@@ -1681,7 +1695,12 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
         }
     }
 
-    raw::ldp(code, true, enctype::pstidx, 0x10, ireg::x30, ireg::sp, ireg::x29);
+    // restore call stack depth
+    constexpr auto exhaust_ptr = ireg::x3, exhaust = ireg::x4;
+    raw::ldp(code, true, enctype::offset, 0x10, exhaust, ireg::sp, exhaust_ptr);
+    raw::str(code, false, exhaust_ptr, exhaust);
+
+    raw::ldp(code, true, enctype::pstidx, 0x20, ireg::x30, ireg::sp, ireg::x29);
     raw::ret(code);
 
     delete[] locals.data();
@@ -1941,21 +1960,7 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
 
     stackify(code, fn.type.params);
 
-    constexpr auto exhaust_ptr = ireg::x3, exhaust = ireg::x4,
-                   function_ptr = exhaust_ptr, signature = exhaust;
-
-    masm::mov(code, reinterpret_cast<uint64_t>(&runtime::call_stack_depth),
-              exhaust_ptr);
-    raw::ldr(code, false, exhaust_ptr, exhaust);
-    raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), exhaust,
-             ireg::sp, exhaust_ptr);
-    raw::subs(code, false, 1, exhaust, exhaust);
-    raw::str(code, false, exhaust_ptr, exhaust);
-
-    auto exhaustion = code;
-    raw::bcond(code, 0, cond::ne);
-    masm::trap(code, runtime::TrapKind::call_stack_exhausted);
-    amend_br_if(exhaustion, code);
+    constexpr auto function_ptr = ireg::x3, signature = ireg::x4;
 
     // load the FunctionInfo pointer
     masm::ldr(code, intregs, true, func_offset * sizeof(void *), miscreg,
@@ -1984,10 +1989,6 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
                  ireg::sp, memreg);
     }
 
-    raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), exhaust,
-             ireg::sp, exhaust_ptr);
-    raw::str(code, false, exhaust_ptr, exhaust);
-
     for ([[maybe_unused]] auto result : fn.type.results) {
         push(value::stack(stack_size));
     }
@@ -2000,26 +2001,12 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     auto idx = v.as<ireg>();
     auto table_ptr = intregs.temporary(), current = intregs.temporary(),
          elements = intregs.temporary(), function_ptr = intregs.temporary(),
-         expected_sig = intregs.temporary(), given_sig = intregs.temporary(),
-         exhaust_ptr = intregs.temporary(), exhaust = intregs.temporary();
+         expected_sig = intregs.temporary(), given_sig = intregs.temporary();
 
     clobber_flags(code);
     clobber_registers();
 
     stackify(code, type.params);
-
-    masm::mov(code, reinterpret_cast<uint64_t>(&runtime::call_stack_depth),
-              exhaust_ptr);
-    raw::ldr(code, false, exhaust_ptr, exhaust);
-    raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), exhaust,
-             ireg::sp, exhaust_ptr);
-    raw::subs(code, false, 1, exhaust, exhaust);
-    raw::str(code, false, exhaust_ptr, exhaust);
-
-    auto exhaustion = code;
-    raw::bcond(code, 0, cond::ne);
-    masm::trap(code, runtime::TrapKind::call_stack_exhausted);
-    amend_br_if(exhaustion, code);
 
     masm::ldr(code, intregs, true, table_offset * sizeof(void *), miscreg,
               table_ptr);
@@ -2074,10 +2061,6 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
 
     raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), miscreg,
              ireg::sp, memreg);
-
-    raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), exhaust,
-             ireg::sp, exhaust_ptr);
-    raw::str(code, false, exhaust_ptr, exhaust);
 
     auto traps = code;
     raw::b(code, 0);
