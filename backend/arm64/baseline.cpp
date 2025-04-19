@@ -2016,14 +2016,20 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     raw::ldp(code, true, enctype::offset, 0, elements, table_ptr, current);
 
     raw::cmp(code, false, idx, current);
-    auto undefined_trap = code;
-    raw::bcond(code, 0, cond::ls);
+    auto not_undefined = code;
+    raw::bcond(code, 0, cond::hi);
+    auto [_, uninitialized_loc, type_mismatch_loc] =
+        masm::trap(code, std::to_array({
+                             runtime::TrapKind::undefined_element,
+                             runtime::TrapKind::uninitialized_element,
+                             runtime::TrapKind::indirect_call_type_mismatch,
+                         }));
+    amend_br_if(not_undefined, code);
 
     raw::load(code, memtype::x, resexttype::uns, indexttype::lsl, true, idx,
               elements, function_ptr);
 
-    auto uninitialized_trap = code;
-    raw::cbz(code, true, 0, function_ptr);
+    raw::cbz(code, true, uninitialized_loc - code, function_ptr);
 
     auto rttype = runtime::FunctionType(type);
     uint64_t p1;
@@ -2042,8 +2048,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
              function_ptr, given_sig);
 
     raw::ccmp(code, false, expected_sig, cond::eq, given_sig, 0);
-    auto type_mismatch_trap = code;
-    raw::bcond(code, 0, cond::ne);
+    raw::bcond(code, type_mismatch_loc - code, cond::ne);
 
     raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), miscreg,
              ireg::sp, memreg);
@@ -2061,21 +2066,6 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
 
     raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), miscreg,
              ireg::sp, memreg);
-
-    auto traps = code;
-    raw::b(code, 0);
-
-    auto [undefined_loc, uninitialized_loc, type_mismatch_loc] =
-        masm::trap(code, std::to_array({
-                             runtime::TrapKind::undefined_element,
-                             runtime::TrapKind::uninitialized_element,
-                             runtime::TrapKind::indirect_call_type_mismatch,
-                         }));
-    amend_br_if(undefined_trap, undefined_loc);
-    amend_br_if(uninitialized_trap, uninitialized_loc);
-    amend_br_if(type_mismatch_trap, type_mismatch_loc);
-
-    amend_br(traps, code);
 
     for ([[maybe_unused]] auto result : type.results) {
         push(value::stack(stack_size));
