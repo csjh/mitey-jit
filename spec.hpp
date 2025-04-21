@@ -65,6 +65,9 @@ enum class valtype : uint8_t {
     funcref = 0x70,
     externref = 0x6f,
 };
+inline bool is_float(valtype ty) {
+    return ty == valtype::f32 || ty == valtype::f64;
+}
 
 template <typename T> static constexpr auto Valtype = valtype::null;
 template <> static constexpr auto Valtype<int> = valtype::i32;

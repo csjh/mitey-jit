@@ -1420,7 +1420,7 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
             auto dest = stack_offset + i * sizeof(runtime::WasmValue);
 
             auto v = copied_values[i];
-            if (v == valtype::f32 || v == valtype::f64) {
+            if (is_float(v)) {
                 switch (expected[i].where()) {
                 case value::location::reg: {
                     auto reg = expected[i].as<freg>();
@@ -1476,7 +1476,7 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
             }
 
             auto v = copied_values[i];
-            if (v == valtype::f32 || v == valtype::f64) {
+            if (is_float(v)) {
                 auto reg = adapt_value_into(code, &expected[i], floatreg,
                                             !discard_copied);
                 masm::str(code, intregs, true, dest, stackreg, reg);
@@ -1619,9 +1619,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
         auto offset = i * sizeof(runtime::WasmValue);
         auto is_param = i < fn.type.params.size();
 
-        if ((local == valtype::i32 || local == valtype::i64 ||
-             local == valtype::funcref || local == valtype::externref) &&
-            ireg_alloc != icallee_saved.end()) {
+        if (!is_float(local) && ireg_alloc != icallee_saved.end()) {
             auto reg = *ireg_alloc++;
             // save current value
             if (is_param) {
@@ -1634,8 +1632,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             }
 
             locals[i] = value::reg(reg);
-        } else if ((local == valtype::f32 || local == valtype::f64) &&
-                   freg_alloc != fcallee_saved.end()) {
+        } else if (is_float(local) && freg_alloc != fcallee_saved.end()) {
             auto reg = *freg_alloc++;
             // save current value
             if (is_param) {
@@ -1672,13 +1669,12 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
         auto local = fn.locals[i];
         auto offset = i * sizeof(runtime::WasmValue);
 
-        if (local == valtype::i32 || local == valtype::i64 ||
-            local == valtype::funcref || local == valtype::externref) {
-            masm::ldr(code, intregs, true, offset, stackreg,
-                      locals[i].as<ireg>());
-        } else if (local == valtype::f32 || local == valtype::f64) {
+        if (is_float(local)) {
             masm::ldr(code, intregs, true, offset, stackreg,
                       locals[i].as<freg>());
+        } else {
+            masm::ldr(code, intregs, true, offset, stackreg,
+                      locals[i].as<ireg>());
         }
     }
 
@@ -1896,7 +1892,7 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     auto expected = values - wanted.size();
     for (auto i = ssize_t(wanted.size()) - 1; i >= 0; i--) {
         auto v = wanted[i];
-        if (v == valtype::f32 || v == valtype::f64) {
+        if (is_float(v)) {
             auto reg = adapt_value_into(code, &expected[i], floatreg);
             raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                       result_offset, stackreg, reg);
@@ -2079,7 +2075,7 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
 
     switch (values->where()) {
     case value::location::reg:
-        if (type == valtype::f32 || type == valtype::f64) {
+        if (is_float(type)) {
             despill<iwant::freg>(code, values);
             auto r = values->as<freg>();
             if (is_volatile(r)) {
@@ -2107,7 +2103,7 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
     }
 }
 void Arm64::select(SHARED_PARAMS, valtype type) {
-    if (type == valtype::f32 || type == valtype::f64) {
+    if (is_float(type)) {
         auto [v1, v2, condition, res] = allocate_registers<
             std::tuple<iwant::freg, iwant::freg, iwant::flags>, iwant::freg>(
             code);
@@ -2145,7 +2141,7 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     auto local = locals[local_idx];
 
     if (local.is<value::location::stack>()) {
-        if (ty == valtype::f32 || ty == valtype::f64) {
+        if (is_float(ty)) {
             auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
             masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg,
                       reg.as<freg>());
@@ -2161,7 +2157,7 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             finalize(code, reg.as<ireg>());
         }
     } else {
-        if (ty == valtype::f32 || ty == valtype::f64) {
+        if (is_float(ty)) {
             floatlocals.claim(local.as<freg>(), {code, values, stack_size});
         } else {
             intlocals.claim(local.as<ireg>(), {code, values, stack_size});
@@ -2180,14 +2176,12 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     // but tbf it's the only place i need to do it
     auto ty = fn.locals[local_idx];
     auto local = locals[local_idx];
-    auto initial_values = values;
-    auto initial_stack_size = stack_size;
 
     if (local.is<value::location::reg>()) {
         auto v = *--values;
         stack_size -= sizeof(runtime::WasmValue);
 
-        if (ty == valtype::f32 || ty == valtype::f64) {
+        if (is_float(ty)) {
             intregs.reset_temporaries();
             floatregs.reset_temporaries();
 
@@ -2292,7 +2286,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             push(pushval);
         }
     } else {
-        if (ty == valtype::f32 || ty == valtype::f64) {
+        if (is_float(ty)) {
             auto [in, out] =
                 allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
 
@@ -2337,9 +2331,6 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             masm::str(code, intregs, true, local.as<uint32_t>(), stackreg, reg);
         }
     }
-
-    assert(values == initial_values);
-    assert(stack_size == initial_stack_size);
 }
 void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
     auto [idx, res] =
@@ -2394,7 +2385,7 @@ void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
     finalize(code);
 }
 void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
-    if (type == valtype::f32 || type == valtype::f64) {
+    if (is_float(type)) {
         auto [res] = allocate_registers<std::tuple<>, iwant::freg>(code);
         auto addr = intregs.temporary();
         masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
@@ -2410,7 +2401,7 @@ void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
     }
 }
 void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
-    if (type == valtype::f32 || type == valtype::f64) {
+    if (is_float(type)) {
         auto [val] = allocate_registers<std::tuple<iwant::freg>>(code);
         auto addr = intregs.temporary();
         masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
