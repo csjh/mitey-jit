@@ -1153,9 +1153,16 @@ void Arm64::temp_reg_manager<registers>::clobber_all() {
 }
 
 template <auto registers>
-bool Arm64::temp_reg_manager<registers>::check_spill(RegType reg,
-                                                     std::byte *code) {
-    return data[to_index(reg)].spilladdr == code;
+bool Arm64::temp_reg_manager<registers>::adjust_spill(RegType reg,
+                                                      std::byte *&code) {
+    // todo: account for wider spilladdrs (>sizeof(inst))
+    if (data[to_index(reg)].spilladdr == code - sizeof(inst)) {
+        code -= sizeof(inst);
+        return true;
+    }
+    return false;
+}
+
 }
 
 template <typename RegType, size_t N>
@@ -1206,10 +1213,14 @@ void Arm64::lasting_reg_manager<RegType, N>::purge(RegType reg) {
 }
 
 template <typename RegType, size_t N>
-bool Arm64::lasting_reg_manager<RegType, N>::check_spill(RegType reg,
-                                                         std::byte *code) {
+bool Arm64::lasting_reg_manager<RegType, N>::adjust_spill(RegType reg,
+                                                          std::byte *&code) {
     assert(count > 0);
-    return data[(count - 1) % N].spilladdr == code;
+    if (data[(count - 1) % N].spilladdr == code - sizeof(inst)) {
+        code -= sizeof(inst);
+        return true;
+    }
+    return false;
 }
 
 template <auto registers>
@@ -1232,10 +1243,10 @@ void Arm64::local_manager<registers>::purge(RegType reg) {
 }
 
 template <auto registers>
-bool Arm64::local_manager<registers>::check_spill(RegType reg,
-                                                  std::byte *code) {
+bool Arm64::local_manager<registers>::adjust_spill(RegType reg,
+                                                   std::byte *&code) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    return get_manager_of(reg).check_spill(reg, code);
+    return get_manager_of(reg).adjust_spill(reg, code);
 }
 
 template <auto registers>
@@ -1283,20 +1294,16 @@ template <typename To> void Arm64::despill(std::byte *&code, value *v) {
     if constexpr (std::is_same_v<To, iwant::freg>) {
         auto reg = v->as<freg>();
         if (is_volatile(reg)) {
-            if (floatregs.check_spill(reg, code - sizeof(inst)))
-                code -= sizeof(inst);
+            floatregs.adjust_spill(reg, code);
         } else {
-            if (floatlocals.check_spill(reg, code - sizeof(inst)))
-                code -= sizeof(inst);
+            floatlocals.adjust_spill(reg, code);
         }
     } else {
         auto reg = v->as<ireg>();
         if (is_volatile(reg)) {
-            if (intregs.check_spill(reg, code - sizeof(inst)))
-                code -= sizeof(inst);
+            intregs.adjust_spill(reg, code);
         } else {
-            if (intlocals.check_spill(reg, code - sizeof(inst)))
-                code -= sizeof(inst);
+            intlocals.adjust_spill(reg, code);
         }
     }
 }
@@ -2333,9 +2340,8 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                 pushval = local;
             } else if (v.is<value::location::reg>()) {
                 auto reg = v.as<freg>();
-                if (is_volatile(reg) &&
-                    floatregs.check_spill(reg, code - sizeof(inst))) {
-                    code -= 2 * sizeof(inst);
+                if (is_volatile(reg) && floatregs.adjust_spill(reg, code)) {
+                    code -= sizeof(inst);
 
                     inst instruction;
                     std::memcpy(&instruction, code, sizeof(inst));
@@ -2346,9 +2352,8 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
                     floatregs.surrender(reg);
                 } else {
-                    if (!is_volatile(reg) &&
-                        floatlocals.check_spill(reg, code - sizeof(inst)))
-                        code -= sizeof(inst);
+                    if (!is_volatile(reg))
+                        floatlocals.adjust_spill(reg, code);
 
                     auto wrapped = std::make_optional(locreg);
                     auto as_reg = adapt_value_into(code, values, wrapped);
@@ -2389,9 +2394,9 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                 pushval = local;
             } else if (v.is<value::location::reg>()) {
                 auto reg = v.as<ireg>();
-                if (is_volatile(reg) &&
-                    intregs.check_spill(reg, code - sizeof(inst))) {
-                    code -= 2 * sizeof(inst);
+                if (is_volatile(reg) && intregs.adjust_spill(reg, code)) {
+                    // overwrite instruction
+                    code -= sizeof(inst);
 
                     inst instruction;
                     std::memcpy(&instruction, code, sizeof(inst));
@@ -2402,9 +2407,8 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
                     intregs.surrender(reg);
                 } else {
-                    if (!is_volatile(reg) &&
-                        intlocals.check_spill(reg, code - sizeof(inst)))
-                        code -= sizeof(inst);
+                    if (!is_volatile(reg))
+                        intlocals.adjust_spill(reg, code);
 
                     auto wrapped = std::make_optional(locreg);
                     auto as_reg = adapt_value_into(code, values, wrapped);
@@ -2450,7 +2454,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                 reg = intregs.result();
                 masm::ldr(code, intregs, true, v.as<uint32_t>(), stackreg, reg);
                 // this one is actually redundant because the masm::str
-                // blocks off any chance at doing the check_spill
+                // blocks off any chance at doing the adjust_spill
                 // optimization
                 raw::mov(code, true, reg, reg);
                 // this is also sketchy

@@ -92,7 +92,7 @@ class Arm64 {
         void surrender(RegType reg);
 
         void clobber_all();
-        bool check_spill(RegType reg, std::byte *code);
+        bool adjust_spill(RegType reg, std::byte *&code);
         void spill(RegType reg);
     };
 
@@ -115,7 +115,7 @@ class Arm64 {
         void claim(RegType, metadata);
         void surrender(value *);
         void purge(RegType);
-        bool check_spill(RegType reg, std::byte *code);
+        bool adjust_spill(RegType reg, std::byte *&code);
         void spill(RegType, size_t);
         void spill(RegType, value *);
     };
@@ -139,7 +139,7 @@ class Arm64 {
         void claim(RegType, sub_manager::metadata);
         void surrender(RegType, value *);
         void purge(RegType);
-        bool check_spill(RegType reg, std::byte *code);
+        bool adjust_spill(RegType reg, std::byte *&code);
         void spill(RegType reg, value *v);
     };
 
