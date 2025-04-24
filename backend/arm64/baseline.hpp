@@ -5,10 +5,13 @@
 #include "./reg_lru.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 namespace mitey {
 namespace arm64 {
+
+using inst = uint32_t;
 
 class value {
   public:
@@ -93,6 +96,7 @@ class Arm64 {
 
         void clobber_all();
         bool adjust_spill(RegType reg, std::byte *&code);
+        std::optional<inst> source_instruction(RegType reg);
         void spill(RegType reg);
     };
 
@@ -188,6 +192,9 @@ class Arm64 {
         };
         struct flags : thresholdless {};
     };
+
+    std::optional<std::tuple<ireg, ireg>>
+    is_multiplication_result(std::byte *code, ireg reg);
 
     template <typename To> void despill(std::byte *&code, value *v);
     template <typename To> value adapt_value(std::byte *&code, value *v);

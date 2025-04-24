@@ -12,7 +12,6 @@ namespace arm64 {
 
 namespace {
 
-using inst = uint32_t;
 static constexpr inst noop = 0xd503201f;
 
 template <typename T> void put(std::byte *&__restrict__ code, const T &val) {
@@ -1163,6 +1162,15 @@ bool Arm64::temp_reg_manager<registers>::adjust_spill(RegType reg,
     return false;
 }
 
+template <auto registers>
+std::optional<inst>
+Arm64::temp_reg_manager<registers>::source_instruction(RegType reg) {
+    auto spilladdr = data[to_index(reg)].spilladdr;
+    if (!spilladdr)
+        return std::nullopt;
+    inst ins;
+    std::memcpy(&ins, data[to_index(reg)].spilladdr, sizeof(ins));
+    return ins;
 }
 
 template <typename RegType, size_t N>
@@ -1287,6 +1295,29 @@ void Arm64::push(value v) {
         flag = flags(stack_size, values - 1);
     stack_size += sizeof(runtime::WasmValue);
 }
+
+std::optional<std::tuple<ireg, ireg>>
+Arm64::is_multiplication_result(std::byte *code, ireg reg) {
+    if (!is_volatile(reg))
+        return std::nullopt;
+
+    auto ins = intregs.source_instruction(reg);
+    if (!ins)
+        return std::nullopt;
+    if (!intregs.adjust_spill(reg, code))
+        return std::nullopt;
+
+    constexpr inst mul_mask = 0b00011011000000000000000000000000;
+    if ((*ins & mul_mask) != mul_mask)
+        return std::nullopt;
+
+    auto rm = static_cast<ireg>((*ins >> 16) & 0b11111);
+    auto rn = static_cast<ireg>((*ins >> 5) & 0b11111);
+    auto rd = static_cast<ireg>(*ins & 0b11111);
+    assert(rd == reg);
+    return std::make_tuple(rn, rm);
+}
+
 
 template <typename To> void Arm64::despill(std::byte *&code, value *v) {
     if (!v->is<value::location::reg>())
@@ -2844,6 +2875,14 @@ void Arm64::i32add(SHARED_PARAMS) {
     if (p2.is<value::location::imm>()) {
         masm::add(code, intregs, false, p2.as<uint32_t>(), p1.as<ireg>(),
                   res.as<ireg>());
+    } else if (auto regs = is_multiplication_result(code, p2.as<ireg>())) {
+        code -= sizeof(inst) * 2;
+        raw::madd(code, false, std::get<0>(*regs), p1.as<ireg>(),
+                  std::get<1>(*regs), res.as<ireg>());
+    } else if (auto regs = is_multiplication_result(code, p1.as<ireg>())) {
+        code -= sizeof(inst) * 2;
+        raw::madd(code, false, std::get<0>(*regs), p2.as<ireg>(),
+                  std::get<1>(*regs), res.as<ireg>());
     } else {
         raw::add(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
@@ -2858,6 +2897,14 @@ void Arm64::i64add(SHARED_PARAMS) {
     if (p2.is<value::location::imm>()) {
         masm::add(code, intregs, true, p2.as<uint32_t>(), p1.as<ireg>(),
                   res.as<ireg>());
+    } else if (auto regs = is_multiplication_result(code, p2.as<ireg>())) {
+        code -= sizeof(inst) * 2;
+        raw::madd(code, true, std::get<0>(*regs), p1.as<ireg>(),
+                  std::get<1>(*regs), res.as<ireg>());
+    } else if (auto regs = is_multiplication_result(code, p1.as<ireg>())) {
+        code -= sizeof(inst) * 2;
+        raw::madd(code, true, std::get<0>(*regs), p2.as<ireg>(),
+                  std::get<1>(*regs), res.as<ireg>());
     } else {
         raw::add(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
@@ -2871,6 +2918,14 @@ void Arm64::i32sub(SHARED_PARAMS) {
 
     if (p2.is<value::location::imm>()) {
         raw::sub(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else if (auto regs = is_multiplication_result(code, p2.as<ireg>())) {
+        code -= sizeof(inst) * 2;
+        raw::msub(code, false, std::get<0>(*regs), p1.as<ireg>(),
+                  std::get<1>(*regs), res.as<ireg>());
+    } else if (auto regs = is_multiplication_result(code, p1.as<ireg>())) {
+        code -= sizeof(inst) * 2;
+        raw::msub(code, false, std::get<0>(*regs), p2.as<ireg>(),
+                  std::get<1>(*regs), res.as<ireg>());
     } else {
         raw::sub(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
@@ -2884,6 +2939,14 @@ void Arm64::i64sub(SHARED_PARAMS) {
 
     if (p2.is<value::location::imm>()) {
         raw::sub(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+    } else if (auto regs = is_multiplication_result(code, p2.as<ireg>())) {
+        code -= sizeof(inst) * 2;
+        raw::msub(code, true, std::get<0>(*regs), p1.as<ireg>(),
+                  std::get<1>(*regs), res.as<ireg>());
+    } else if (auto regs = is_multiplication_result(code, p1.as<ireg>())) {
+        code -= sizeof(inst) * 2;
+        raw::msub(code, true, std::get<0>(*regs), p2.as<ireg>(),
+                  std::get<1>(*regs), res.as<ireg>());
     } else {
         raw::sub(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
