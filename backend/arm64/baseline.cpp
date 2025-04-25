@@ -1,11 +1,44 @@
 #include "./baseline.hpp"
 #include "../../type-templates.hpp"
+#include <csignal>
 #include <cstring>
 #include <limits>
 #include <optional>
 #include <ranges>
 #include <tuple>
 #include <variant>
+
+void sigill_handler(int, siginfo_t *si, void *) {
+    uint32_t reason;
+    memcpy(&reason, si->si_addr, sizeof(reason));
+
+    uint16_t kind = reason & 0xff;
+    // the bits 0-8 and 8-16 both have the same value so it's
+    // less likely for a false positive (i.e. true sigill)
+    if (kind >= mitey::runtime::n_traps || (reason >> 8) != kind) {
+        struct sigaction sa;
+        sa.sa_handler = SIG_DFL;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGBUS, &sa, nullptr);
+        raise(SIGBUS);
+        return;
+    }
+
+    mitey::runtime::trap(static_cast<mitey::runtime::TrapKind>(kind));
+}
+
+struct signal_register {
+    struct sigaction sa;
+    signal_register() {
+        sa.sa_sigaction = sigill_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_SIGINFO;
+        sigaction(SIGILL, &sa, nullptr);
+    }
+};
+
+signal_register _sigill_handler;
 
 namespace mitey {
 namespace arm64 {
@@ -1032,21 +1065,11 @@ std::array<std::byte *, N> trap(std::byte *&code,
                                 std::array<runtime::TrapKind, N> kinds) {
     static_assert(N > 0);
 
-    auto first = code;
-    // move first kind to x0
-    masm::mov(code, static_cast<uint64_t>(kinds.front()), ireg::x0);
-    auto trap = code;
-    // put address of runtime::trap in x1
-    masm::mov(code, reinterpret_cast<uint64_t>(&runtime::trap), ireg::x1);
-    raw::blr(code, ireg::x1);
-
-    std::array<std::byte *, N> labels = {first};
-    for (size_t i = 1; i < N; i++) {
-        auto kind = kinds[i];
+    std::array<std::byte *, N> labels = {};
+    for (size_t i = 0; i < N; i++) {
         labels[i] = code;
-        // put kind in x0
-        masm::mov(code, static_cast<uint64_t>(kind), ireg::x0);
-        raw::b(code, trap - code);
+        auto kind = static_cast<uint16_t>(kinds[i]);
+        put(code, static_cast<inst>((kind << 8) | kind));
     }
     return labels;
 }

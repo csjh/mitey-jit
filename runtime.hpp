@@ -28,6 +28,7 @@ enum class TrapKind {
     out_of_bounds_table_access,
     call_stack_exhausted,
 };
+constexpr auto n_traps = static_cast<int>(TrapKind::call_stack_exhausted) + 1;
 
 static inline const char *trap_kind_to_string(TrapKind kind) {
     switch (kind) {
