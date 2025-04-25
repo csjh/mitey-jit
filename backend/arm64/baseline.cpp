@@ -1163,8 +1163,6 @@ bool Arm64::temp_reg_manager<registers>::adjust_spill(RegType reg,
     return false;
 }
 
-}
-
 template <typename RegType, size_t N>
 void Arm64::lasting_reg_manager<RegType, N>::spill(RegType reg, size_t i) {
     auto [addr, v, offset] = data[i];
