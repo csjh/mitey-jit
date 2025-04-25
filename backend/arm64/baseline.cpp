@@ -20,14 +20,14 @@ template <typename T> void put(std::byte *&__restrict__ code, const T &val) {
 }
 
 struct LogicalImm {
-    uint32_t prefix : 9;
-    uint32_t N : 1;
-    uint32_t immr : 6;
-    uint32_t imms : 6;
     uint32_t postfix : 10;
+    uint32_t imms : 6;
+    uint32_t immr : 6;
+    uint32_t N : 1;
+    uint32_t prefix : 9;
 
     constexpr LogicalImm(uint32_t N, uint32_t immr, uint32_t imms)
-        : prefix(0), N(N), immr(immr), imms(imms), postfix(0) {}
+        : postfix(0), imms(imms), immr(immr), N(N), prefix(0) {}
     constexpr LogicalImm(uint32_t v) { *this = std::bit_cast<LogicalImm>(v); }
 };
 
@@ -145,18 +145,19 @@ void lsl(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
 }
 
 void lsl(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
+    auto width = sf ? 64 : 32;
+    shift_imm %= width;
     if (shift_imm == 0) {
         lsl(code, sf, ireg::xzr, rn, rd);
         return;
     }
-    auto width = sf ? 64 : 32;
-    shift_imm %= width;
     auto imms = width - shift_imm - 1;
     auto immr = imms + 1;
     ubfm(code, sf, LogicalImm(sf, immr, imms), rn, rd);
 }
 
 void lsr(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
+    // todo: does this need a shift_imm check as well?
     auto width = sf ? 64 : 32;
     shift_imm %= width;
     ubfm(code, sf, LogicalImm(sf, shift_imm, 0b011111u | sf << 5), rn, rd);
@@ -1087,7 +1088,7 @@ bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
 template <auto registers>
 void Arm64::temp_reg_manager<registers>::spill(RegType reg) {
     auto [addr, v, offset] = data[to_index(reg)];
-    if (addr) {
+    if (v) {
         masm::str_no_temp(addr, true, offset, stackreg, reg);
         *v = value::stack(offset);
     }
@@ -1128,7 +1129,7 @@ decltype(registers)::value_type
 Arm64::temp_reg_manager<registers>::temporary() {
     auto idx = regs.temporary();
     spill(from_index(idx));
-    data[idx].spilladdr = nullptr;
+    data[idx].value_offset = nullptr;
     return from_index(idx);
 }
 
@@ -1136,19 +1137,26 @@ template <auto registers>
 void Arm64::temp_reg_manager<registers>::surrender(RegType reg) {
     auto idx = to_index(reg);
     regs.surrender(idx);
-    data[idx].spilladdr = nullptr;
+    data[idx].value_offset = nullptr;
 }
 
 template <auto registers>
 void Arm64::temp_reg_manager<registers>::clobber_all() {
     for (auto reg : registers) {
         auto [addr, v, offset] = data[to_index(reg)];
-        if (addr) {
+        if (v) {
             masm::str_no_temp(addr, true, offset, stackreg, reg);
             *v = value::stack(offset);
-            data[to_index(reg)].spilladdr = nullptr;
+            data[to_index(reg)].value_offset = nullptr;
         }
     }
+}
+
+template <auto registers>
+bool Arm64::temp_reg_manager<registers>::check_instruction(RegType reg,
+                                                           std::byte *code) {
+    // spill starts 1 after instruction
+    return data[to_index(reg)].spilladdr - sizeof(inst) == code;
 }
 
 template <auto registers>
@@ -1165,18 +1173,18 @@ bool Arm64::temp_reg_manager<registers>::adjust_spill(RegType reg,
 template <auto registers>
 std::optional<inst>
 Arm64::temp_reg_manager<registers>::source_instruction(RegType reg) {
-    auto spilladdr = data[to_index(reg)].spilladdr;
-    if (!spilladdr)
+    auto [addr, v, offset] = data[to_index(reg)];
+    if (!addr)
         return std::nullopt;
     inst ins;
-    std::memcpy(&ins, data[to_index(reg)].spilladdr, sizeof(ins));
+    std::memcpy(&ins, addr - sizeof(inst), sizeof(ins));
     return ins;
 }
 
 template <typename RegType, size_t N>
 void Arm64::lasting_reg_manager<RegType, N>::spill(RegType reg, size_t i) {
     auto [addr, v, offset] = data[i];
-    if (addr) {
+    if (v) {
         masm::str_no_temp(addr, true, offset, stackreg, reg);
         *v = value::stack(offset);
     }
@@ -1188,12 +1196,11 @@ void Arm64::lasting_reg_manager<RegType, N>::spill(RegType reg, value *v) {
     count--;
     assert(data[count % N].value_offset == v);
     auto [addr, _, offset] = data[count % N];
-    if (addr) {
-        masm::str_no_temp(addr, true, offset, stackreg, reg);
-        *v = value::stack(offset);
-        // todo: why is next line necessary?
-        data[count % N].spilladdr = nullptr;
-    }
+
+    masm::str_no_temp(addr, true, offset, stackreg, reg);
+    *v = value::stack(offset);
+    // todo: why is next line necessary?
+    data[count % N].value_offset = nullptr;
 }
 
 template <typename RegType, size_t N>
@@ -1208,14 +1215,14 @@ void Arm64::lasting_reg_manager<RegType, N>::surrender(value *v) {
     assert(count > 0);
     count--;
     assert(data[count % N].value_offset == v);
-    data[count % N].spilladdr = nullptr;
+    data[count % N].value_offset = nullptr;
 }
 
 template <typename RegType, size_t N>
 void Arm64::lasting_reg_manager<RegType, N>::purge(RegType reg) {
     for (auto i = 0; i < std::min(count, N); i++) {
         spill(reg, i);
-        data[i].spilladdr = nullptr;
+        data[i].value_offset = nullptr;
     }
     count = 0;
 }
@@ -1296,28 +1303,84 @@ void Arm64::push(value v) {
     stack_size += sizeof(runtime::WasmValue);
 }
 
-std::optional<std::tuple<ireg, ireg>>
+std::optional<Arm64::mul_result>
 Arm64::is_multiplication_result(std::byte *code, ireg reg) {
+    return std::nullopt;
+
     if (!is_volatile(reg))
         return std::nullopt;
 
     auto ins = intregs.source_instruction(reg);
     if (!ins)
         return std::nullopt;
-    if (!intregs.adjust_spill(reg, code))
+
+    // check if prev position in code is the instruction
+    if (!intregs.check_instruction(reg, code - sizeof(inst)))
         return std::nullopt;
 
+    constexpr inst ones_mask = 0b01111111111000001000000000000000;
     constexpr inst mul_mask = 0b00011011000000000000000000000000;
-    if ((*ins & mul_mask) != mul_mask)
+    if ((*ins & ones_mask) != mul_mask)
         return std::nullopt;
 
     auto rm = static_cast<ireg>((*ins >> 16) & 0b11111);
     auto rn = static_cast<ireg>((*ins >> 5) & 0b11111);
     auto rd = static_cast<ireg>(*ins & 0b11111);
     assert(rd == reg);
-    return std::make_tuple(rn, rm);
+    return Arm64::mul_result{rm, rn};
 }
 
+std::optional<Arm64::shifted_register>
+Arm64::is_shifted_register(std::byte *code, ireg reg) {
+    return std::nullopt;
+
+    if (!is_volatile(reg))
+        return std::nullopt;
+
+    auto ins = intregs.source_instruction(reg);
+    if (!ins)
+        return std::nullopt;
+    if (!intregs.check_instruction(reg, code - sizeof(inst)))
+        return std::nullopt;
+
+    constexpr inst ones_mask = 0b01111111100000000000000000000000;
+
+    // case 1. check if it's ubfm
+    constexpr inst ubfm_mask = 0b01010011000000000000000000000000;
+    if ((*ins & ones_mask) == ubfm_mask) {
+        // case 1.1. bitwise shift left
+        auto imm = LogicalImm(*ins);
+        if (imm.imms != (0b011111 | imm.N << 5) && imm.imms + 1 == imm.immr) {
+            auto width = imm.N ? 64 : 32;
+            auto shift = static_cast<uint8_t>(width - imm.imms - 1);
+            auto rn = static_cast<ireg>((*ins >> 5) & 0b11111);
+            auto rd = static_cast<ireg>(*ins & 0b11111);
+            assert(rd == reg);
+            return Arm64::shifted_register{shifttype::lsl, rn, shift};
+        }
+
+        // case 1.2. bitwise shift right
+        if (imm.imms == (0b011111 | imm.N << 5)) {
+            auto shift = static_cast<uint8_t>((*ins >> 16) & 0b111111);
+            auto rn = static_cast<ireg>((*ins >> 5) & 0b11111);
+            auto rd = static_cast<ireg>(*ins & 0b11111);
+            assert(rd == reg);
+            return Arm64::shifted_register{shifttype::lsr, rn, shift};
+        }
+    }
+
+    // case 2. check if it's asr
+    constexpr inst sbfm_mask = 0b00010011000000000111110000000000;
+    if ((*ins & ones_mask) == sbfm_mask) {
+        auto shift = static_cast<uint8_t>((*ins >> 16) & 0b111111);
+        auto rn = static_cast<ireg>((*ins >> 5) & 0b11111);
+        auto rd = static_cast<ireg>(*ins & 0b11111);
+        assert(rd == reg);
+        return Arm64::shifted_register{shifttype::asr, rn, shift};
+    }
+
+    return std::nullopt;
+}
 
 template <typename To> void Arm64::despill(std::byte *&code, value *v) {
     if (!v->is<value::location::reg>())
@@ -2876,13 +2939,22 @@ void Arm64::i32add(SHARED_PARAMS) {
         masm::add(code, intregs, false, p2.as<uint32_t>(), p1.as<ireg>(),
                   res.as<ireg>());
     } else if (auto regs = is_multiplication_result(code, p2.as<ireg>())) {
-        code -= sizeof(inst) * 2;
-        raw::madd(code, false, std::get<0>(*regs), p1.as<ireg>(),
-                  std::get<1>(*regs), res.as<ireg>());
+        code -= sizeof(inst);
+        // despill here
+        raw::madd(code, false, regs->rm, p1.as<ireg>(), regs->rn,
+                  res.as<ireg>());
     } else if (auto regs = is_multiplication_result(code, p1.as<ireg>())) {
-        code -= sizeof(inst) * 2;
-        raw::madd(code, false, std::get<0>(*regs), p2.as<ireg>(),
-                  std::get<1>(*regs), res.as<ireg>());
+        code -= sizeof(inst);
+        raw::madd(code, false, regs->rm, p2.as<ireg>(), regs->rn,
+                  res.as<ireg>());
+    } else if (auto regs = is_shifted_register(code, p2.as<ireg>())) {
+        code -= sizeof(inst);
+        raw::add(code, false, regs->reg, p1.as<ireg>(), res.as<ireg>(),
+                 regs->type, regs->shift);
+    } else if (auto regs = is_shifted_register(code, p1.as<ireg>())) {
+        code -= sizeof(inst);
+        raw::add(code, false, regs->reg, p2.as<ireg>(), res.as<ireg>(),
+                 regs->type, regs->shift);
     } else {
         raw::add(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
@@ -2898,13 +2970,21 @@ void Arm64::i64add(SHARED_PARAMS) {
         masm::add(code, intregs, true, p2.as<uint32_t>(), p1.as<ireg>(),
                   res.as<ireg>());
     } else if (auto regs = is_multiplication_result(code, p2.as<ireg>())) {
-        code -= sizeof(inst) * 2;
-        raw::madd(code, true, std::get<0>(*regs), p1.as<ireg>(),
-                  std::get<1>(*regs), res.as<ireg>());
+        code -= sizeof(inst);
+        raw::madd(code, true, regs->rm, p1.as<ireg>(), regs->rn,
+                  res.as<ireg>());
     } else if (auto regs = is_multiplication_result(code, p1.as<ireg>())) {
-        code -= sizeof(inst) * 2;
-        raw::madd(code, true, std::get<0>(*regs), p2.as<ireg>(),
-                  std::get<1>(*regs), res.as<ireg>());
+        code -= sizeof(inst);
+        raw::madd(code, true, regs->rm, p2.as<ireg>(), regs->rn,
+                  res.as<ireg>());
+    } else if (auto regs = is_shifted_register(code, p2.as<ireg>())) {
+        code -= sizeof(inst);
+        raw::add(code, true, regs->reg, p1.as<ireg>(), res.as<ireg>(),
+                 regs->type, regs->shift);
+    } else if (auto regs = is_shifted_register(code, p1.as<ireg>())) {
+        code -= sizeof(inst);
+        raw::add(code, true, regs->reg, p2.as<ireg>(), res.as<ireg>(),
+                 regs->type, regs->shift);
     } else {
         raw::add(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
@@ -2919,13 +2999,13 @@ void Arm64::i32sub(SHARED_PARAMS) {
     if (p2.is<value::location::imm>()) {
         raw::sub(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
     } else if (auto regs = is_multiplication_result(code, p2.as<ireg>())) {
-        code -= sizeof(inst) * 2;
-        raw::msub(code, false, std::get<0>(*regs), p1.as<ireg>(),
-                  std::get<1>(*regs), res.as<ireg>());
-    } else if (auto regs = is_multiplication_result(code, p1.as<ireg>())) {
-        code -= sizeof(inst) * 2;
-        raw::msub(code, false, std::get<0>(*regs), p2.as<ireg>(),
-                  std::get<1>(*regs), res.as<ireg>());
+        code -= sizeof(inst);
+        raw::msub(code, false, regs->rm, p1.as<ireg>(), regs->rn,
+                  res.as<ireg>());
+    } else if (auto regs = is_shifted_register(code, p2.as<ireg>())) {
+        code -= sizeof(inst);
+        raw::sub(code, false, regs->reg, p1.as<ireg>(), res.as<ireg>(),
+                 regs->type, regs->shift);
     } else {
         raw::sub(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
@@ -2940,13 +3020,13 @@ void Arm64::i64sub(SHARED_PARAMS) {
     if (p2.is<value::location::imm>()) {
         raw::sub(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
     } else if (auto regs = is_multiplication_result(code, p2.as<ireg>())) {
-        code -= sizeof(inst) * 2;
-        raw::msub(code, true, std::get<0>(*regs), p1.as<ireg>(),
-                  std::get<1>(*regs), res.as<ireg>());
-    } else if (auto regs = is_multiplication_result(code, p1.as<ireg>())) {
-        code -= sizeof(inst) * 2;
-        raw::msub(code, true, std::get<0>(*regs), p2.as<ireg>(),
-                  std::get<1>(*regs), res.as<ireg>());
+        code -= sizeof(inst);
+        raw::msub(code, true, regs->rm, p1.as<ireg>(), regs->rn,
+                  res.as<ireg>());
+    } else if (auto regs = is_shifted_register(code, p2.as<ireg>())) {
+        code -= sizeof(inst);
+        raw::sub(code, true, regs->reg, p1.as<ireg>(), res.as<ireg>(),
+                 regs->type, regs->shift);
     } else {
         raw::sub(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }

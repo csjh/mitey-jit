@@ -95,6 +95,7 @@ class Arm64 {
         void surrender(RegType reg);
 
         void clobber_all();
+        bool check_instruction(RegType reg, std::byte *code);
         bool adjust_spill(RegType reg, std::byte *&code);
         std::optional<inst> source_instruction(RegType reg);
         void spill(RegType reg);
@@ -193,8 +194,20 @@ class Arm64 {
         struct flags : thresholdless {};
     };
 
-    std::optional<std::tuple<ireg, ireg>>
-    is_multiplication_result(std::byte *code, ireg reg);
+    struct mul_result {
+        ireg rm;
+        ireg rn;
+    };
+    std::optional<mul_result> is_multiplication_result(std::byte *code,
+                                                       ireg reg);
+
+    struct shifted_register {
+        shifttype type;
+        ireg reg;
+        uint8_t shift;
+    };
+    std::optional<shifted_register> is_shifted_register(std::byte *code,
+                                                        ireg reg);
 
     template <typename To> void despill(std::byte *&code, value *v);
     template <typename To> value adapt_value(std::byte *&code, value *v);
