@@ -1658,8 +1658,8 @@ void Arm64::finalize(std::byte *&code, Args... results) {
 }
 
 void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
-    auto start = code;
-    put(code, noop);
+    raw::stp(code, true, enctype::preidx, -0x20, ireg::x30, ireg::sp,
+             ireg::x29);
     raw::add(code, true, 0, ireg::sp, ireg::x29);
 
     constexpr auto exhaust_ptr = ireg::x3, exhaust = ireg::x4;
@@ -1669,7 +1669,6 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
     raw::ldr(code, false, exhaust_ptr, exhaust);
 
     raw::stp(code, true, enctype::offset, 0x10, exhaust, ireg::sp, exhaust_ptr);
-    auto sp_offset = 0x20;
 
     raw::subs(code, false, 1, exhaust, exhaust);
     raw::str(code, false, exhaust_ptr, exhaust);
@@ -1693,7 +1692,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
     };
     std::optional<save> prev;
 
-    for (size_t i = 0; i < fn.locals.size(); i++) {
+    for (int i = 0; i < fn.locals.size(); i++) {
         auto local = fn.locals[i];
         auto offset = i * sizeof(runtime::WasmValue);
         auto is_param = i < fn.type.params.size();
@@ -1703,32 +1702,43 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             // save current value
             if (prev && prev->ty == local && offset < 512) {
                 code = prev->code;
-                sp_offset = prev->offset;
+                offset = prev->offset;
                 auto preg = (ireg)prev->reg;
 
-                raw::stp(code, true, enctype::offset, sp_offset, reg, ireg::sp,
+                if (is_param && prev->is_param)
+                    raw::ldp(code, true, enctype::offset, offset, ireg::x4,
+                             stackreg, ireg::x3);
+                else if (is_param)
+                    raw::ldr(code, true, offset + sizeof(runtime::WasmValue),
+                             stackreg, ireg::x4);
+                else if (prev->is_param)
+                    raw::ldr(code, true, offset, stackreg, ireg::x3);
+
+                raw::stp(code, true, enctype::offset, offset, reg, stackreg,
                          preg);
-                raw::ldp(code, true, enctype::offset,
-                         offset - sizeof(runtime::WasmValue), reg, stackreg,
-                         preg);
+
                 if (!prev->is_param)
                     raw::mov(code, true, ireg::xzr, preg);
+                else
+                    raw::mov(code, true, ireg::x3, preg);
+
                 if (!is_param)
                     raw::mov(code, true, ireg::xzr, reg);
+                else
+                    raw::mov(code, true, ireg::x4, reg);
 
-                sp_offset += 0x10;
                 prev = std::nullopt;
             } else {
-                prev = save{local, (int)reg, sp_offset, is_param, code};
+                prev = save{local, (int)reg, (int)offset, is_param, code};
 
-                masm::str(code, intregs, true, sp_offset, ireg::sp, reg);
                 if (is_param) {
-                    masm::ldr(code, intregs, true, offset, stackreg, reg);
+                    masm::ldr(code, intregs, true, offset, stackreg, ireg::x3);
+                    masm::str(code, intregs, true, offset, stackreg, reg);
+                    raw::mov(code, true, ireg::x3, reg);
                 } else {
+                    masm::str(code, intregs, true, offset, stackreg, reg);
                     raw::mov(code, true, ireg::xzr, reg);
                 }
-
-                sp_offset += 0x8;
             }
 
             locals[i] = value::reg(reg);
@@ -1737,32 +1747,45 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             // save current value
             if (prev && prev->ty == local && offset < 512) {
                 code = prev->code;
-                sp_offset = prev->offset;
+                offset = prev->offset;
                 auto preg = (freg)prev->reg;
 
-                raw::stp(code, ftype::double_, enctype::offset, sp_offset, reg,
-                         ireg::sp, preg);
-                raw::ldp(code, ftype::double_, enctype::offset,
-                         offset - sizeof(runtime::WasmValue), reg, stackreg,
-                         preg);
+                raw::ldp(code, ftype::double_, enctype::offset, offset,
+                         freg::d1, stackreg, freg::d0);
+                if (is_param && prev->is_param)
+                    raw::ldp(code, ftype::double_, enctype::offset, offset,
+                             freg::d1, stackreg, freg::d0);
+                else if (is_param)
+                    raw::ldr(code, true, offset - sizeof(runtime::WasmValue),
+                             stackreg, freg::d1);
+                else if (prev->is_param)
+                    raw::ldr(code, true, offset, stackreg, freg::d0);
+
+                raw::stp(code, ftype::double_, enctype::offset, offset, reg,
+                         stackreg, preg);
+
                 if (!prev->is_param)
                     raw::mov(code, true, ftype::double_, ireg::xzr, preg);
+                else
+                    raw::mov(code, ftype::double_, freg::d0, preg);
+
                 if (!is_param)
                     raw::mov(code, true, ftype::double_, ireg::xzr, reg);
+                else
+                    raw::mov(code, ftype::double_, freg::d1, reg);
 
-                sp_offset += 0x10;
                 prev = std::nullopt;
             } else {
-                prev = save{local, (int)reg, sp_offset, is_param, code};
+                prev = save{local, (int)reg, (int)offset, is_param, code};
 
-                masm::str(code, intregs, true, sp_offset, ireg::sp, reg);
                 if (is_param) {
-                    masm::ldr(code, intregs, true, offset, stackreg, reg);
+                    masm::ldr(code, intregs, true, offset, stackreg, freg::d0);
+                    masm::str(code, intregs, true, offset, stackreg, reg);
+                    raw::mov(code, ftype::double_, freg::d0, reg);
                 } else {
+                    masm::str(code, intregs, true, offset, stackreg, reg);
                     raw::mov(code, true, ftype::double_, ireg::xzr, reg);
                 }
-
-                sp_offset += 0x8;
             }
 
             locals[i] = value::reg(reg);
@@ -1775,35 +1798,10 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
         }
     }
 
-    // round sp_offset up to multiple of 16
-    sp_offset = (sp_offset + 15) & ~15;
-    raw::stp(start, true, enctype::preidx, -sp_offset, ireg::x30, ireg::sp,
-             ireg::x29);
-
     stack_size = fn.locals.size() * sizeof(runtime::WasmValue);
 }
 void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     auto &fn = std::get<Function>(flow.construct).fn;
-    if (auto local_bytes = fn.locals.bytesize(); local_bytes != 0) {
-        // return values should be in [local_bytes, ...), so copy them backwards
-        // into the local area
-        // clobber at will (in this case x3)
-        for (size_t i = 0; i < fn.type.results.size(); i++) {
-            auto final_offset = i * sizeof(runtime::WasmValue);
-            auto current_offset = local_bytes + final_offset;
-
-            masm::ldr(code, intregs, true, current_offset, stackreg, ireg::x3);
-            masm::str(code, intregs, true, final_offset, stackreg, ireg::x3);
-        }
-    }
-
-    auto sp_offset = 0x10;
-    // restore call stack depth
-    constexpr auto exhaust_ptr = ireg::x3, exhaust = ireg::x4;
-    raw::ldp(code, true, enctype::offset, 0x10, exhaust, ireg::sp, exhaust_ptr);
-    sp_offset += 0x10;
-    raw::str(code, false, exhaust_ptr, exhaust);
-
     struct restore {
         valtype ty;
         int reg;
@@ -1817,51 +1815,61 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
         if (!locals[i].is<value::location::reg>())
             continue;
 
+        auto offset = i * sizeof(runtime::WasmValue);
+
         if (is_float(fn.locals[i])) {
-            if (prev && prev->ty == fn.locals[i] && sp_offset < 512) {
+            if (prev && prev->ty == fn.locals[i] && offset < 512) {
                 code = prev->code;
-                sp_offset = prev->offset;
+                offset = prev->offset;
 
-                raw::ldp(code, ftype::double_, enctype::offset, sp_offset,
-                         locals[i].as<freg>(), ireg::sp, (freg)prev->reg);
+                raw::ldp(code, ftype::double_, enctype::offset, offset,
+                         locals[i].as<freg>(), stackreg, (freg)prev->reg);
 
-                sp_offset += 0x10;
                 prev = std::nullopt;
             } else {
                 prev = restore{fn.locals[i], (int)locals[i].as<freg>(),
-                               sp_offset, code};
+                               (int)offset, code};
 
-                masm::ldr(code, intregs, true, sp_offset, ireg::sp,
+                masm::ldr(code, intregs, true, offset, stackreg,
                           locals[i].as<freg>());
-
-                sp_offset += 0x8;
             }
         } else {
-            if (prev && prev->ty == fn.locals[i] && sp_offset < 512) {
+            if (prev && prev->ty == fn.locals[i] && offset < 512) {
                 code = prev->code;
-                sp_offset = prev->offset;
+                offset = prev->offset;
 
-                raw::ldp(code, true, enctype::offset, sp_offset,
-                         locals[i].as<ireg>(), ireg::sp, (ireg)prev->reg);
+                raw::ldp(code, true, enctype::offset, offset,
+                         locals[i].as<ireg>(), stackreg, (ireg)prev->reg);
 
-                sp_offset += 0x10;
                 prev = std::nullopt;
             } else {
                 prev = restore{fn.locals[i], (int)locals[i].as<ireg>(),
-                               sp_offset, code};
+                               (int)offset, code};
 
-                masm::ldr(code, intregs, true, sp_offset, ireg::sp,
+                masm::ldr(code, intregs, true, offset, stackreg,
                           locals[i].as<ireg>());
-
-                sp_offset += 0x8;
             }
         }
     }
 
-    // round sp_offset up to multiple of 16
-    sp_offset = (sp_offset + 15) & ~15;
-    raw::ldp(code, true, enctype::pstidx, sp_offset, ireg::x30, ireg::sp,
-             ireg::x29);
+    if (auto local_bytes = fn.locals.bytesize(); local_bytes != 0) {
+        // return values should be in [local_bytes, ...), so copy them backwards
+        // into the local area
+        // clobber at will (in this case x3)
+        for (size_t i = 0; i < fn.type.results.size(); i++) {
+            auto final_offset = i * sizeof(runtime::WasmValue);
+            auto current_offset = local_bytes + final_offset;
+
+            masm::ldr(code, intregs, true, current_offset, stackreg, ireg::x3);
+            masm::str(code, intregs, true, final_offset, stackreg, ireg::x3);
+        }
+    }
+
+    constexpr auto exhaust_ptr = ireg::x3, exhaust = ireg::x4;
+    raw::ldp(code, true, enctype::offset, 0x10, exhaust, ireg::sp, exhaust_ptr);
+    raw::str(code, false, exhaust_ptr, exhaust);
+
+    raw::ldp(code, true, enctype::pstidx, 0x20, ireg::x30, ireg::sp, ireg::x29);
     raw::ret(code);
 
     delete[] locals.data();
