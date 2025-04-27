@@ -2464,15 +2464,18 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             ireg reg;
 
             intregs.reset_temporaries();
-            if (v.is<value::location::imm>()) {
+            switch (v.where()) {
+            case value::location::imm:
                 reg = intregs.temporary();
                 masm::mov(code, v.as<uint32_t>(), reg);
                 push(v);
-            } else if (v.is<value::location::flags>()) {
+                break;
+            case value::location::flags:
                 reg = intregs.temporary();
                 raw::cset(code, true, v.as<cond>(), reg);
                 push(v);
-            } else if (v.is<value::location::stack>()) {
+                break;
+            case value::location::stack:
                 reg = intregs.result();
                 masm::ldr(code, intregs, true, v.as<uint32_t>(), stackreg, reg);
                 // this one is actually redundant because the masm::str
@@ -2481,7 +2484,8 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                 raw::mov(code, true, reg, reg);
                 // this is also sketchy
                 finalize(code, reg);
-            } else if (v.is<value::location::reg>()) {
+                break;
+            case value::location::reg:
                 // todo: see how possible it is to steal the spill space
                 // from the register we're using here
                 // also it's very sketchy to passthrough like this even
@@ -2490,6 +2494,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                 // usual
                 reg = v.as<ireg>();
                 push(value::reg(reg));
+                break;
             }
             masm::str(code, intregs, true, local.as<uint32_t>(), stackreg, reg);
         }
