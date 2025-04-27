@@ -89,7 +89,7 @@ class Arm64 {
         // spills the register if necessary
         RegType temporary();
         // dumps a register, throws away the metadata
-        void surrender(RegType reg);
+        void surrender(RegType reg, value *v);
 
         void clobber_all();
         bool adjust_spill(RegType reg, std::byte *&code);
@@ -148,10 +148,32 @@ class Arm64 {
     temp_int_manager intregs;
     temp_float_manager floatregs;
 
+    template <typename RegType> auto &regs_of() {
+        if constexpr (std::is_same_v<RegType, ireg>) {
+            return intregs;
+        } else if constexpr (std::is_same_v<RegType, freg>) {
+            return floatregs;
+        } else {
+            static_assert(!std::is_same_v<RegType, RegType>,
+                          "Invalid register type");
+        }
+    }
+
     // callee saved registers
     std::span<value> locals;
     local_manager<icallee_saved> intlocals;
     local_manager<fcallee_saved> floatlocals;
+
+    template <typename RegType> auto &locals_of() {
+        if constexpr (std::is_same_v<RegType, ireg>) {
+            return intlocals;
+        } else if constexpr (std::is_same_v<RegType, freg>) {
+            return floatlocals;
+        } else {
+            static_assert(!std::is_same_v<RegType, RegType>,
+                          "Invalid register type");
+        }
+    }
 
     struct flags {
         // offset to spill into

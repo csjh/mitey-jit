@@ -1157,9 +1157,10 @@ Arm64::temp_reg_manager<registers>::temporary() {
 }
 
 template <auto registers>
-void Arm64::temp_reg_manager<registers>::surrender(RegType reg) {
+void Arm64::temp_reg_manager<registers>::surrender(RegType reg, value *v) {
     auto idx = to_index(reg);
     regs.surrender(idx);
+    assert(data[idx].value_offset == v);
     data[idx].spilladdr = nullptr;
 }
 
@@ -1337,17 +1338,9 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
     case value::location::reg: {
         auto r = v->as<RegType>();
         if (is_volatile(r)) {
-            if constexpr (std::is_same_v<To, iwant::freg>) {
-                floatregs.surrender(r);
+            regs_of<RegType>().surrender(r, v);
             } else {
-                intregs.surrender(r);
-            }
-        } else {
-            if constexpr (std::is_same_v<To, iwant::freg>) {
-                floatlocals.surrender(r, v);
-            } else {
-                intlocals.surrender(r, v);
-            }
+            locals_of<RegType>().surrender(r, v);
         }
         return *v;
     }
@@ -1402,7 +1395,7 @@ ireg Arm64::adapt_value_into(std::byte *&code, value *v,
     if (v->is<value::location::reg>()) {
         if (!soft) {
             if (is_volatile(v->as<ireg>()))
-                intregs.surrender(v->as<ireg>());
+                intregs.surrender(v->as<ireg>(), v);
             else
                 intlocals.surrender(v->as<ireg>(), v);
         }
@@ -1443,7 +1436,7 @@ freg Arm64::adapt_value_into(std::byte *&code, value *v,
     if (v->is<value::location::reg>()) {
         if (!soft) {
             if (is_volatile(v->as<freg>()))
-                floatregs.surrender(v->as<freg>());
+                floatregs.surrender(v->as<freg>(), v);
             else
                 floatlocals.surrender(v->as<freg>(), v);
         }
@@ -1493,7 +1486,7 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
                     auto reg = expected[i].as<freg>();
                     if (is_volatile(reg)) {
                         floatregs.spill(reg);
-                        floatregs.surrender(reg);
+                        floatregs.surrender(reg, &expected[i]);
                     } else {
                         floatlocals.spill(reg, &expected[i]);
                     }
@@ -1512,7 +1505,7 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
                     auto reg = expected[i].as<ireg>();
                     if (is_volatile(reg)) {
                         intregs.spill(reg);
-                        intregs.surrender(reg);
+                        intregs.surrender(reg, &expected[i]);
                     } else {
                         intlocals.spill(reg, &expected[i]);
                     }
@@ -2252,7 +2245,7 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
             despill<iwant::freg>(code, values);
             auto r = values->as<freg>();
             if (is_volatile(r)) {
-                floatregs.surrender(r);
+                floatregs.surrender(r, values);
             } else {
                 floatlocals.surrender(r, values);
             }
@@ -2260,7 +2253,7 @@ void Arm64::drop(SHARED_PARAMS, valtype type) {
             despill<iwant::ireg>(code, values);
             auto r = values->as<ireg>();
             if (is_volatile(r)) {
-                intregs.surrender(r);
+                intregs.surrender(r, values);
             } else {
                 intlocals.surrender(r, values);
             }
@@ -2379,7 +2372,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                     instruction |= (unsigned)locreg;
                     put(code, instruction);
 
-                    floatregs.surrender(reg);
+                    floatregs.surrender(reg, values);
                 } else {
                     if (!is_volatile(reg))
                         floatlocals.adjust_spill(reg, code);
@@ -2434,7 +2427,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                     instruction |= (unsigned)locreg;
                     put(code, instruction);
 
-                    intregs.surrender(reg);
+                    intregs.surrender(reg, values);
                 } else {
                     if (!is_volatile(reg))
                         intlocals.adjust_spill(reg, code);
