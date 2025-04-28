@@ -976,7 +976,7 @@ void add(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
             raw::add(code, sf, imm, dst, dst, true);
         }
     } else {
-        auto tmp = intregs.temporary();
+        Arm64::temporary<ireg> tmp(intregs);
         mov(code, imm, tmp);
         raw::add(code, sf, tmp, src, dst);
     }
@@ -993,7 +993,7 @@ void sub(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
             raw::sub(code, sf, imm, dst, dst, true);
         }
     } else {
-        auto tmp = intregs.temporary();
+        Arm64::temporary<ireg> tmp(intregs);
         mov(code, imm, tmp);
         raw::sub(code, sf, tmp, src, dst);
     }
@@ -1022,7 +1022,7 @@ void ldr(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
         raw::ldr(code, sf, offset & 0xfff, rn, rt);
         raw::sub(code, true, offset >> 12, rn, rn, true);
     } else {
-        auto offsetreg = intregs.temporary();
+        Arm64::temporary<ireg> offsetreg(intregs);
         masm::mov(code, offset, offsetreg);
         raw::load(code, memtype::x, resexttype::uns, indexttype::lsl, false,
                   offsetreg, rn, rt);
@@ -1053,7 +1053,7 @@ void str(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
         raw::str(code, sf, offset & 0xfff, rn, rt);
         raw::sub(code, true, offset >> 12, rn, rn, true);
     } else {
-        auto offsetreg = intregs.temporary();
+        Arm64::temporary<ireg> offsetreg(intregs);
         masm::mov(code, offset, offsetreg);
         raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                   offsetreg, rn, rt);
@@ -1154,6 +1154,11 @@ Arm64::temp_reg_manager<registers>::temporary() {
     spill(from_index(idx));
     data[idx].spilladdr = nullptr;
     return from_index(idx);
+}
+
+template <auto registers>
+void Arm64::temp_reg_manager<registers>::untemporary(RegType reg) {
+    regs.untemporary(to_index(reg));
 }
 
 template <auto registers>
@@ -1288,11 +1293,11 @@ void Arm64::clobber_flags(std::byte *&code) {
     // so the cset into the .result register could clobber a real value
 
     // step 1. claim a register, spilling if necessary
-    auto reg = intregs.temporary();
+    temporary<ireg> reg(this);
     // step 2. spill into claimed register
     raw::cset(code, false, flag.val->as<cond>(), reg);
     // step 3. spill into memory
-    masm::str(code, intregs, true, flag.stack_offset, stackreg, reg);
+    masm::str(code, intregs, true, flag.stack_offset, stackreg, reg.get());
 
     *flag.val = value::stack(flag.stack_offset);
     flag = flags();
@@ -1339,7 +1344,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
         auto r = v->as<RegType>();
         if (is_volatile(r)) {
             regs_of<RegType>().surrender(r, v);
-            } else {
+        } else {
             locals_of<RegType>().surrender(r, v);
         }
         return *v;
@@ -1390,25 +1395,20 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
     assert(false);
 }
 
-ireg Arm64::adapt_value_into(std::byte *&code, value *v,
-                             std::optional<ireg> &hint, bool soft) {
-    if (v->is<value::location::reg>()) {
-        if (!soft) {
-            if (is_volatile(v->as<ireg>()))
-                intregs.surrender(v->as<ireg>(), v);
-            else
-                intlocals.surrender(v->as<ireg>(), v);
-        }
-        return v->as<ireg>();
-    }
-
-    if (!hint)
-        hint = intregs.temporary();
-    auto reg = *hint;
+template <typename To>
+Arm64::temporary<To> Arm64::adapt_value_into(std::byte *&code, value *v,
+                                             bool soft) {
+    temporary<To> reg(this);
 
     switch (v->where()) {
     case value::location::reg: {
-        __builtin_unreachable();
+        if (!soft) {
+            if (is_volatile(v->as<To>()))
+                regs_of<To>().surrender(v->as<To>(), v);
+            else
+                locals_of<To>().surrender(v->as<To>(), v);
+        }
+        return v->as<To>();
     }
     case value::location::stack: {
         auto offset = v->as<uint32_t>();
@@ -1416,47 +1416,24 @@ ireg Arm64::adapt_value_into(std::byte *&code, value *v,
         return reg;
     }
     case value::location::imm: {
-        auto imm = v->as<uint32_t>();
-        masm::mov(code, imm, reg);
-        return reg;
+        if constexpr (std::is_same_v<To, freg>) {
+            assert(false);
+        } else {
+            auto imm = v->as<uint32_t>();
+            masm::mov(code, imm, reg);
+            return reg;
+        }
     }
     case value::location::flags: {
-        if (!soft)
-            flag = flags();
-        raw::cset(code, false, v->as<cond>(), reg);
-        return reg;
-    }
-    }
-
-    assert(false);
-}
-
-freg Arm64::adapt_value_into(std::byte *&code, value *v,
-                             std::optional<freg> &hint, bool soft) {
-    if (v->is<value::location::reg>()) {
-        if (!soft) {
-            if (is_volatile(v->as<freg>()))
-                floatregs.surrender(v->as<freg>(), v);
-            else
-                floatlocals.surrender(v->as<freg>(), v);
+        if constexpr (std::is_same_v<To, freg>) {
+            assert(false);
+        } else {
+            if (!soft)
+                flag = flags();
+            raw::cset(code, false, v->as<cond>(), reg);
+            return reg;
         }
-        return v->as<freg>();
     }
-
-    if (!hint)
-        hint = floatregs.temporary();
-    auto reg = *hint;
-
-    switch (v->where()) {
-    case value::location::stack: {
-        auto offset = v->as<uint32_t>();
-        masm::ldr(code, intregs, true, offset, stackreg, reg);
-        return reg;
-    }
-    case value::location::reg:
-    case value::location::imm:
-    case value::location::flags:
-        __builtin_unreachable();
     }
 
     assert(false);
@@ -1469,9 +1446,6 @@ void Arm64::stackify(std::byte *&code, valtype_vector &moved_values) {
 
 bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
                          uint32_t stack_offset, bool discard_copied) {
-    std::optional<ireg> intreg = std::nullopt;
-    std::optional<freg> floatreg = std::nullopt;
-
     auto start = code;
 
     auto expected = values - copied_values.size();
@@ -1518,10 +1492,10 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
                     assert(expected[i].as<uint32_t>() == dest);
                     break;
                 case value::location::imm:
+                    temporary<ireg> reg(intregs);
                     auto imm = expected[i].as<uint32_t>();
-                    intreg = intreg ? intreg : intregs.temporary();
-                    masm::mov(code, imm, *intreg);
-                    masm::str(code, intregs, true, dest, stackreg, *intreg);
+                    masm::mov(code, imm, reg);
+                    masm::str(code, intregs, true, dest, stackreg, reg.get());
                     break;
                 }
             }
@@ -1537,13 +1511,13 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
 
             auto v = copied_values[i];
             if (is_float(v)) {
-                auto reg = adapt_value_into(code, &expected[i], floatreg,
-                                            !discard_copied);
-                masm::str(code, intregs, true, dest, stackreg, reg);
+                auto reg =
+                    adapt_value_into<freg>(code, &expected[i], !discard_copied);
+                masm::str(code, intregs, true, dest, stackreg, reg.get());
             } else {
-                auto reg = adapt_value_into(code, &expected[i], intreg,
-                                            !discard_copied);
-                masm::str(code, intregs, true, dest, stackreg, reg);
+                auto reg =
+                    adapt_value_into<ireg>(code, &expected[i], !discard_copied);
+                masm::str(code, intregs, true, dest, stackreg, reg.get());
             }
         }
     }
@@ -2034,8 +2008,7 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     auto base = control_stack.size() - 1;
     auto &wanted = control_stack[base - targets.back()].expected;
 
-    auto depth = intregs.temporary();
-    auto addr = intregs.temporary();
+    temporary<ireg> depth(this), addr(this);
 
     // put max depth (-1 for default target) in $depth
     masm::mov(code, (uint32_t)targets.size() - 1, depth);
@@ -2048,24 +2021,21 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     // $addr = $addr + $depth * sizeof(BrTableTarget)
     raw::add(code, true, depth, addr, addr, shifttype::lsl, 3);
     // reuse $addr & $depth into $result_offset & $jump_offset
-    auto result_offset = addr, jump_offset = depth;
+    auto &result_offset = addr, &jump_offset = depth;
     // [$result_offset, $jump_offset] = ldpsw($addr)
     raw::ldpsw(code, 0, result_offset, addr, jump_offset);
-
-    std::optional<ireg> intreg = std::nullopt;
-    std::optional<freg> floatreg = std::nullopt;
 
     auto expected = values - wanted.size();
     for (auto i = ssize_t(wanted.size()) - 1; i >= 0; i--) {
         auto v = wanted[i];
         if (is_float(v)) {
-            auto reg = adapt_value_into(code, &expected[i], floatreg);
+            auto reg = adapt_value_into<freg>(code, &expected[i]);
             raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                       result_offset, stackreg, reg);
             raw::sub(code, true, sizeof(runtime::WasmValue), result_offset,
                      result_offset);
         } else {
-            auto reg = adapt_value_into(code, &expected[i], intreg);
+            auto reg = adapt_value_into<ireg>(code, &expected[i]);
             raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                       result_offset, stackreg, reg);
             raw::sub(code, true, sizeof(runtime::WasmValue), result_offset,
@@ -2080,7 +2050,7 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 
     auto relative_point = code;
     // $jump = PC + $jump_offset
-    auto jump = result_offset;
+    auto &jump = result_offset;
     raw::adr(code, 0, jump);
     raw::add(code, true, jump_offset, jump, jump);
     raw::br(code, jump);
@@ -2161,9 +2131,8 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
                           WasmSignature &type) {
     auto [v] = allocate_registers<std::tuple<iwant::ireg>>(code);
     auto idx = v.as<ireg>();
-    auto table_ptr = intregs.temporary(), current = intregs.temporary(),
-         elements = intregs.temporary(), function_ptr = intregs.temporary(),
-         expected_sig = intregs.temporary(), given_sig = intregs.temporary();
+    temporary<ireg> table_ptr(this), current(this), elements(this),
+        function_ptr(this), expected_sig(this), given_sig(this);
 
     clobber_flags(code);
     clobber_registers();
@@ -2374,13 +2343,14 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
                     floatregs.surrender(reg, values);
                 } else {
-                    if (!is_volatile(reg))
+                    if (!is_volatile(reg)) {
                         floatlocals.adjust_spill(reg, code);
+                        floatlocals.surrender(reg, values);
+                    } else {
+                        floatregs.surrender(reg, values);
+                    }
 
-                    auto wrapped = std::make_optional(locreg);
-                    auto as_reg = adapt_value_into(code, values, wrapped);
-                    if (*wrapped != as_reg)
-                        raw::mov(code, ftype::double_, as_reg, *wrapped);
+                    raw::mov(code, ftype::double_, reg, locreg);
                 }
 
                 floatlocals.purge(locreg);
@@ -2429,13 +2399,14 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
                     intregs.surrender(reg, values);
                 } else {
-                    if (!is_volatile(reg))
+                    if (!is_volatile(reg)) {
                         intlocals.adjust_spill(reg, code);
+                        intlocals.surrender(reg, values);
+                    } else {
+                        intregs.surrender(reg, values);
+                    }
 
-                    auto wrapped = std::make_optional(locreg);
-                    auto as_reg = adapt_value_into(code, values, wrapped);
-                    if (*wrapped != as_reg)
-                        raw::mov(code, true, as_reg, *wrapped);
+                    raw::mov(code, true, reg, locreg);
                 }
 
                 intlocals.purge(locreg);
@@ -2503,8 +2474,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
     auto [idx, res] =
         allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-    auto table_ptr = intregs.temporary(), elements = intregs.temporary(),
-         current = table_ptr;
+    temporary<ireg> table_ptr(this), elements(this), &current = table_ptr;
 
     clobber_flags(code);
 
@@ -2529,8 +2499,7 @@ void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
 void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
     auto [idx, value] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>>(code);
-    auto table_ptr = intregs.temporary(), elements = intregs.temporary(),
-         current = table_ptr;
+    temporary<ireg> table_ptr(this), elements(this), &current = table_ptr;
 
     clobber_flags(code);
 
@@ -2555,7 +2524,7 @@ void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
 void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
     if (is_float(type)) {
         auto [res] = allocate_registers<std::tuple<>, iwant::freg>(code);
-        auto addr = intregs.temporary();
+        temporary<ireg> addr(this);
         masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
                   addr);
         raw::ldr(code, true, addr, res.as<freg>());
@@ -2571,14 +2540,14 @@ void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
 void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
     if (is_float(type)) {
         auto [val] = allocate_registers<std::tuple<iwant::freg>>(code);
-        auto addr = intregs.temporary();
+        temporary<ireg> addr(this);
         masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
                   addr);
         raw::str(code, true, addr, val.as<freg>());
         finalize(code);
     } else {
         auto [val] = allocate_registers<std::tuple<iwant::ireg>>(code);
-        auto addr = intregs.temporary();
+        temporary<ireg> addr(this);
         masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
                   addr);
         raw::str(code, true, addr, val.as<ireg>());
@@ -2611,7 +2580,7 @@ void Arm64::i64const(SHARED_PARAMS, uint64_t cons) {
 }
 void Arm64::f32const(SHARED_PARAMS, float cons) {
     auto [res] = allocate_registers<std::tuple<>, iwant::freg>(code);
-    auto temp = intregs.temporary();
+    temporary<ireg> temp(this);
 
     masm::mov(code, std::bit_cast<uint32_t>(cons), temp);
     raw::mov(code, false, ftype::single, temp, res.as<freg>());
@@ -2620,7 +2589,7 @@ void Arm64::f32const(SHARED_PARAMS, float cons) {
 }
 void Arm64::f64const(SHARED_PARAMS, double cons) {
     auto [res] = allocate_registers<std::tuple<>, iwant::freg>(code);
-    auto temp = intregs.temporary();
+    temporary<ireg> temp(this);
 
     masm::mov(code, std::bit_cast<uint64_t>(cons), temp);
     raw::mov(code, true, ftype::double_, temp, res.as<freg>());
@@ -2841,7 +2810,7 @@ void Arm64::i32popcnt(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
 
-    auto s = floatregs.temporary();
+    temporary<freg> s(this);
 
     raw::mov(code, false, ftype::single, p1.as<ireg>(), s);
     raw::cnt(code, false, s, s);
@@ -2854,7 +2823,7 @@ void Arm64::i64popcnt(SHARED_PARAMS) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
 
-    auto s = floatregs.temporary();
+    temporary<freg> s(this);
 
     raw::mov(code, true, ftype::double_, p1.as<ireg>(), s);
     raw::cnt(code, false, s, s);
@@ -3005,7 +2974,7 @@ void Arm64::i32rem_s(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    auto v = intregs.temporary();
+    temporary<ireg> v(this);
     clobber_flags(code);
 
     auto zero_check = code;
@@ -3021,7 +2990,7 @@ void Arm64::i64rem_s(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    auto v = intregs.temporary();
+    temporary<ireg> v(this);
     clobber_flags(code);
 
     auto zero_check = code;
@@ -3037,7 +3006,7 @@ void Arm64::i32rem_u(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    auto v = intregs.temporary();
+    temporary<ireg> v(this);
     clobber_flags(code);
 
     auto zero_check = code;
@@ -3053,7 +3022,7 @@ void Arm64::i64rem_u(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    auto v = intregs.temporary();
+    temporary<ireg> v(this);
     clobber_flags(code);
 
     auto zero_check = code;
@@ -3242,7 +3211,7 @@ void Arm64::i32rotl(SHARED_PARAMS) {
         raw::ror(code, false, 32 - (p2.as<uint32_t>() & 31), p1.as<ireg>(),
                  res.as<ireg>());
     } else {
-        auto temp = intregs.temporary();
+        temporary<ireg> temp(this);
         raw::neg(code, false, p2.as<ireg>(), temp);
         raw::ror(code, false, temp, p1.as<ireg>(), res.as<ireg>());
     }
@@ -3258,7 +3227,7 @@ void Arm64::i64rotl(SHARED_PARAMS) {
         raw::ror(code, true, 64 - (p2.as<uint32_t>() & 63), p1.as<ireg>(),
                  res.as<ireg>());
     } else {
-        auto temp = intregs.temporary();
+        temporary<ireg> temp(this);
         raw::neg(code, true, p2.as<ireg>(), temp);
         raw::ror(code, true, temp, p1.as<ireg>(), res.as<ireg>());
     }
@@ -3475,7 +3444,7 @@ void Arm64::f32copysign(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    auto i1 = intregs.temporary(), i2 = intregs.temporary();
+    temporary<ireg> i1(this), i2(this);
 
     raw::mov(code, false, ftype::single, p1.as<freg>(), i1);
     raw::mov(code, false, ftype::single, p2.as<freg>(), i2);
@@ -3489,7 +3458,7 @@ void Arm64::f64copysign(SHARED_PARAMS) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
             code);
-    auto i1 = intregs.temporary(), i2 = intregs.temporary();
+    temporary<ireg> i1(this), i2(this);
 
     raw::mov(code, true, ftype::double_, p1.as<freg>(), i1);
     raw::mov(code, true, ftype::double_, p2.as<freg>(), i2);
@@ -3544,8 +3513,8 @@ void Arm64::validate_trunc(std::byte *&code, freg v, FloatType lower,
 
     clobber_flags(code);
 
-    auto int_bits = intregs.temporary(), int_comparison = intregs.temporary();
-    auto float_comparison = floatregs.temporary();
+    temporary<ireg> int_bits(this), int_comparison(this);
+    temporary<freg> float_comparison(this);
 
     raw::mov(code, sf, ft, v, int_bits);
     masm::mov(code, nonfinite_value, int_comparison);

@@ -86,6 +86,10 @@ template <uint8_t N> class reg_lru {
         current_temporary = next[ret];
         return ret;
     }
+    void untemporary(uint8_t n) {
+        if (n == prev[current_temporary])
+            current_temporary = n;
+    }
     // only allows one result
     uint8_t back() { return head; }
 };

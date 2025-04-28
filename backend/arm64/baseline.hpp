@@ -88,6 +88,7 @@ class Arm64 {
         // takes the least recently used register
         // spills the register if necessary
         RegType temporary();
+        void untemporary(RegType reg);
         // dumps a register, throws away the metadata
         void surrender(RegType reg, value *v);
 
@@ -118,6 +119,49 @@ class Arm64 {
         bool adjust_spill(RegType reg, std::byte *&code);
         void spill(RegType, size_t);
         void spill(RegType, value *);
+    };
+
+    template <typename RegType> struct temporary {
+        static_assert(std::is_same_v<RegType, ireg> ||
+                          std::is_same_v<RegType, freg>,
+                      "temporary can only be used with ireg or freg");
+
+        using manager_type = std::conditional_t<std::is_same_v<RegType, ireg>,
+                                                Arm64::temp_int_manager,
+                                                Arm64::temp_float_manager>;
+
+        temporary(Arm64 *that) : temporary(that->regs_of<RegType>()) {}
+
+        temporary(manager_type &that) {
+            manager = &that;
+            reg = manager->temporary();
+        }
+
+        temporary(RegType existing) {
+            manager = nullptr;
+            reg = existing;
+        }
+
+        temporary(temporary<RegType> &existing) = delete;
+        temporary(temporary<RegType> &&existing) {
+            manager = existing.manager;
+            reg = existing.reg;
+            existing.manager = nullptr;
+        }
+
+        ~temporary() {
+            if (manager)
+                manager->untemporary(reg);
+        }
+
+        void operator=(temporary<RegType> &existing) = delete;
+        void operator=(temporary<RegType> &&existing) = delete;
+        operator RegType() { return reg; }
+        RegType get() { return reg; }
+
+      private:
+        manager_type *manager;
+        RegType reg;
     };
 
     template <auto registers> class local_manager {
@@ -213,10 +257,10 @@ class Arm64 {
 
     template <typename To> void despill(std::byte *&code, value *v);
     template <typename To> value adapt_value(std::byte *&code, value *v);
-    ireg adapt_value_into(std::byte *&code, value *v, std::optional<ireg> &reg,
-                          bool soft = false);
-    freg adapt_value_into(std::byte *&code, value *v, std::optional<freg> &reg,
-                          bool soft = false);
+
+    template <typename To>
+    temporary<To> adapt_value_into(std::byte *&code, value *v,
+                                   bool soft = false);
 
     void stackify(std::byte *&code, valtype_vector &values);
     bool move_results(std::byte *&code, valtype_vector &copied_values,
@@ -509,8 +553,6 @@ class Arm64 {
 // - things that can't be clobbered in a block:
 //   - locals
 //   - the stack
-
-constexpr auto x = sizeof(Arm64);
 
 } // namespace arm64
 } // namespace mitey
