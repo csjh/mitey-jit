@@ -1895,22 +1895,28 @@ void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     }
 }
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
-    intregs.reset_temporaries();
-    floatregs.reset_temporaries();
+    if (std::holds_alternative<Loop>(flow.construct)) {
+        if (stack.polymorphism()) {
+            for ([[maybe_unused]] auto result : flow.sig.results) {
+                push(value::stack(stack_size));
+            }
+        }
+    } else {
+        intregs.reset_temporaries();
+        floatregs.reset_temporaries();
 
-    if (!stack.polymorphism()) {
-        stackify(code, flow.sig.results);
-    }
+        if (!stack.polymorphism()) {
+            stackify(code, flow.sig.results);
+        }
 
-    if (std::holds_alternative<If>(flow.construct)) {
-        amend_br_if(std::get<If>(flow.construct).else_jump, code);
-    }
+        if (std::holds_alternative<If>(flow.construct)) {
+            amend_br_if(std::get<If>(flow.construct).else_jump, code);
+        }
 
-    for ([[maybe_unused]] auto result : flow.sig.results) {
-        push(value::stack(stack_size));
-    }
+        for ([[maybe_unused]] auto result : flow.sig.results) {
+            push(value::stack(stack_size));
+        }
 
-    if (!std::holds_alternative<Loop>(flow.construct)) {
         for (auto target : flow.pending_br) {
             amend_br(target, code);
         }
@@ -1923,10 +1929,10 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
             ensure(idiff == diff, "branch target out of range");
             std::memcpy(target, &idiff, sizeof(idiff));
         }
-    }
 
-    if (std::holds_alternative<Function>(flow.construct)) {
-        exit_function(code, stack, flow);
+        if (std::holds_alternative<Function>(flow.construct)) {
+            exit_function(code, stack, flow);
+        }
     }
 }
 void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
