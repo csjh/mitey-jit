@@ -47,60 +47,7 @@ class value {
 
 class Arm64 {
   public:
-    template <auto registers> class temp_reg_manager {
-        using RegType = decltype(registers)::value_type;
-        static constexpr auto First = (size_t)registers.front();
-        static constexpr auto Last = (size_t)registers.back();
-        static constexpr auto N = registers.size();
-        static_assert(N == Last - First + 1, "registers must be contiguous");
-
-      public:
-        struct metadata {
-            // when a register is inactive, this is a null pointer
-            // when a register is given a value, this is set to a noop
-            // when a register is stolen, this is set to a spill
-            std::byte *spilladdr = nullptr;
-            // this could be an index into the values pointer but
-            // that's an optimization attempt for another day
-            value *value_offset = nullptr;
-            uint32_t stack_offset = 0;
-        };
-
-      private:
-        reg_lru<N> regs;
-        metadata data[N];
-
-        uint8_t to_index(RegType reg);
-        RegType from_index(uint8_t idx);
-
-      public:
-        void reset_temporaries();
-        // takes the least recently used non-claimed register
-        // spills the register if necessary
-        // result should only used after all temporaries are consumed
-        // i.e. <result> = <temp1> + <temp2> (good)
-        // <result> = <temp1> + <temp2>
-        // <result> = <result> + <temp1> (bad)
-        // because <result> might alias temp1
-        RegType result();
-        // adds the spill metadata for a given (result) register
-        void claim(RegType, metadata);
-        // takes the least recently used register
-        // spills the register if necessary
-        RegType temporary();
-        void untemporary(RegType reg);
-        // dumps a register, throws away the metadata
-        void surrender(RegType reg, value *v);
-
-        void clobber_all();
-        bool adjust_spill(RegType reg, std::byte *&code);
-        void spill(RegType reg);
-    };
-
-    using temp_int_manager = temp_reg_manager<icaller_saved>;
-    using temp_float_manager = temp_reg_manager<fcaller_saved>;
-
-    template <typename RegType, size_t N> class lasting_reg_manager {
+    template <typename RegType, size_t N> class reg_info {
       public:
         struct metadata {
             std::byte *spilladdr = nullptr;
@@ -117,9 +64,53 @@ class Arm64 {
         void surrender(value *);
         void purge(RegType);
         bool adjust_spill(RegType reg, std::byte *&code);
-        void spill(RegType, size_t);
-        void spill(RegType, value *);
+        void spill(RegType, size_t i);
+        void spill(RegType, value *v);
     };
+
+    template <auto registers> struct reg_manager {
+        using RegType = typename decltype(registers)::value_type;
+        static constexpr bool allocate =
+            std::is_same_v<decltype(registers),
+                           std::remove_cv_t<decltype(icaller_saved)>> ||
+            std::is_same_v<decltype(registers),
+                           std::remove_cv_t<decltype(fcaller_saved)>>;
+        static constexpr auto First = (size_t)registers.front();
+        static constexpr auto Last = (size_t)registers.back();
+        static constexpr auto N = registers.size();
+        static_assert(N == Last - First + 1, "registers must be contiguous");
+        using sub_manager = reg_info<RegType, 4>;
+
+        sub_manager locals[N];
+
+        sub_manager &get_manager_of(RegType reg) {
+            return locals[(size_t)reg - First];
+        }
+
+        reg_lru<allocate ? N : 0> regs;
+
+        void spill(RegType, size_t);
+
+        uint8_t to_index(RegType reg);
+        RegType from_index(uint8_t idx);
+
+      public:
+        RegType result();
+        RegType temporary();
+        void untemporary(RegType reg);
+        void reset_temporaries();
+
+        void claim(RegType, sub_manager::metadata);
+        void surrender(RegType, value *);
+        void purge(RegType);
+        void clobber_all();
+
+        void spill(RegType reg, value *v);
+        bool adjust_spill(RegType reg, std::byte *&code);
+    };
+
+    using temp_int_manager = reg_manager<icaller_saved>;
+    using temp_float_manager = reg_manager<fcaller_saved>;
 
     template <typename RegType> struct temporary {
         static_assert(std::is_same_v<RegType, ireg> ||
@@ -164,29 +155,6 @@ class Arm64 {
         RegType reg;
     };
 
-    template <auto registers> class local_manager {
-        using RegType = decltype(registers)::value_type;
-        static constexpr auto First = (size_t)registers.front();
-        static constexpr auto Last = (size_t)registers.back();
-        static constexpr auto N = registers.size();
-        static_assert(N == Last - First + 1, "registers must be contiguous");
-
-        using sub_manager = lasting_reg_manager<RegType, 4>;
-
-        sub_manager locals[N];
-
-        sub_manager &get_manager_of(RegType reg) {
-            return locals[(size_t)reg - First];
-        }
-
-      public:
-        void claim(RegType, sub_manager::metadata);
-        void surrender(RegType, value *);
-        void purge(RegType);
-        bool adjust_spill(RegType reg, std::byte *&code);
-        void spill(RegType reg, value *v);
-    };
-
   private:
     // caller saved registers
     temp_int_manager intregs;
@@ -205,8 +173,8 @@ class Arm64 {
 
     // callee saved registers
     std::span<value> locals;
-    local_manager<icallee_saved> intlocals;
-    local_manager<fcallee_saved> floatlocals;
+    reg_manager<icallee_saved> intlocals;
+    reg_manager<fcallee_saved> floatlocals;
 
     template <typename RegType> auto &locals_of() {
         if constexpr (std::is_same_v<RegType, ireg>) {

@@ -1109,104 +1109,62 @@ bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
 }; // namespace
 
 template <auto registers>
-void Arm64::temp_reg_manager<registers>::spill(RegType reg) {
-    auto [addr, v, offset] = data[to_index(reg)];
-    if (addr) {
-        masm::str_no_temp(addr, true, offset, stackreg, reg);
-        *v = value::stack(offset);
-    }
-}
-
-template <auto registers>
-uint8_t Arm64::temp_reg_manager<registers>::to_index(RegType reg) {
+uint8_t Arm64::reg_manager<registers>::to_index(RegType reg) {
     return static_cast<uint8_t>(reg) - First;
 }
 
 template <auto registers>
 decltype(registers)::value_type
-Arm64::temp_reg_manager<registers>::from_index(uint8_t idx) {
+Arm64::reg_manager<registers>::from_index(uint8_t idx) {
     return static_cast<RegType>(idx + First);
 }
 
 template <auto registers>
-void Arm64::temp_reg_manager<registers>::reset_temporaries() {
+void Arm64::reg_manager<registers>::reset_temporaries() {
     regs.reset_temporaries();
 }
 
 template <auto registers>
-decltype(registers)::value_type Arm64::temp_reg_manager<registers>::result() {
+decltype(registers)::value_type Arm64::reg_manager<registers>::result() {
     auto idx = regs.back();
-    spill(from_index(idx));
+    purge(from_index(idx));
     return from_index(idx);
 }
 
 template <auto registers>
-void Arm64::temp_reg_manager<registers>::claim(RegType reg, metadata md) {
-    auto idx = to_index(reg);
-    data[idx] = md;
-    regs.claim(idx);
-}
-
-template <auto registers>
-decltype(registers)::value_type
-Arm64::temp_reg_manager<registers>::temporary() {
+decltype(registers)::value_type Arm64::reg_manager<registers>::temporary() {
     auto idx = regs.temporary();
-    spill(from_index(idx));
-    data[idx].spilladdr = nullptr;
+    purge(from_index(idx));
     return from_index(idx);
 }
 
 template <auto registers>
-void Arm64::temp_reg_manager<registers>::untemporary(RegType reg) {
+void Arm64::reg_manager<registers>::untemporary(RegType reg) {
     regs.untemporary(to_index(reg));
 }
 
-template <auto registers>
-void Arm64::temp_reg_manager<registers>::surrender(RegType reg, value *v) {
-    auto idx = to_index(reg);
-    regs.surrender(idx);
-    assert(data[idx].value_offset == v);
-    data[idx].spilladdr = nullptr;
-}
-
-template <auto registers>
-void Arm64::temp_reg_manager<registers>::clobber_all() {
+template <auto registers> void Arm64::reg_manager<registers>::clobber_all() {
     for (auto reg : registers) {
-        auto [addr, v, offset] = data[to_index(reg)];
-        if (addr) {
-            masm::str_no_temp(addr, true, offset, stackreg, reg);
-            *v = value::stack(offset);
-            data[to_index(reg)].spilladdr = nullptr;
-        }
+        purge(reg);
     }
-}
-
-template <auto registers>
-bool Arm64::temp_reg_manager<registers>::adjust_spill(RegType reg,
-                                                      std::byte *&code) {
-    // todo: account for wider spilladdrs (>sizeof(inst))
-    if (data[to_index(reg)].spilladdr == code - sizeof(inst)) {
-        code -= sizeof(inst);
-        return true;
-    }
-    return false;
 }
 
 template <typename RegType, size_t N>
-void Arm64::lasting_reg_manager<RegType, N>::spill(RegType reg, size_t i) {
+void Arm64::reg_info<RegType, N>::spill(RegType reg, size_t i) {
     auto [addr, v, offset] = data[i];
     if (addr) {
         masm::str_no_temp(addr, true, offset, stackreg, reg);
         *v = value::stack(offset);
+        data[i].spilladdr = nullptr;
     }
 }
 
 template <typename RegType, size_t N>
-void Arm64::lasting_reg_manager<RegType, N>::spill(RegType reg, value *v) {
+void Arm64::reg_info<RegType, N>::spill(RegType reg, value *v) {
     assert(count > 0);
     count--;
-    assert(data[count % N].value_offset == v);
-    auto [addr, _, offset] = data[count % N];
+    auto [addr, v2, offset] = data[count % N];
+    assert(v == v2);
     if (addr) {
         masm::str_no_temp(addr, true, offset, stackreg, reg);
         *v = value::stack(offset);
@@ -1216,14 +1174,14 @@ void Arm64::lasting_reg_manager<RegType, N>::spill(RegType reg, value *v) {
 }
 
 template <typename RegType, size_t N>
-void Arm64::lasting_reg_manager<RegType, N>::claim(RegType reg, metadata md) {
+void Arm64::reg_info<RegType, N>::claim(RegType reg, metadata md) {
     spill(reg, count % N);
     data[count % N] = md;
     count++;
 }
 
 template <typename RegType, size_t N>
-void Arm64::lasting_reg_manager<RegType, N>::surrender(value *v) {
+void Arm64::reg_info<RegType, N>::surrender(value *v) {
     assert(count > 0);
     count--;
     assert(data[count % N].value_offset == v);
@@ -1231,7 +1189,7 @@ void Arm64::lasting_reg_manager<RegType, N>::surrender(value *v) {
 }
 
 template <typename RegType, size_t N>
-void Arm64::lasting_reg_manager<RegType, N>::purge(RegType reg) {
+void Arm64::reg_info<RegType, N>::purge(RegType reg) {
     for (auto i = 0; i < std::min(count, N); i++) {
         spill(reg, i);
         data[i].spilladdr = nullptr;
@@ -1240,8 +1198,7 @@ void Arm64::lasting_reg_manager<RegType, N>::purge(RegType reg) {
 }
 
 template <typename RegType, size_t N>
-bool Arm64::lasting_reg_manager<RegType, N>::adjust_spill(RegType reg,
-                                                          std::byte *&code) {
+bool Arm64::reg_info<RegType, N>::adjust_spill(RegType reg, std::byte *&code) {
     assert(count > 0);
     if (data[(count - 1) % N].spilladdr == code - sizeof(inst)) {
         code -= sizeof(inst);
@@ -1251,33 +1208,37 @@ bool Arm64::lasting_reg_manager<RegType, N>::adjust_spill(RegType reg,
 }
 
 template <auto registers>
-void Arm64::local_manager<registers>::claim(RegType reg,
-                                            sub_manager::metadata md) {
+void Arm64::reg_manager<registers>::claim(RegType reg,
+                                          sub_manager::metadata md) {
     assert(std::ranges::find(registers, reg) != registers.end());
     get_manager_of(reg).claim(reg, md);
+    if constexpr (allocate)
+        regs.claim(to_index(reg));
 }
 
 template <auto registers>
-void Arm64::local_manager<registers>::surrender(RegType reg, value *v) {
+void Arm64::reg_manager<registers>::surrender(RegType reg, value *v) {
     assert(std::ranges::find(registers, reg) != registers.end());
     get_manager_of(reg).surrender(v);
+    if constexpr (allocate)
+        regs.surrender(to_index(reg));
 }
 
 template <auto registers>
-void Arm64::local_manager<registers>::purge(RegType reg) {
+void Arm64::reg_manager<registers>::purge(RegType reg) {
     assert(std::ranges::find(registers, reg) != registers.end());
     get_manager_of(reg).purge(reg);
 }
 
 template <auto registers>
-bool Arm64::local_manager<registers>::adjust_spill(RegType reg,
-                                                   std::byte *&code) {
+bool Arm64::reg_manager<registers>::adjust_spill(RegType reg,
+                                                 std::byte *&code) {
     assert(std::ranges::find(registers, reg) != registers.end());
     return get_manager_of(reg).adjust_spill(reg, code);
 }
 
 template <auto registers>
-void Arm64::local_manager<registers>::spill(RegType reg, value *v) {
+void Arm64::reg_manager<registers>::spill(RegType reg, value *v) {
     assert(std::ranges::find(registers, reg) != registers.end());
     get_manager_of(reg).spill(reg, v);
 }
@@ -1459,8 +1420,7 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
                 case value::location::reg: {
                     auto reg = expected[i].as<freg>();
                     if (is_volatile(reg)) {
-                        floatregs.spill(reg);
-                        floatregs.surrender(reg, &expected[i]);
+                        floatregs.spill(reg, &expected[i]);
                     } else {
                         floatlocals.spill(reg, &expected[i]);
                     }
@@ -1478,8 +1438,7 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
                 case value::location::reg: {
                     auto reg = expected[i].as<ireg>();
                     if (is_volatile(reg)) {
-                        intregs.spill(reg);
-                        intregs.surrender(reg, &expected[i]);
+                        intregs.spill(reg, &expected[i]);
                     } else {
                         intlocals.spill(reg, &expected[i]);
                     }
