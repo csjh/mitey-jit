@@ -179,6 +179,7 @@ class Arm64 {
 
     struct plane {
         bool is_float;
+        std::byte *dumpaddr;
         uint32_t local_idx;
         uint32_t stack_offset;
     };
@@ -186,8 +187,8 @@ class Arm64 {
     uint32_t inflight_count = 0;
 
     void take_flight(std::byte *&code, uint32_t local_idx, bool is_float);
-    void force_landing(std::byte *&code, plane local);
-    void force_landing(std::byte *&code);
+    void force_landing(plane local);
+    void force_landing();
 
     template <typename RegType> auto &locals_of() {
         if constexpr (std::is_same_v<RegType, ireg>) {

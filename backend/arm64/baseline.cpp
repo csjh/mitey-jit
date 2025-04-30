@@ -1531,31 +1531,40 @@ void Arm64::amend_br_if(std::byte *br, std::byte *target) {
 
 void Arm64::take_flight(std::byte *&code, uint32_t local_idx, bool is_float) {
     assert(locals[local_idx].is<value::location::stack>());
+    auto stack_offset = locals[local_idx].as<uint32_t>();
 
     if (inflight_count >= 8) {
-        force_landing(code, inflight_locals[inflight_count % 8]);
+        force_landing(inflight_locals[inflight_count % 8]);
     }
-    inflight_locals[inflight_count % 8] = {is_float, local_idx,
-                                           locals[local_idx].as<uint32_t>()};
+    inflight_locals[inflight_count % 8] = {is_float, code, local_idx,
+                                           stack_offset};
+    pad_spill(code, stack_offset);
     inflight_count++;
 }
 
-void Arm64::force_landing(std::byte *&code) {
+void Arm64::force_landing() {
+    std::array<uint32_t, 8> seen;
+    seen.fill(std::numeric_limits<uint32_t>::max());
+    int j = 0;
+
     for (uint32_t i = 0; i < std::min(inflight_count, 8u); i++) {
-        force_landing(code, inflight_locals[i % 8]);
+        if (std::ranges::find(seen, inflight_locals[i].local_idx) != seen.end())
+            continue;
+        seen[j++] = inflight_locals[i].local_idx;
+
+        force_landing(inflight_locals[i]);
     }
     inflight_count = 0;
 }
 
-void Arm64::force_landing(std::byte *&code, plane local) {
+void Arm64::force_landing(plane local) {
+    assert(locals[local.local_idx].is<value::location::reg>());
     if (local.is_float) {
-        // floatregs.purge(locals[local.local_idx].as<freg>());
-        masm::str(code, intregs, true, local.stack_offset, stackreg,
-                  locals[local.local_idx].as<freg>());
+        masm::str_no_temp(local.dumpaddr, true, local.stack_offset, stackreg,
+                          locals[local.local_idx].as<freg>());
     } else {
-        // intregs.purge(locals[local.local_idx].as<ireg>());
-        masm::str(code, intregs, true, local.stack_offset, stackreg,
-                  locals[local.local_idx].as<ireg>());
+        masm::str_no_temp(local.dumpaddr, true, local.stack_offset, stackreg,
+                          locals[local.local_idx].as<ireg>());
     }
     locals[local.local_idx] = value::stack(local.stack_offset);
 }
@@ -2357,6 +2366,11 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
         if (is_volatile(locreg)) {
             floatregs.purge(locreg);
+            if (local.is<value::location::stack>()) {
+                take_flight(code, local_idx, false);
+                locals[local_idx] = local = value::reg(locreg);
+                raw::mov(code, ftype::double_, locreg, locreg);
+            }
             floatregs.claim(locreg, {code, values, stack_size});
         } else {
             floatlocals.purge(locreg);
@@ -2371,9 +2385,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
         if (local.is<value::location::reg>()) {
             locreg = local.as<ireg>();
         } else {
-            take_flight(code, local_idx, false);
             locreg = intregs.result();
-            locals[local_idx] = local = value::reg(locreg);
         }
         // certain value locations are better than a register
         value pushval = v;
@@ -2414,6 +2426,11 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
         if (is_volatile(locreg)) {
             intregs.purge(locreg);
+            if (local.is<value::location::stack>()) {
+                take_flight(code, local_idx, false);
+                locals[local_idx] = local = value::reg(locreg);
+                raw::mov(code, true, locreg, locreg);
+            }
         } else {
             intlocals.purge(locreg);
         }
@@ -2455,7 +2472,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     //     }
     // }
 
-    force_landing(code);
+    force_landing();
 }
 void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
     auto [idx, res] =
