@@ -172,9 +172,22 @@ class Arm64 {
     }
 
     // callee saved registers
-    std::span<value> locals;
     reg_manager<icallee_saved> intlocals;
     reg_manager<fcallee_saved> floatlocals;
+
+    std::span<value> locals;
+
+    struct plane {
+        bool is_float;
+        uint32_t local_idx;
+        uint32_t stack_offset;
+    };
+    plane inflight_locals[8];
+    uint32_t inflight_count = 0;
+
+    void take_flight(std::byte *&code, uint32_t local_idx, bool is_float);
+    void force_landing(std::byte *&code, plane local);
+    void force_landing(std::byte *&code);
 
     template <typename RegType> auto &locals_of() {
         if constexpr (std::is_same_v<RegType, ireg>) {
