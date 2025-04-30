@@ -20,8 +20,8 @@ void sigill_handler(int, siginfo_t *si, void *) {
         sa.sa_handler = SIG_DFL;
         sigemptyset(&sa.sa_mask);
         sa.sa_flags = 0;
-        sigaction(SIGBUS, &sa, nullptr);
-        raise(SIGBUS);
+        sigaction(SIGILL, &sa, nullptr);
+        raise(SIGILL);
         return;
     }
 
