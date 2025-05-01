@@ -46,16 +46,14 @@ class value {
     [[maybe_unused]] std::byte *&code, [[maybe_unused]] WasmStack &stack
 
 class Arm64 {
-  public:
-    template <typename RegType, size_t N> class reg_info {
-      public:
         struct metadata {
             std::byte *spilladdr = nullptr;
             value *value_offset = nullptr;
             uint32_t stack_offset = 0;
         };
 
-      private:
+  public:
+    template <typename RegType, size_t N> class reg_info {
         metadata data[N];
         size_t count = 0;
 
@@ -100,7 +98,7 @@ class Arm64 {
         void untemporary(RegType reg);
         void reset_temporaries();
 
-        void claim(RegType, sub_manager::metadata);
+        void claim(RegType, metadata);
         void surrender(RegType, value *);
         void purge(RegType);
         void clobber_all();
@@ -156,6 +154,17 @@ class Arm64 {
     };
 
   private:
+    void claim(value, valtype, metadata);
+    void surrender(valtype, value *);
+    void spill(valtype, value *);
+
+    template <typename RegType> void claim(RegType, metadata);
+    template <typename RegType> void surrender(RegType, value *);
+    template <typename RegType> void purge(RegType);
+    template <typename RegType> void spill(RegType reg, value *v);
+    template <typename RegType>
+    bool adjust_spill(RegType reg, std::byte *&code);
+
     // caller saved registers
     temp_int_manager intregs;
     temp_float_manager floatregs;
@@ -178,16 +187,22 @@ class Arm64 {
     std::span<value> locals;
 
     struct plane {
-        bool is_float;
         std::byte *dumpaddr;
         uint32_t local_idx;
         uint32_t stack_offset;
+        uint32_t reg;
+        bool is_float;
+        bool active = false;
     };
-    plane inflight_locals[8];
+
+    constexpr static uint32_t max_inflight = 8;
+    std::array<plane, max_inflight> inflight_locals;
     uint32_t inflight_count = 0;
 
-    void take_flight(std::byte *&code, uint32_t local_idx, bool is_float);
-    void force_landing(plane local);
+    template <typename RegType>
+    void take_flight(std::byte *&code, uint32_t local_idx, RegType reg);
+    template <typename RegType> void shoot_down(RegType reg);
+    void force_landing(plane &local);
     void force_landing();
 
     template <typename RegType> auto &locals_of() {
