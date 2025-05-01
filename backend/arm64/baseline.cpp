@@ -179,12 +179,12 @@ void lsl(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
 }
 
 void lsl(std::byte *&code, bool sf, uint32_t shift_imm, ireg rn, ireg rd) {
+    auto width = sf ? 64 : 32;
+    shift_imm %= width;
     if (shift_imm == 0) {
         lsl(code, sf, ireg::xzr, rn, rd);
         return;
     }
-    auto width = sf ? 64 : 32;
-    shift_imm %= width;
     auto imms = width - shift_imm - 1;
     auto immr = imms + 1;
     ubfm(code, sf, LogicalImm(sf, immr, imms), rn, rd);
