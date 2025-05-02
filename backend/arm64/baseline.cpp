@@ -1902,6 +1902,8 @@ void Arm64::unreachable(SHARED_PARAMS) {
 void Arm64::nop(SHARED_PARAMS) { put(code, noop); }
 void Arm64::block(SHARED_PARAMS, WasmSignature &) {}
 void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
+    force_landing();
+
     stackify(code, sig.params);
 
     for ([[maybe_unused]] auto param : sig.params) {
@@ -1909,6 +1911,8 @@ void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
     }
 }
 std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
+    force_landing();
+
     auto [condition] = allocate_registers<std::tuple<iwant::flags>>(code);
 
     // todo: take another look at duping values
@@ -1928,6 +1932,8 @@ std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
     return imm;
 }
 void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
+    force_landing();
+
     // todo: this is a tiny bit efficient, because at this point we have the
     // additional knowledge that there is no need to move the results
     // however it should be possible to optimize that anyways in move_results
@@ -1950,6 +1956,8 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
             }
         }
     } else {
+        force_landing();
+
         intregs.reset_temporaries();
         floatregs.reset_temporaries();
 
@@ -1985,6 +1993,8 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
 }
 void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                uint32_t depth) {
+    force_landing();
+
     // for now, only support non-special case distances (+/- 128MB)
 
     // todo: check if these are necessary, or can they go back in move_results
@@ -2009,6 +2019,8 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 }
 void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                   uint32_t depth) {
+    force_landing();
+
     // for now, only support non-special case distances (+/- 1MB)
 
     auto &flow = control_stack[control_stack.size() - depth - 1];
@@ -2046,6 +2058,8 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 }
 void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                      std::span<uint32_t> targets) {
+    force_landing();
+
     auto [input] = allocate_registers<std::tuple<iwant::ireg>>(code);
 
     clobber_flags(code);
@@ -2130,6 +2144,8 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
 }
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
+    force_landing();
+
     allocate_registers<std::tuple<>>(code);
 
     clobber_flags(code);
@@ -2174,6 +2190,8 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
 }
 void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
                           WasmSignature &type) {
+    force_landing();
+
     auto [v] = allocate_registers<std::tuple<iwant::ireg>>(code);
     auto idx = v.as<ireg>();
     temporary<ireg> table_ptr(this), current(this), elements(this),
@@ -3798,6 +3816,7 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
                          std::array<valtype, NR> results,
                          std::optional<uint64_t> temp1,
                          std::optional<uint64_t> temp2) {
+    force_landing();
     allocate_registers<std::tuple<>>(code);
 
     clobber_flags(code);
