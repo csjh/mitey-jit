@@ -32,7 +32,7 @@ template <uint8_t N> class reg_lru {
         tail = N - 1;
     }
 
-    void claim(uint8_t n) {
+    void use(uint8_t n) {
         assert(n < N);
 
         if (n == tail) {

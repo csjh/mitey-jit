@@ -58,7 +58,7 @@ class Arm64 {
         size_t count = 0;
 
       public:
-        void claim(RegType, metadata);
+        void use(RegType, metadata);
         void surrender(value *);
         void purge(RegType);
         bool adjust_spill(RegType reg, std::byte *&code);
@@ -98,7 +98,7 @@ class Arm64 {
         void untemporary(RegType reg);
         void reset_temporaries();
 
-        void claim(RegType, metadata);
+        void use(RegType, metadata);
         void surrender(RegType, value *);
         void purge(RegType);
         void clobber_all();
@@ -154,11 +154,11 @@ class Arm64 {
     };
 
   private:
-    void claim(value, valtype, metadata);
+    void use(value, valtype, metadata);
     void surrender(valtype, value *);
     void spill(valtype, value *);
 
-    template <typename RegType> void claim(RegType, metadata);
+    template <typename RegType> void use(RegType, metadata);
     template <typename RegType> void surrender(RegType, value *);
     template <typename RegType> void purge(RegType);
     template <typename RegType> void spill(RegType reg, value *v);

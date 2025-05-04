@@ -1174,7 +1174,7 @@ void Arm64::reg_info<RegType, N>::spill(RegType reg, value *v) {
 }
 
 template <typename RegType, size_t N>
-void Arm64::reg_info<RegType, N>::claim(RegType reg, metadata md) {
+void Arm64::reg_info<RegType, N>::use(RegType reg, metadata md) {
     spill(reg, count % N);
     data[count % N] = md;
     count++;
@@ -1208,11 +1208,11 @@ bool Arm64::reg_info<RegType, N>::adjust_spill(RegType reg, std::byte *&code) {
 }
 
 template <auto registers>
-void Arm64::reg_manager<registers>::claim(RegType reg, metadata md) {
+void Arm64::reg_manager<registers>::use(RegType reg, metadata md) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    get_manager_of(reg).claim(reg, md);
+    get_manager_of(reg).use(reg, md);
     if constexpr (allocate)
-        regs.claim(to_index(reg));
+        regs.use(to_index(reg));
 }
 
 template <auto registers>
@@ -1242,19 +1242,19 @@ void Arm64::reg_manager<registers>::spill(RegType reg, value *v) {
     get_manager_of(reg).spill(reg, v);
 }
 
-void Arm64::claim(value v, valtype ty, metadata md) {
+void Arm64::use(value v, valtype ty, metadata md) {
     if (is_float(ty)) {
-        claim(freg(v.as<freg>()), md);
+        use(freg(v.as<freg>()), md);
     } else {
-        claim(ireg(v.as<ireg>()), md);
+        use(ireg(v.as<ireg>()), md);
     }
 }
 
-template <typename RegType> void Arm64::claim(RegType reg, metadata md) {
+template <typename RegType> void Arm64::use(RegType reg, metadata md) {
     if (is_volatile(reg)) {
-        regs_of<RegType>().claim(reg, md);
+        regs_of<RegType>().use(reg, md);
     } else {
-        locals_of<RegType>().claim(reg, md);
+        locals_of<RegType>().use(reg, md);
     }
 }
 
@@ -1659,7 +1659,7 @@ Arm64::allocate_registers(std::byte *&code) {
 template <typename... Args>
 void Arm64::finalize(std::byte *&code, Args... results) {
     auto finalize = [&](auto result) {
-        claim(result, {code, values, stack_size});
+        use(result, {code, values, stack_size});
 
         inst instruction;
         std::memcpy(&instruction, code - sizeof(inst), sizeof(inst));
