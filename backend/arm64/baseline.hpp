@@ -3,6 +3,7 @@
 #include "../../module.hpp"
 #include "./enums.hpp"
 #include "./reg_lru.hpp"
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -12,7 +13,7 @@ namespace arm64 {
 
 class value {
   public:
-    enum class location { reg, stack, imm, flags };
+    enum class location { reg, stack, imm, flags, multireg };
 
   private:
     location loc;
@@ -28,6 +29,12 @@ class value {
     }
     static value reg(freg reg) {
         return value(location::reg, static_cast<uint32_t>(reg));
+    }
+    static value multireg(ireg reg) {
+        return value(location::multireg, static_cast<uint32_t>(reg));
+    }
+    static value multireg(freg reg) {
+        return value(location::multireg, static_cast<uint32_t>(reg));
     }
     static value stack(uint32_t offset) {
         return value(location::stack, offset);
@@ -46,11 +53,11 @@ class value {
     [[maybe_unused]] std::byte *&code, [[maybe_unused]] WasmStack &stack
 
 class Arm64 {
-        struct metadata {
-            std::byte *spilladdr = nullptr;
-            value *value_offset = nullptr;
-            uint32_t stack_offset = 0;
-        };
+    struct metadata {
+        std::byte *spilladdr = nullptr;
+        value *value_offset = nullptr;
+        uint32_t stack_offset = 0;
+    };
 
   public:
     template <typename RegType, size_t N> class reg_info {
@@ -59,7 +66,7 @@ class Arm64 {
 
       public:
         void use(RegType, metadata);
-        void surrender(value *);
+        bool surrender(value *);
         void purge(RegType);
         bool adjust_spill(RegType reg, std::byte *&code);
         void spill(RegType, size_t i);
@@ -86,6 +93,7 @@ class Arm64 {
         }
 
         reg_lru<allocate ? N : 0> regs;
+        std::bitset<N> keepalive = 0;
 
         void spill(RegType, size_t);
 
@@ -97,6 +105,8 @@ class Arm64 {
         RegType temporary();
         void untemporary(RegType reg);
         void reset_temporaries();
+        void keep_alive(RegType reg);
+        void allow_death(RegType reg);
 
         void use(RegType, metadata);
         void surrender(RegType, value *);
