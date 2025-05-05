@@ -1382,6 +1382,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
             reg = floatregs.temporary();
         else
             reg = intregs.temporary();
+        shoot_down(reg);
         masm::ldr(code, intregs, true, offset, stackreg, reg);
         return value::reg(reg);
     }
@@ -1399,6 +1400,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
                 return value::imm(std::bit_cast<uint32_t>(*mask));
 
         auto reg = intregs.temporary();
+        shoot_down(reg);
         masm::mov(code, imm, reg);
         return value::reg(reg);
     }
@@ -1412,6 +1414,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
             return *v;
         } else {
             auto reg = intregs.temporary();
+            shoot_down(reg);
             raw::cset(code, false, v->as<cond>(), reg);
             return value::reg(reg);
         }
@@ -1586,7 +1589,8 @@ void Arm64::take_flight(std::byte *&code, uint32_t local_idx, RegType reg) {
     }
 
     if (i == inflight_count) {
-    inflight_count++;
+        inflight_count++;
+        force_landing(inflight_locals[i % max_inflight]);
     } else if (inflight_locals[i % max_inflight].local_idx != local_idx) {
         assert(inflight_locals[i % max_inflight].active);
         force_landing(inflight_locals[i % max_inflight]);
@@ -1670,9 +1674,13 @@ Arm64::allocate_registers(std::byte *&code) {
     }(std::make_index_sequence<nparams>{});
 
     if constexpr (std::is_same_v<Result, iwant::ireg>) {
-        ret.back() = value::reg(intregs.result());
+        auto reg = intregs.result();
+        shoot_down(reg);
+        ret.back() = value::reg(reg);
     } else if constexpr (std::is_same_v<Result, iwant::freg>) {
-        ret.back() = value::reg(floatregs.result());
+        auto reg = floatregs.result();
+        shoot_down(reg);
+        ret.back() = value::reg(reg);
     } else {
         static_assert(std::is_same_v<Result, iwant::none>);
     }
@@ -2646,6 +2654,8 @@ void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
         if (!is_volatile(addr) ||
             base.template is<value::location::multireg>()) {
             addr = intregs.temporary();
+            shoot_down(addr);
+        }
         masm::add(code, intregs, true, offset, base.template as<ireg>(), addr);
     }
     raw::load(code, mtype, etype, indexttype::lsl, false, addr, memreg,
