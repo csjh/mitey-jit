@@ -8,6 +8,11 @@
 #include <tuple>
 #include <variant>
 
+// #undef assert
+// #define assert(cond) \
+//     if (!(cond)) \
+//         *(volatile int *)0;
+
 void sigill_handler(int, siginfo_t *si, void *) {
     uint32_t reason;
     memcpy(&reason, si->si_addr, sizeof(reason));
@@ -2363,33 +2368,39 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
     if (local.is<value::location::stack>()) {
         if (is_float(ty)) {
-            auto [reg] = allocate_registers<std::tuple<>, iwant::freg>(code);
-            masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg,
-                      reg.as<freg>());
-            // todo: this noop move is necessary because efficient local.set
-            // handling requires the last instruction to move into the
-            // result and the masm above could have a sub afterwards
-            raw::mov(code, ftype::double_, reg.as<freg>(), reg.as<freg>());
-            finalize(code, reg.as<freg>());
+            auto [out] = allocate_registers<std::tuple<>, iwant::freg>(code);
+            auto reg = out.as<freg>();
+
+            masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg, reg);
+
+            floatregs.keep_alive(reg);
+            use(reg, {code, values, stack_size});
+            pad_spill(code, stack_size);
+            if (is_volatile(reg)) {
+                shoot_down(reg);
+                locals[local_idx] = value::multireg(reg);
+            }
+            push(locals[local_idx]);
         } else {
-            auto [reg] = allocate_registers<std::tuple<>, iwant::ireg>(code);
-            masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg,
-                      reg.as<ireg>());
-            finalize(code, reg.as<ireg>());
+            auto [out] = allocate_registers<std::tuple<>, iwant::ireg>(code);
+            auto reg = out.as<ireg>();
+
+            masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg, reg);
+
+            intregs.keep_alive(reg);
+            use(reg, {code, values, stack_size});
+            pad_spill(code, stack_size);
+            if (is_volatile(reg)) {
+                shoot_down(reg);
+                locals[local_idx] = value::multireg(reg);
+            }
+            push(locals[local_idx]);
         }
     } else {
         if (is_float(ty)) {
-            auto reg = local.as<freg>();
-            if (is_volatile(reg)) {
-                raw::mov(code, ftype::double_, reg, reg);
-            }
-            claim(reg, {code, values, stack_size});
+            use(local.as<freg>(), {code, values, stack_size});
         } else {
-            auto reg = local.as<ireg>();
-            if (is_volatile(reg)) {
-                raw::mov(code, true, reg, reg);
-            }
-            claim(reg, {code, values, stack_size});
+            use(local.as<ireg>(), {code, values, stack_size});
         }
 
         pad_spill(code, stack_size);
@@ -2404,110 +2415,168 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     // i don't like that this specializes allocate_registers
     // but tbf it's the only place i need to do it
     auto ty = fn.locals[local_idx];
+    auto local = locals[local_idx];
 
     auto v = *--values;
     stack_size -= sizeof(runtime::WasmValue);
 
     if (is_float(ty)) {
+        auto in_caller_saved = local.is<value::location::multireg>() &&
+                               !is_volatile(local.as<freg>());
+
         intregs.reset_temporaries();
         floatregs.reset_temporaries();
 
         freg locreg;
-        if (locals[local_idx].is<value::location::reg>()) {
-            locreg = locals[local_idx].as<freg>();
+        if (in_caller_saved) {
+            locreg = local.as<freg>();
+        } else if (v.is<value::location::reg>()) {
+            locreg = v.as<freg>();
+            floatregs.keep_alive(locreg);
+        } else if (v.is<value::location::multireg>() &&
+                   is_volatile(v.as<freg>())) {
+            locreg = v.as<freg>();
         } else {
             locreg = floatregs.result();
+            shoot_down(locreg);
+            floatregs.keep_alive(locreg);
         }
 
-        if (v.is<value::location::stack>()) {
+        switch (v.where()) {
+        case value::location::stack:
             masm::ldr(code, intregs, true, v.as<uint32_t>(), stackreg, locreg);
-        } else if (v.is<value::location::reg>()) {
+            purge(locreg);
+            break;
+        case value::location::reg: {
             auto reg = v.as<freg>();
-            if (is_volatile(reg) && adjust_spill(reg, code)) {
-                code -= sizeof(inst);
+            bool is_prior = adjust_spill(reg, code);
+            if (in_caller_saved) {
+                if (is_volatile(reg) && is_prior) {
+                    // overwrite instruction
+                    code -= sizeof(inst);
 
-                inst instruction;
-                std::memcpy(&instruction, code, sizeof(inst));
-                assert((instruction & 0b11111u) == (unsigned)reg);
-                instruction &= ~0b11111u;
-                instruction |= (unsigned)locreg;
-                put(code, instruction);
-            } else {
-                if (!is_volatile(reg)) {
-                    adjust_spill(reg, code);
+                    inst instruction;
+                    std::memcpy(&instruction, code, sizeof(inst));
+                    assert((instruction & 0b11111u) == (unsigned)reg);
+                    instruction &= ~0b11111u;
+                    instruction |= (unsigned)locreg;
+                    put(code, instruction);
+                } else {
+                    raw::mov(code, ftype::double_, reg, locreg);
                 }
-                raw::mov(code, ftype::double_, reg, locreg);
+                purge(locreg);
+            } else {
+                assert(locreg == reg);
             }
             surrender(reg, values);
-        } else {
+            break;
+        }
+        case value::location::multireg: {
+            auto reg = v.as<freg>();
+            adjust_spill(reg, code);
+            // can't reuse non-volatile multiregs
+            if (in_caller_saved || !is_volatile(reg)) {
+                raw::mov(code, ftype::double_, reg, locreg);
+                surrender(reg, values);
+                purge(locreg);
+            } else {
+                assert(locreg == reg);
+                surrender(reg, values);
+            }
+            break;
+        }
+        default:
             assert(false);
         }
 
-        purge(locreg);
+        use(locreg, {code, values, stack_size});
+        pad_spill(code, stack_size);
         if (is_volatile(locreg)) {
             take_flight(code, local_idx, locreg);
-                raw::mov(code, ftype::double_, locreg, locreg);
-            }
-        claim(locreg, {code, values, stack_size});
-        pad_spill(code, stack_size);
+        }
         push(locals[local_idx]);
     } else {
+        auto in_caller_saved = local.is<value::location::multireg>() &&
+                               !is_volatile(local.as<ireg>());
+
         intregs.reset_temporaries();
 
         ireg locreg;
-        if (locals[local_idx].is<value::location::reg>()) {
-            locreg = locals[local_idx].as<ireg>();
+        if (in_caller_saved) {
+            locreg = local.as<ireg>();
+        } else if (v.is<value::location::reg>()) {
+            locreg = v.as<ireg>();
+            intregs.keep_alive(locreg);
+        } else if (v.is<value::location::multireg>() &&
+                   is_volatile(v.as<ireg>())) {
+            locreg = v.as<ireg>();
         } else {
             locreg = intregs.result();
+            shoot_down(locreg);
+            intregs.keep_alive(locreg);
         }
-        // certain value locations are better than a register
-        value pushval = v;
 
-        if (v.is<value::location::imm>()) {
+        switch (v.where()) {
+        case value::location::imm:
             masm::mov(code, v.as<uint32_t>(), locreg);
-        } else if (v.is<value::location::flags>()) {
+            purge(locreg);
+            break;
+        case value::location::flags:
             raw::cset(code, true, v.as<cond>(), locreg);
-        } else if (v.is<value::location::stack>()) {
+            flag = flags();
+            purge(locreg);
+            break;
+        case value::location::stack:
             masm::ldr(code, intregs, true, v.as<uint32_t>(), stackreg, locreg);
-        } else if (v.is<value::location::reg>()) {
+            purge(locreg);
+            break;
+        case value::location::reg: {
             auto reg = v.as<ireg>();
-            if (is_volatile(reg) && adjust_spill(reg, code)) {
-                // overwrite instruction
-                code -= sizeof(inst);
+            bool is_prior = adjust_spill(reg, code);
+            if (in_caller_saved) {
+                if (is_volatile(reg) && is_prior) {
+                    // overwrite instruction
+                    code -= sizeof(inst);
 
-                inst instruction;
-                std::memcpy(&instruction, code, sizeof(inst));
-                assert((instruction & 0b11111u) == (unsigned)reg);
-                instruction &= ~0b11111u;
-                instruction |= (unsigned)locreg;
-                put(code, instruction);
-            } else {
-                if (!is_volatile(reg)) {
-                    adjust_spill(reg, code);
+                    inst instruction;
+                    std::memcpy(&instruction, code, sizeof(inst));
+                    assert((instruction & 0b11111u) == (unsigned)reg);
+                    instruction &= ~0b11111u;
+                    instruction |= (unsigned)locreg;
+                    put(code, instruction);
+                } else {
+                    raw::mov(code, true, reg, locreg);
                 }
-                raw::mov(code, true, reg, locreg);
+                purge(locreg);
+            } else {
+                assert(locreg == reg);
             }
             surrender(reg, values);
-        } else {
-            assert(false);
+            break;
+        }
+        case value::location::multireg: {
+            auto reg = v.as<ireg>();
+            adjust_spill(reg, code);
+            // can't reuse non-volatile multiregs
+            if (in_caller_saved || !is_volatile(reg)) {
+                raw::mov(code, true, reg, locreg);
+                surrender(reg, values);
+                purge(locreg);
+            } else {
+                assert(locreg == reg);
+                surrender(reg, values);
+            }
+            break;
+        }
         }
 
-        purge(locreg);
+        use(locreg, {code, values, stack_size});
+        pad_spill(code, stack_size);
         if (is_volatile(locreg)) {
             take_flight(code, local_idx, locreg);
-            }
-
-        if (v.is<value::location::stack>() || v.is<value::location::reg>()) {
-            raw::mov(code, true, locreg, locreg);
-            claim(locreg, {code, values, stack_size});
-            pad_spill(code, stack_size);
-            pushval = locals[local_idx];
         }
-
-        push(pushval);
+        push(locals[local_idx]);
     }
-
-    force_landing();
 }
 void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
     auto [idx, res] =
