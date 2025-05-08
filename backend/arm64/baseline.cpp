@@ -546,6 +546,10 @@ void mov(std::byte *&code, ftype ft, freg src, freg dst) {
                   (static_cast<uint32_t>(dst) << 0));
 }
 
+void mov(std::byte *&code, bool sf, freg src, freg dst) {
+    return mov(code, sf ? ftype::double_ : ftype::single, src, dst);
+}
+
 void mov(std::byte *&code, bool sf, bool notneg, bool keep, uint8_t hw,
          uint16_t imm, ireg rd) {
     assert(hw < 4);
@@ -1430,22 +1434,22 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
 }
 
 template <typename To>
-Arm64::temporary<To> Arm64::adapt_value_into(std::byte *&code, value *v,
-                                             bool soft) {
-    temporary<To> reg(this);
-
+void Arm64::force_value_into(std::byte *&code, value *v, To reg, bool soft) {
     switch (v->where()) {
     case value::location::reg:
     case value::location::multireg: {
         if (!soft) {
             surrender(v->as<To>(), v);
         }
-        return v->as<To>();
+        if (v->template as<To>() != reg) {
+            raw::mov(code, true, v->as<To>(), reg);
+        }
+        return;
     }
     case value::location::stack: {
         auto offset = v->as<uint32_t>();
         masm::ldr(code, intregs, true, offset, stackreg, reg);
-        return reg;
+        return;
     }
     case value::location::imm: {
         if constexpr (std::is_same_v<To, freg>) {
@@ -1453,7 +1457,7 @@ Arm64::temporary<To> Arm64::adapt_value_into(std::byte *&code, value *v,
         } else {
             auto imm = v->as<uint32_t>();
             masm::mov(code, imm, reg);
-            return reg;
+            return;
         }
     }
     case value::location::flags: {
@@ -1463,12 +1467,20 @@ Arm64::temporary<To> Arm64::adapt_value_into(std::byte *&code, value *v,
             if (!soft)
                 flag = flags();
             raw::cset(code, false, v->as<cond>(), reg);
-            return reg;
+            return;
         }
     }
     }
 
     assert(false);
+}
+
+template <typename To>
+Arm64::temporary<To> Arm64::adapt_value_into(std::byte *&code, value *v,
+                                             bool soft) {
+    temporary<To> reg(this);
+    force_value_into(code, v, reg.get(), soft);
+    return reg;
 }
 
 void Arm64::stackify(std::byte *&code, valtype_vector &moved_values) {

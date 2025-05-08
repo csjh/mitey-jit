@@ -266,6 +266,10 @@ class Arm64 {
     template <typename To> value adapt_value(std::byte *&code, value *v);
 
     template <typename To>
+    void force_value_into(std::byte *&code, value *v, To reg,
+                          bool soft = false);
+
+    template <typename To>
     temporary<To> adapt_value_into(std::byte *&code, value *v,
                                    bool soft = false);
 
