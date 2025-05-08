@@ -2500,11 +2500,11 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             assert(false);
         }
 
-        use(locreg, {code, values, stack_size});
-        pad_spill(code, stack_size);
         if (is_volatile(locreg)) {
             take_flight(code, local_idx, locreg);
         }
+        use(locreg, {code, values, stack_size});
+        pad_spill(code, stack_size);
         push(locals[local_idx]);
     } else {
         auto in_caller_saved = local.is<value::location::multireg>() &&
@@ -2581,12 +2581,16 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
         }
         }
 
-        use(locreg, {code, values, stack_size});
-        pad_spill(code, stack_size);
         if (is_volatile(locreg)) {
             take_flight(code, local_idx, locreg);
         }
+        if (v.is<value::location::flags>()) {
+            push(v);
+        } else {
+            use(locreg, {code, values, stack_size});
+            pad_spill(code, stack_size);
         push(locals[local_idx]);
+        }
     }
 }
 void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
