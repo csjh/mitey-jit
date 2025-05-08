@@ -2014,14 +2014,13 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
             stackify(code, flow.sig.results);
         }
 
-        if (std::holds_alternative<If>(flow.construct)) {
-            amend_br_if(std::get<If>(flow.construct).else_jump, code);
-        }
-
         for ([[maybe_unused]] auto result : flow.sig.results) {
             push(value::stack(stack_size));
         }
 
+        if (std::holds_alternative<If>(flow.construct)) {
+            amend_br_if(std::get<If>(flow.construct).else_jump, code);
+        }
         for (auto target : flow.pending_br) {
             amend_br(target, code);
         }
