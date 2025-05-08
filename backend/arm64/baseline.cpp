@@ -1761,7 +1761,8 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
         auto offset = i * sizeof(runtime::WasmValue);
         auto is_param = i < fn.type.params.size();
 
-        if (!is_float(local) && ireg_alloc != icallee_saved.end()) {
+        if (!is_param && !is_float(local) &&
+            ireg_alloc != icallee_saved.end()) {
             auto reg = *ireg_alloc++;
             // save current value
             if (prev && prev->ty == local && offset < 512) {
@@ -1806,7 +1807,8 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             }
 
             locals[i] = value::multireg(reg);
-        } else if (is_float(local) && freg_alloc != fcallee_saved.end()) {
+        } else if (!is_param && is_float(local) &&
+                   freg_alloc != fcallee_saved.end()) {
             auto reg = *freg_alloc++;
             // save current value
             if (prev && prev->ty == local && offset < 512) {
