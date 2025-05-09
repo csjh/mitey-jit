@@ -428,7 +428,7 @@ using f64 = double;
         stack -= 2;                                                            \
         auto dst = memory + stack[0].u32 + tmp1;                               \
         /* make sure all bytes are in bounds before writing (on -O0) */        \
-        for (size_t i = 0; i < sizeof(memtype); i++)                             \
+        for (size_t i = 0; i < sizeof(memtype); i++)                           \
             dst[i] = dst[i];                                                   \
         memtype value = stack[1].stacktype;                                    \
         std::memcpy(dst, &value, sizeof(memtype));                             \
