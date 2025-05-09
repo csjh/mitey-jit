@@ -118,6 +118,7 @@ struct ControlFlow {
     std::vector<PendingBrTable> pending_br_tables;
     WasmSignature &sig;
     bool polymorphized;
+    bool unreachable;
     int32_t stack_offset;
     std::variant<Function, Block, Loop, If, IfElse> construct;
 };

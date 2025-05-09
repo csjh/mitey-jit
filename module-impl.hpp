@@ -13,7 +13,7 @@ extern std::vector<std::string> names;
 #endif
 
 #define _(name, ...)                                                           \
-    if (!stack.polymorphism() && !control_stack.back().polymorphized)          \
+    if (!stack.polymorphism() && !control_stack.back().unreachable)            \
     jit.name(code, stack __VA_OPT__(, ) __VA_ARGS__)
 
 namespace mitey {
@@ -951,6 +951,7 @@ HANDLER(block) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(ControlFlow(
         signature.results, {}, {}, {}, signature, stack.polymorphism(),
+        stack.polymorphism() || control_stack.back().unreachable,
         stack.sp() - signature.params.bytesize(), Block()));
     stack.unpolymorphize();
 
@@ -963,6 +964,7 @@ HANDLER(loop) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(ControlFlow(
         signature.params, {}, {}, {}, signature, stack.polymorphism(),
+        stack.polymorphism() || control_stack.back().unreachable,
         stack.sp() - signature.params.bytesize(), Loop(nullptr)));
     stack.unpolymorphize();
 
@@ -979,9 +981,10 @@ HANDLER(if_) {
     stack.enter_flow(signature.params);
     control_stack.emplace_back(ControlFlow(
         signature.results, {}, {}, {}, signature, stack.polymorphism(),
+        stack.polymorphism() || control_stack.back().unreachable,
         stack.sp() - signature.params.bytesize(), If(nullptr)));
 
-    if (!stack.polymorphism()) {
+    if (!control_stack.back().unreachable) {
         auto if_ptr = jit.if_(code, stack, signature);
         control_stack.back().construct = If(if_ptr);
     }
@@ -991,11 +994,12 @@ HANDLER(if_) {
 }
 HANDLER(else_) {
     auto &[expected, pending_br, pending_br_if, pending_br_tables, sig,
-           is_polymorphic, stack_offset, construct] = control_stack.back();
+           is_polymorphic, is_unreachable, stack_offset, construct] =
+        control_stack.back();
     ensure(std::holds_alternative<If>(construct), "else must close an if");
     ensure(stack == sig.results, "type mismatch");
 
-    if (!is_polymorphic) {
+    if (!is_unreachable) {
         jit.else_(code, stack, control_stack);
     }
 
@@ -1011,7 +1015,7 @@ HANDLER(else_) {
 }
 HANDLER(end) {
     auto &[_, pending_br, pending_br_if, pending_br_tables, sig, polymorphism,
-           sp, construct] = control_stack.back();
+           unreachable, sp, construct] = control_stack.back();
 
     ensure(stack == sig.results, "type mismatch stack vs. results");
 
@@ -1019,7 +1023,7 @@ HANDLER(end) {
         ensure(sig.params == sig.results, "type mismatch params vs. results");
     }
 
-    if (!polymorphism) {
+    if (!unreachable) {
         // special cased (not in _(end)) because
         // stack can be polymorphic here but we always want it to run
         jit.end(code, stack, control_stack.back());
@@ -1632,8 +1636,8 @@ std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
 
     auto jit = Target();
     auto control_stack = std::vector<ControlFlow>(
-        {ControlFlow(fn.type.results, {}, {}, {}, fn.type, false, stack.sp(),
-                     Function(fn))});
+        {ControlFlow(fn.type.results, {}, {}, {}, fn.type, false, false,
+                     stack.sp(), Function(fn))});
 
     _(start_function, fn);
 
