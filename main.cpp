@@ -82,8 +82,13 @@ int main(int argc, const char **argv) {
     auto fd = open(path, O_RDONLY | O_DIRECTORY, 0666);
     register_preopen(fd, "/");
 
+    auto &exports = instance->get_exports();
+    if (exports.find("_start") == exports.end()) {
+        return 0;
+    }
+
     auto func = externalize<void()>(
-        std::get<runtime::FunctionInfo>(instance->get_exports().at("_start")));
+        std::get<runtime::FunctionInfo>(exports.at("_start")));
     try {
         func();
     } catch (const std::exception &e) {
