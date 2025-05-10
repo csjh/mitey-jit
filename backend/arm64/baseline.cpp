@@ -399,7 +399,7 @@ void udiv(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
 }
 
 void b(std::byte *&code, int32_t _imm26) {
-    assert(std::abs(_imm26) < (1 << 26) * sizeof(inst));
+    assert(std::abs(_imm26) < (1 << 26) * (int)sizeof(inst));
 
     uint32_t imm26 = _imm26 / sizeof(inst);
     imm26 &= 0x3ffffff;
@@ -409,7 +409,7 @@ void b(std::byte *&code, int32_t _imm26) {
 }
 
 void bcond(std::byte *&code, int32_t _imm19, cond c) {
-    assert(std::abs(_imm19) < (1 << 19) * sizeof(inst));
+    assert(std::abs(_imm19) < (1 << 19) * (int)sizeof(inst));
 
     uint32_t imm19 = _imm19 /= sizeof(inst);
     imm19 &= 0x7ffff;
@@ -430,7 +430,7 @@ void blr(std::byte *&code, ireg rn) {
 }
 
 void cbnz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
-    assert(std::abs(_imm19) < (1 << 19) * sizeof(inst));
+    assert(std::abs(_imm19) < (1 << 19) * (int)sizeof(inst));
 
     uint32_t imm19 = _imm19 /= sizeof(inst);
     imm19 &= 0x7ffff;
@@ -442,7 +442,7 @@ void cbnz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
 }
 
 void cbz(std::byte *&code, bool sf, int32_t _imm19, ireg rt) {
-    assert(std::abs(_imm19) < (1 << 19) * sizeof(inst));
+    assert(std::abs(_imm19) < (1 << 19) * (int)sizeof(inst));
 
     uint32_t imm19 = _imm19 /= sizeof(inst);
     imm19 &= 0x7ffff;
@@ -564,7 +564,7 @@ void mov(std::byte *&code, bool sf, bool notneg, bool keep, uint8_t hw,
 }
 
 void adr(std::byte *&code, int32_t imm, ireg rd) {
-    assert(std::abs(imm) < (1 << 21) * sizeof(inst));
+    assert(std::abs(imm) < (1 << 21) * (int)sizeof(inst));
 
     auto immlo = imm & 0b11;
     auto immhi = imm >> 2;
@@ -1008,7 +1008,7 @@ void sub(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
     }
 }
 
-void ldr(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
+void ldr(std::byte *&code, [[maybe_unused]] Arm64 *that, bool sf,
          uint32_t offset, ireg rn, ireg rt) {
     if (offset < 1 << 12) {
         raw::ldr(code, sf, offset, rn, rt);
@@ -1214,7 +1214,7 @@ bool Arm64::reg_info<RegType, N>::surrender(value *v) {
 
 template <typename RegType, size_t N>
 void Arm64::reg_info<RegType, N>::purge(RegType reg) {
-    for (auto i = 0; i < std::min(count, N); i++) {
+    for (size_t i = 0; i < std::min(count, N); i++) {
         spill(reg, i);
         data[i].spilladdr = nullptr;
     }
@@ -1756,7 +1756,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
     };
     std::optional<save> prev;
 
-    for (int i = 0; i < fn.locals.size(); i++) {
+    for (size_t i = 0; i < fn.locals.size(); i++) {
         auto local = fn.locals[i];
         auto offset = i * sizeof(runtime::WasmValue);
         auto is_param = i < fn.type.params.size();
