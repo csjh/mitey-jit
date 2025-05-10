@@ -1205,7 +1205,6 @@ template <typename RegType, size_t N>
 void Arm64::reg_info<RegType, N>::purge(RegType reg) {
     for (size_t i = 0; i < std::min(count, N); i++) {
         spill(reg, i);
-        data[i].spilladdr = nullptr;
     }
     count = 0;
 }
@@ -1241,7 +1240,7 @@ void Arm64::reg_manager<registers>::purge(std::span<value> local_locations,
                                           RegType reg) {
     assert(std::ranges::find(registers, reg) != registers.end());
     get_manager_of(reg).purge(reg);
-    if (allocate)
+    if (allocate && locals.is_active(reg))
         locals.deactivate(local_locations, reg);
 }
 
@@ -1606,15 +1605,15 @@ void Arm64::reg_manager<registers>::local_manager::activate(
         }
     }
     auto &local = inflight_locals[to_index(reg)];
-    if (local.local_idx != local_idx) {
+    if (is_active(reg) && local.local_idx != local_idx) {
         deactivate(local_locations, reg);
     }
 
     if (set) {
-        local = {code, local_idx, stack_offset, reg, true};
+        local = {code, local_idx, true};
         masm::pad_spill(code, stack_offset);
     } else {
-        local = {nullptr, local_idx, stack_offset, reg, true};
+        local = {nullptr, local_idx, true};
     }
 
     local_locations[local_idx] = value::multireg(reg);
@@ -1624,38 +1623,43 @@ template <auto registers>
 void Arm64::reg_manager<registers>::local_manager::deactivate_all(
     std::span<value> local_locations) {
     for (auto reg : registers) {
-        deactivate(local_locations, reg);
+        if (is_active(reg)) [[unlikely]]
+            deactivate(local_locations, reg);
     }
 }
 
 template <auto registers>
 void Arm64::reg_manager<registers>::local_manager::deactivate(
     std::span<value> local_locations, RegType reg) {
+    assert(is_active(reg));
 
     auto &local = inflight_locals[to_index(reg)];
-    if (!local.active)
-        return;
-
     commit(reg);
-    local_locations[local.local_idx] = value::stack(local.stack_offset);
+
+    auto stack_offset = local.local_idx * sizeof(runtime::WasmValue);
+    local_locations[local.local_idx] = value::stack(stack_offset);
 
     local.active = false;
 }
 
 template <auto registers>
 void Arm64::reg_manager<registers>::local_manager::commit(RegType reg) {
+    assert(is_active(reg));
+
     auto local = inflight_locals[to_index(reg)];
-    if (!local.active || !local.dumpaddr)
+    if (!local.dumpaddr)
         return;
 
-    masm::str_no_temp(local.dumpaddr, true, local.stack_offset, stackreg, reg);
+    auto stack_offset = local.local_idx * sizeof(runtime::WasmValue);
+    masm::str_no_temp(local.dumpaddr, true, stack_offset, stackreg, reg);
     local.dumpaddr = nullptr;
 }
 
 template <auto registers>
 void Arm64::reg_manager<registers>::local_manager::commit_all() {
     for (auto reg : registers) {
-        commit(reg);
+        if (is_active(reg)) [[unlikely]]
+            commit(reg);
     }
 }
 

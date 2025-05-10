@@ -90,8 +90,6 @@ class Arm64 {
             struct plane {
                 std::byte *dumpaddr;
                 uint32_t local_idx;
-                uint32_t stack_offset;
-                RegType reg;
                 bool active = false;
             };
 
