@@ -1085,6 +1085,16 @@ std::array<std::byte *, N> trap(std::byte *&code,
 
 void trap(std::byte *&code, runtime::TrapKind kind) { trap<1>(code, {kind}); }
 
+void pad_spill(std::byte *&code, uint32_t stack_size) {
+    if (stack_size < 1 << 12) {
+        put(code, noop);
+    } else {
+        put(code, noop);
+        put(code, noop);
+        put(code, noop);
+    }
+}
+
 }; // namespace masm
 
 template <size_t Bits, size_t Offset>
@@ -1118,57 +1128,36 @@ bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
 }; // namespace
 
 template <auto registers>
-uint8_t Arm64::reg_manager<registers>::to_index(RegType reg) {
-    return static_cast<uint8_t>(reg) - First;
+void Arm64::reg_manager<registers>::reset_temporaries() {
+    reg_positions.reset_temporaries();
 }
 
 template <auto registers>
 decltype(registers)::value_type
-Arm64::reg_manager<registers>::from_index(uint8_t idx) {
-    return static_cast<RegType>(idx + First);
-}
-
-template <auto registers>
-void Arm64::reg_manager<registers>::reset_temporaries() {
-    regs.reset_temporaries();
-}
-
-template <auto registers>
-void Arm64::reg_manager<registers>::keep_alive(RegType reg) {
-    assert(std::ranges::find(registers, reg) != registers.end());
-    keepalive[to_index(reg)] = true;
-}
-
-template <auto registers>
-void Arm64::reg_manager<registers>::allow_death(RegType reg) {
-    assert(std::ranges::find(registers, reg) != registers.end());
-    keepalive[to_index(reg)] = false;
-}
-
-template <auto registers>
-decltype(registers)::value_type Arm64::reg_manager<registers>::result() {
-    auto idx = regs.back();
-    purge(from_index(idx));
-    allow_death(from_index(idx));
+Arm64::reg_manager<registers>::result(std::span<value> local_locations) {
+    auto idx = reg_positions.back();
+    purge(local_locations, from_index(idx));
     return from_index(idx);
 }
 
 template <auto registers>
-decltype(registers)::value_type Arm64::reg_manager<registers>::temporary() {
-    auto idx = regs.temporary();
-    purge(from_index(idx));
-    allow_death(from_index(idx));
+decltype(registers)::value_type
+Arm64::reg_manager<registers>::temporary(std::span<value> local_locations) {
+    auto idx = reg_positions.temporary();
+    purge(local_locations, from_index(idx));
     return from_index(idx);
 }
 
 template <auto registers>
 void Arm64::reg_manager<registers>::untemporary(RegType reg) {
-    regs.untemporary(to_index(reg));
+    reg_positions.untemporary(to_index(reg));
 }
 
-template <auto registers> void Arm64::reg_manager<registers>::clobber_all() {
+template <auto registers>
+void Arm64::reg_manager<registers>::clobber_all(
+    std::span<value> local_locations) {
     for (auto reg : registers) {
-        purge(reg);
+        purge(local_locations, reg);
     }
 }
 
@@ -1236,21 +1225,42 @@ void Arm64::reg_manager<registers>::use(RegType reg, metadata md) {
     assert(std::ranges::find(registers, reg) != registers.end());
     get_manager_of(reg).use(reg, md);
     if constexpr (allocate)
-        regs.use(to_index(reg));
+        reg_positions.use(to_index(reg));
 }
 
 template <auto registers>
 void Arm64::reg_manager<registers>::surrender(RegType reg, value *v) {
     assert(std::ranges::find(registers, reg) != registers.end());
     bool is_empty = get_manager_of(reg).surrender(v);
-    if (allocate && is_empty && !keepalive[to_index(reg)])
-        regs.surrender(to_index(reg));
+    if (allocate && is_empty && !locals.is_active(reg))
+        reg_positions.surrender(to_index(reg));
 }
 
 template <auto registers>
-void Arm64::reg_manager<registers>::purge(RegType reg) {
+void Arm64::reg_manager<registers>::purge(std::span<value> local_locations,
+                                          RegType reg) {
     assert(std::ranges::find(registers, reg) != registers.end());
     get_manager_of(reg).purge(reg);
+    if (allocate)
+        locals.deactivate(local_locations, reg);
+}
+
+template <auto registers> void Arm64::reg_manager<registers>::commit_all() {
+    locals.commit_all();
+}
+
+template <auto registers>
+void Arm64::reg_manager<registers>::deactivate_all(
+    std::span<value> local_locations) {
+    locals.deactivate_all(local_locations);
+}
+
+template <auto registers>
+void Arm64::reg_manager<registers>::activate(std::byte *&code,
+                                             std::span<value> local_locations,
+                                             uint32_t local_idx, RegType reg,
+                                             bool set) {
+    locals.activate(code, local_locations, local_idx, reg, set);
 }
 
 template <auto registers>
@@ -1266,20 +1276,22 @@ void Arm64::reg_manager<registers>::spill(RegType reg, value *v) {
     get_manager_of(reg).spill(reg, v);
 }
 
-void Arm64::use(value v, valtype ty, metadata md) {
+void Arm64::use(std::byte *&code, value v, valtype ty) {
     if (is_float(ty)) {
-        use(freg(v.as<freg>()), md);
+        use(code, freg(v.as<freg>()));
     } else {
-        use(ireg(v.as<ireg>()), md);
+        use(code, ireg(v.as<ireg>()));
     }
 }
 
-template <typename RegType> void Arm64::use(RegType reg, metadata md) {
+template <typename RegType> void Arm64::use(std::byte *&code, RegType reg) {
+    auto md = metadata{code, values, stack_size};
     if (is_volatile(reg)) {
         regs_of<RegType>().use(reg, md);
     } else {
         locals_of<RegType>().use(reg, md);
     }
+    masm::pad_spill(code, stack_size);
 }
 
 void Arm64::surrender(valtype ty, value *v) {
@@ -1300,9 +1312,9 @@ template <typename RegType> void Arm64::surrender(RegType reg, value *v) {
 
 template <typename RegType> void Arm64::purge(RegType reg) {
     if (is_volatile(reg)) {
-        regs_of<RegType>().purge(reg);
+        regs_of<RegType>().purge(locals, reg);
     } else {
-        locals_of<RegType>().purge(reg);
+        locals_of<RegType>().purge(locals, reg);
     }
 }
 
@@ -1353,8 +1365,8 @@ void Arm64::clobber_flags(std::byte *&code) {
 }
 
 void Arm64::clobber_registers() {
-    intregs.clobber_all();
-    floatregs.clobber_all();
+    intregs.clobber_all(locals);
+    floatregs.clobber_all(locals);
 }
 
 void Arm64::push(value v) {
@@ -1388,8 +1400,9 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
         auto offset = v->as<uint32_t>();
         RegType reg;
         if constexpr (std::is_same_v<To, iwant::freg>)
-            reg = floatregs.temporary();
+            reg = floatregs.temporary(locals);
         else
+            reg = intregs.temporary(locals);
         masm::ldr(code, this, true, offset, stackreg, reg);
         return value::reg(reg);
     }
@@ -1406,8 +1419,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
             if (auto mask = tryLogicalImm((typename To::type)imm))
                 return value::imm(std::bit_cast<uint32_t>(*mask));
 
-        auto reg = intregs.temporary();
-        shoot_down(reg);
+        auto reg = intregs.temporary(locals);
         masm::mov(code, imm, reg);
         return value::reg(reg);
     }
@@ -1420,8 +1432,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
         if constexpr (std::is_same_v<To, iwant::flags>) {
             return *v;
         } else {
-            auto reg = intregs.temporary();
-            shoot_down(reg);
+            auto reg = intregs.temporary(locals);
             raw::cset(code, false, v->as<cond>(), reg);
             return value::reg(reg);
         }
@@ -1562,16 +1573,6 @@ void Arm64::discard(std::byte *&code, WasmStack &stack, uint32_t skip,
     }
 }
 
-void Arm64::pad_spill(std::byte *&code, uint32_t stack_size) {
-    if (stack_size < 1 << 12) {
-        put(code, noop);
-    } else {
-        put(code, noop);
-        put(code, noop);
-        put(code, noop);
-    }
-}
-
 void Arm64::amend_br(std::byte *br, std::byte *target) {
     put_immediate<26, 6>(br, target);
 }
@@ -1588,80 +1589,79 @@ void Arm64::amend_br_if(std::byte *br, std::byte *target) {
     }
 }
 
-template <typename RegType>
-void Arm64::take_flight(std::byte *&code, uint32_t local_idx, RegType reg) {
-    static_assert(std::is_same_v<RegType, freg> ||
-                  std::is_same_v<RegType, ireg>);
+template <auto registers>
+void Arm64::reg_manager<registers>::local_manager::activate(
+    std::byte *&code, std::span<value> local_locations, uint32_t local_idx,
+    RegType reg, bool set) {
 
-    constexpr bool is_float = std::is_same_v<RegType, freg>;
     uint32_t stack_offset = local_idx * sizeof(runtime::WasmValue);
 
-    int i = std::max(0, (int)(inflight_count - max_inflight));
-    for (; i < inflight_count; i++) {
-        if (inflight_locals[i % max_inflight].local_idx == local_idx) {
+    for (auto &local : inflight_locals) {
+        if (local.active && local.local_idx == local_idx) {
+            // non-set activations should only happen
+            // when the local is on the stack
+            assert(set);
+            local.active = false;
             break;
         }
     }
-
-    if (i == inflight_count) {
-        inflight_count++;
-        force_landing(inflight_locals[i % max_inflight]);
-    } else if (inflight_locals[i % max_inflight].local_idx != local_idx) {
-        assert(inflight_locals[i % max_inflight].active);
-        force_landing(inflight_locals[i % max_inflight]);
+    auto &local = inflight_locals[to_index(reg)];
+    if (local.local_idx != local_idx) {
+        deactivate(local_locations, reg);
     }
-    inflight_locals[i % max_inflight] = {code,          local_idx, stack_offset,
-                                         (uint32_t)reg, is_float,  true};
-    pad_spill(code, stack_offset);
 
-    locals[local_idx] = value::multireg(reg);
+    if (set) {
+        local = {code, local_idx, stack_offset, reg, true};
+        masm::pad_spill(code, stack_offset);
+    } else {
+        local = {nullptr, local_idx, stack_offset, reg, true};
+    }
+
+    local_locations[local_idx] = value::multireg(reg);
 }
 
-template <typename RegType> void Arm64::shoot_down(RegType reg) {
-    static_assert(std::is_same_v<RegType, freg> ||
-                  std::is_same_v<RegType, ireg>);
-
-    constexpr bool is_float = std::is_same_v<RegType, freg>;
-    for (int i = 0; i < std::min(max_inflight, inflight_count); i++) {
-        if (inflight_locals[i].is_float == is_float &&
-            inflight_locals[i].reg == (uint32_t)reg &&
-            inflight_locals[i].active) {
-            force_landing(inflight_locals[i]);
-            return;
-        }
+template <auto registers>
+void Arm64::reg_manager<registers>::local_manager::deactivate_all(
+    std::span<value> local_locations) {
+    for (auto reg : registers) {
+        deactivate(local_locations, reg);
     }
 }
 
-void Arm64::force_landing() {
-    for (auto i = (int)std::min(inflight_count, max_inflight) - 1; i >= 0;
-         i--) {
-        force_landing(inflight_locals[i]);
-    }
-    inflight_count = 0;
-}
+template <auto registers>
+void Arm64::reg_manager<registers>::local_manager::deactivate(
+    std::span<value> local_locations, RegType reg) {
 
-void Arm64::force_landing(plane &local) {
+    auto &local = inflight_locals[to_index(reg)];
     if (!local.active)
         return;
+
+    commit(reg);
+    local_locations[local.local_idx] = value::stack(local.stack_offset);
+
     local.active = false;
+}
 
-    assert(locals[local.local_idx].is<value::location::multireg>());
-    assert(locals[local.local_idx].as<uint32_t>() == local.reg);
+template <auto registers>
+void Arm64::reg_manager<registers>::local_manager::commit(RegType reg) {
+    auto local = inflight_locals[to_index(reg)];
+    if (!local.active || !local.dumpaddr)
+        return;
 
-    if (local.is_float) {
-        masm::str_no_temp(local.dumpaddr, true, local.stack_offset, stackreg,
-                          locals[local.local_idx].as<freg>());
-    } else {
-        masm::str_no_temp(local.dumpaddr, true, local.stack_offset, stackreg,
-                          locals[local.local_idx].as<ireg>());
+    masm::str_no_temp(local.dumpaddr, true, local.stack_offset, stackreg, reg);
+    local.dumpaddr = nullptr;
+}
+
+template <auto registers>
+void Arm64::reg_manager<registers>::local_manager::commit_all() {
+    for (auto reg : registers) {
+        commit(reg);
     }
-    locals[local.local_idx] = value::stack(local.stack_offset);
+}
 
-    if (local.is_float && is_volatile((freg)local.reg)) {
-        floatregs.allow_death((freg)local.reg);
-    } else if (!local.is_float && is_volatile((ireg)local.reg)) {
-        intregs.allow_death((ireg)local.reg);
-    }
+template <auto registers>
+bool Arm64::reg_manager<registers>::local_manager::is_active(RegType reg) {
+    return inflight_locals[to_index(reg)].active;
 }
 
 template <typename Params, typename Result = Arm64::iwant::none>
@@ -1689,13 +1689,9 @@ Arm64::allocate_registers(std::byte *&code) {
     }(std::make_index_sequence<nparams>{});
 
     if constexpr (std::is_same_v<Result, iwant::ireg>) {
-        auto reg = intregs.result();
-        shoot_down(reg);
-        ret.back() = value::reg(reg);
+        ret.back() = value::reg(intregs.result(locals));
     } else if constexpr (std::is_same_v<Result, iwant::freg>) {
-        auto reg = floatregs.result();
-        shoot_down(reg);
-        ret.back() = value::reg(reg);
+        ret.back() = value::reg(floatregs.result(locals));
     } else {
         static_assert(std::is_same_v<Result, iwant::none>);
     }
@@ -1706,13 +1702,11 @@ Arm64::allocate_registers(std::byte *&code) {
 template <typename... Args>
 void Arm64::finalize(std::byte *&code, Args... results) {
     auto finalize = [&](auto result) {
-        use(result, {code, values, stack_size});
-
         inst instruction;
         std::memcpy(&instruction, code - sizeof(inst), sizeof(inst));
         assert((instruction & 0b11111u) == (unsigned)result);
 
-        pad_spill(code, stack_size);
+        use(code, result);
         push(value::reg(result));
     };
 
@@ -1951,7 +1945,8 @@ void Arm64::unreachable(SHARED_PARAMS) {
 void Arm64::nop(SHARED_PARAMS) { put(code, noop); }
 void Arm64::block(SHARED_PARAMS, WasmSignature &) {}
 void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
-    force_landing();
+    intregs.deactivate_all(locals);
+    floatregs.deactivate_all(locals);
 
     stackify(code, sig.params);
 
@@ -1960,7 +1955,11 @@ void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
     }
 }
 std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
-    force_landing();
+    // don't force land here, because it's like entering a block
+    // do commit, because otherwise the commits could be overwritten by another
+    // set inside the branch
+    intregs.commit_all();
+    floatregs.commit_all();
 
     auto [condition] = allocate_registers<std::tuple<iwant::flags>>(code);
 
@@ -1981,7 +1980,9 @@ std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
     return imm;
 }
 void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
-    force_landing();
+    // do force landing here, because we don't save the state at the start of if
+    intregs.deactivate_all(locals);
+    floatregs.deactivate_all(locals);
 
     // todo: this is a tiny bit efficient, because at this point we have the
     // additional knowledge that there is no need to move the results
@@ -2005,7 +2006,8 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
             }
         }
     } else {
-        force_landing();
+        intregs.deactivate_all(locals);
+        floatregs.deactivate_all(locals);
 
         intregs.reset_temporaries();
         floatregs.reset_temporaries();
@@ -2041,7 +2043,8 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
 }
 void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                uint32_t depth) {
-    force_landing();
+    intregs.deactivate_all(locals);
+    floatregs.deactivate_all(locals);
 
     // for now, only support non-special case distances (+/- 128MB)
 
@@ -2067,7 +2070,8 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 }
 void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                   uint32_t depth) {
-    force_landing();
+    intregs.commit_all();
+    floatregs.commit_all();
 
     // for now, only support non-special case distances (+/- 1MB)
 
@@ -2106,7 +2110,8 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 }
 void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                      std::span<uint32_t> targets) {
-    force_landing();
+    intregs.deactivate_all(locals);
+    floatregs.deactivate_all(locals);
 
     auto [input] = allocate_registers<std::tuple<iwant::ireg>>(code);
 
@@ -2192,9 +2197,10 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
 }
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
-    force_landing();
-
     allocate_registers<std::tuple<>>(code);
+
+    intregs.deactivate_all(locals);
+    floatregs.deactivate_all(locals);
 
     clobber_flags(code);
     clobber_registers();
@@ -2238,7 +2244,8 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
 }
 void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
                           WasmSignature &type) {
-    force_landing();
+    intregs.deactivate_all(locals);
+    floatregs.deactivate_all(locals);
 
     auto [v] = allocate_registers<std::tuple<iwant::ireg>>(code);
     auto idx = v.as<ireg>();
@@ -2379,42 +2386,29 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
     if (local.is<value::location::stack>()) {
         if (is_float(ty)) {
-            auto [out] = allocate_registers<std::tuple<>, iwant::freg>(code);
-            auto reg = out.as<freg>();
+            auto reg = floatregs.result(locals);
+            floatregs.activate(code, locals, local_idx, reg, false);
 
             masm::ldr(code, this, true, local.as<uint32_t>(), stackreg, reg);
 
-            floatregs.keep_alive(reg);
-            use(reg, {code, values, stack_size});
-            pad_spill(code, stack_size);
-            if (is_volatile(reg)) {
-                shoot_down(reg);
-                locals[local_idx] = value::multireg(reg);
-            }
+            use(code, reg);
             push(locals[local_idx]);
         } else {
-            auto [out] = allocate_registers<std::tuple<>, iwant::ireg>(code);
-            auto reg = out.as<ireg>();
+            auto reg = intregs.result(locals);
+            intregs.activate(code, locals, local_idx, reg, false);
 
             masm::ldr(code, this, true, local.as<uint32_t>(), stackreg, reg);
 
-            intregs.keep_alive(reg);
-            use(reg, {code, values, stack_size});
-            pad_spill(code, stack_size);
-            if (is_volatile(reg)) {
-                shoot_down(reg);
-                locals[local_idx] = value::multireg(reg);
-            }
+            use(code, reg);
             push(locals[local_idx]);
         }
     } else {
         if (is_float(ty)) {
-            use(local.as<freg>(), {code, values, stack_size});
+            use(code, local.as<freg>());
         } else {
-            use(local.as<ireg>(), {code, values, stack_size});
+            use(code, local.as<ireg>());
         }
 
-        pad_spill(code, stack_size);
         push(local);
     }
 }
@@ -2443,14 +2437,11 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             locreg = local.as<freg>();
         } else if (v.is<value::location::reg>()) {
             locreg = v.as<freg>();
-            floatregs.keep_alive(locreg);
         } else if (v.is<value::location::multireg>() &&
                    is_volatile(v.as<freg>())) {
             locreg = v.as<freg>();
         } else {
-            locreg = floatregs.result();
-            shoot_down(locreg);
-            floatregs.keep_alive(locreg);
+            locreg = floatregs.result(locals);
         }
 
         switch (v.where()) {
@@ -2501,10 +2492,9 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
         }
 
         if (is_volatile(locreg)) {
-            take_flight(code, local_idx, locreg);
+            floatregs.activate(code, locals, local_idx, locreg, true);
         }
-        use(locreg, {code, values, stack_size});
-        pad_spill(code, stack_size);
+        use(code, locreg);
         push(locals[local_idx]);
     } else {
         auto in_caller_saved = local.is<value::location::multireg>() &&
@@ -2517,14 +2507,11 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             locreg = local.as<ireg>();
         } else if (v.is<value::location::reg>()) {
             locreg = v.as<ireg>();
-            intregs.keep_alive(locreg);
         } else if (v.is<value::location::multireg>() &&
                    is_volatile(v.as<ireg>())) {
             locreg = v.as<ireg>();
         } else {
-            locreg = intregs.result();
-            shoot_down(locreg);
-            intregs.keep_alive(locreg);
+            locreg = intregs.result(locals);
         }
 
         switch (v.where()) {
@@ -2582,14 +2569,13 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
         }
 
         if (is_volatile(locreg)) {
-            take_flight(code, local_idx, locreg);
+            intregs.activate(code, locals, local_idx, locreg, true);
         }
         if (v.is<value::location::flags>()) {
             push(v);
         } else {
-            use(locreg, {code, values, stack_size});
-            pad_spill(code, stack_size);
-        push(locals[local_idx]);
+            use(code, locreg);
+            push(locals[local_idx]);
         }
     }
 }
@@ -2737,8 +2723,7 @@ void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
     if (offset) {
         if (!is_volatile(addr) ||
             base.template is<value::location::multireg>()) {
-            addr = intregs.temporary();
-            shoot_down(addr);
+            addr = intregs.temporary(locals);
         }
         masm::add(code, this, true, offset, base.template as<ireg>(), addr);
     }
@@ -3936,7 +3921,9 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
                          std::array<valtype, NR> results,
                          std::optional<uint64_t> temp1,
                          std::optional<uint64_t> temp2) {
-    force_landing();
+    intregs.deactivate_all(locals);
+    floatregs.deactivate_all(locals);
+
     allocate_registers<std::tuple<>>(code);
 
     clobber_flags(code);

@@ -73,7 +73,7 @@ class Arm64 {
         void spill(RegType, value *v);
     };
 
-    template <auto registers> struct reg_manager {
+    template <auto registers> class reg_manager {
         using RegType = typename decltype(registers)::value_type;
         static constexpr bool allocate =
             std::is_same_v<decltype(registers),
@@ -86,32 +86,60 @@ class Arm64 {
         static_assert(N == Last - First + 1, "registers must be contiguous");
         using sub_manager = reg_info<RegType, 4>;
 
-        sub_manager locals[N];
+        class local_manager {
+            struct plane {
+                std::byte *dumpaddr;
+                uint32_t local_idx;
+                uint32_t stack_offset;
+                RegType reg;
+                bool active = false;
+            };
+
+            std::array<plane, allocate ? N : 0> inflight_locals;
+
+          public:
+            void activate(std::byte *&code, std::span<value> local_locations,
+                          uint32_t local_idx, RegType reg, bool set);
+            void commit(RegType reg);
+            void commit_all();
+            void deactivate(std::span<value> local_locations, RegType reg);
+            void deactivate_all(std::span<value> local_locations);
+            bool is_active(RegType reg);
+        };
+
+        local_manager locals;
+        sub_manager regs[N];
 
         sub_manager &get_manager_of(RegType reg) {
-            return locals[(size_t)reg - First];
+            return regs[static_cast<uint8_t>(reg) - First];
         }
 
-        reg_lru<allocate ? N : 0> regs;
-        std::bitset<N> keepalive = 0;
+        reg_lru<allocate ? N : 0> reg_positions;
 
         void spill(RegType, size_t);
 
-        uint8_t to_index(RegType reg);
-        RegType from_index(uint8_t idx);
+        static uint8_t to_index(RegType reg) {
+            return static_cast<uint8_t>(reg) - First;
+        }
+        static RegType from_index(uint8_t idx) {
+            return static_cast<RegType>(idx + First);
+        }
 
       public:
-        RegType result();
-        RegType temporary();
+        RegType result(std::span<value> local_locations);
+        RegType temporary(std::span<value> local_locations);
         void untemporary(RegType reg);
         void reset_temporaries();
-        void keep_alive(RegType reg);
-        void allow_death(RegType reg);
+
+        void activate(std::byte *&code, std::span<value> local_locations,
+                      uint32_t local_idx, RegType reg, bool set);
+        void deactivate_all(std::span<value> local_locations);
+        void commit_all();
 
         void use(RegType, metadata);
         void surrender(RegType, value *);
-        void purge(RegType);
-        void clobber_all();
+        void purge(std::span<value> local_locations, RegType);
+        void clobber_all(std::span<value> local_locations);
 
         void spill(RegType reg, value *v);
         bool adjust_spill(RegType reg, std::byte *&code);
@@ -131,7 +159,7 @@ class Arm64 {
 
         temporary(Arm64 *that)
             : that(that),
-              reg(that->regs_of<RegType>()->temporary(that->locals)) {}
+              reg(that->regs_of<RegType>().temporary(that->locals)) {}
 
         temporary(RegType existing) {
             that = nullptr;
@@ -147,7 +175,7 @@ class Arm64 {
 
         ~temporary() {
             if (that)
-                that->regs_of<RegType>()->untemporary(reg);
+                that->regs_of<RegType>().untemporary(reg);
         }
 
         void operator=(temporary<RegType> &existing) = delete;
@@ -161,11 +189,11 @@ class Arm64 {
     };
 
   private:
-    void use(value, valtype, metadata);
+    void use(std::byte *&, value, valtype);
     void surrender(valtype, value *);
     void spill(valtype, value *);
 
-    template <typename RegType> void use(RegType, metadata);
+    template <typename RegType> void use(std::byte *&, RegType);
     template <typename RegType> void surrender(RegType, value *);
     template <typename RegType> void purge(RegType);
     template <typename RegType> void spill(RegType reg, value *v);
@@ -192,25 +220,6 @@ class Arm64 {
     reg_manager<fcallee_saved> floatlocals;
 
     std::span<value> locals;
-
-    struct plane {
-        std::byte *dumpaddr;
-        uint32_t local_idx;
-        uint32_t stack_offset;
-        uint32_t reg;
-        bool is_float;
-        bool active = false;
-    };
-
-    constexpr static uint32_t max_inflight = 8;
-    std::array<plane, max_inflight> inflight_locals;
-    uint32_t inflight_count = 0;
-
-    template <typename RegType>
-    void take_flight(std::byte *&code, uint32_t local_idx, RegType reg);
-    template <typename RegType> void shoot_down(RegType reg);
-    void force_landing(plane &local);
-    void force_landing();
 
     template <typename RegType> auto &locals_of() {
         if constexpr (std::is_same_v<RegType, ireg>) {
@@ -275,8 +284,6 @@ class Arm64 {
                       uint32_t copy_to, bool discard_copied);
     void discard(std::byte *&code, WasmStack &stack, uint32_t skip,
                  uint32_t discard_to);
-
-    void pad_spill(std::byte *&code, uint32_t stack_size);
 
     template <typename FloatType>
     void validate_trunc(std::byte *&code, freg v, FloatType lower,
