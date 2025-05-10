@@ -974,8 +974,8 @@ bool mov(std::byte *&code, uint64_t imm, ireg dst) {
     return false;
 }
 
-void add(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
-         uint32_t imm, ireg src, ireg dst) {
+void add(std::byte *&code, Arm64 *that, bool sf, uint32_t imm, ireg src,
+         ireg dst) {
     if (imm == 0) {
         raw::mov(code, sf, src, dst);
     } else if (imm < 1 << 24) {
@@ -985,14 +985,14 @@ void add(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
             raw::add(code, sf, imm, dst, dst, true);
         }
     } else {
-        Arm64::temporary<ireg> tmp(intregs);
+        Arm64::temporary<ireg> tmp(that);
         mov(code, imm, tmp);
         raw::add(code, sf, tmp, src, dst);
     }
 }
 
-void sub(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
-         uint32_t imm, ireg src, ireg dst) {
+void sub(std::byte *&code, Arm64 *that, bool sf, uint32_t imm, ireg src,
+         ireg dst) {
     if (imm == 0) {
         raw::mov(code, sf, src, dst);
     } else if (imm < 1 << 24) {
@@ -1002,7 +1002,7 @@ void sub(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
             raw::sub(code, sf, imm, dst, dst, true);
         }
     } else {
-        Arm64::temporary<ireg> tmp(intregs);
+        Arm64::temporary<ireg> tmp(that);
         mov(code, imm, tmp);
         raw::sub(code, sf, tmp, src, dst);
     }
@@ -1022,8 +1022,8 @@ void ldr(std::byte *&code, [[maybe_unused]] Arm64 *that, bool sf,
     }
 }
 
-void ldr(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
-         uint32_t offset, ireg rn, freg rt) {
+void ldr(std::byte *&code, Arm64 *that, bool sf, uint32_t offset, ireg rn,
+         freg rt) {
     if (offset < 1 << 12) {
         raw::ldr(code, sf, offset, rn, rt);
     } else if (offset < 1 << 24) {
@@ -1031,7 +1031,7 @@ void ldr(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
         raw::ldr(code, sf, offset & 0xfff, rn, rt);
         raw::sub(code, true, offset >> 12, rn, rn, true);
     } else {
-        Arm64::temporary<ireg> offsetreg(intregs);
+        Arm64::temporary<ireg> offsetreg(that);
         masm::mov(code, offset, offsetreg);
         raw::load(code, memtype::x, resexttype::uns, indexttype::lsl, false,
                   offsetreg, rn, rt);
@@ -1053,8 +1053,8 @@ void str_no_temp(std::byte *&code, bool sf, uint32_t offset, ireg rn,
 }
 
 template <typename RegType>
-void str(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
-         uint32_t offset, ireg rn, RegType rt) {
+void str(std::byte *&code, Arm64 *that, bool sf, uint32_t offset, ireg rn,
+         RegType rt) {
     if (offset < 1 << 12) {
         raw::str(code, sf, offset, rn, rt);
     } else if (offset < 1 << 24) {
@@ -1062,7 +1062,7 @@ void str(std::byte *&code, Arm64::temp_int_manager &intregs, bool sf,
         raw::str(code, sf, offset & 0xfff, rn, rt);
         raw::sub(code, true, offset >> 12, rn, rn, true);
     } else {
-        Arm64::temporary<ireg> offsetreg(intregs);
+        Arm64::temporary<ireg> offsetreg(that);
         masm::mov(code, offset, offsetreg);
         raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
                   offsetreg, rn, rt);
@@ -1346,7 +1346,7 @@ void Arm64::clobber_flags(std::byte *&code) {
     // step 2. spill into claimed register
     raw::cset(code, false, flag.val->as<cond>(), reg);
     // step 3. spill into memory
-    masm::str(code, intregs, true, flag.stack_offset, stackreg, reg.get());
+    masm::str(code, this, true, flag.stack_offset, stackreg, reg.get());
 
     *flag.val = value::stack(flag.stack_offset);
     flag = flags();
@@ -1390,9 +1390,7 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
         if constexpr (std::is_same_v<To, iwant::freg>)
             reg = floatregs.temporary();
         else
-            reg = intregs.temporary();
-        shoot_down(reg);
-        masm::ldr(code, intregs, true, offset, stackreg, reg);
+        masm::ldr(code, this, true, offset, stackreg, reg);
         return value::reg(reg);
     }
     case value::location::imm: {
@@ -1448,7 +1446,7 @@ void Arm64::force_value_into(std::byte *&code, value *v, To reg, bool soft) {
     }
     case value::location::stack: {
         auto offset = v->as<uint32_t>();
-        masm::ldr(code, intregs, true, offset, stackreg, reg);
+        masm::ldr(code, this, true, offset, stackreg, reg);
         return;
     }
     case value::location::imm: {
@@ -1513,10 +1511,10 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
                 break;
             case value::location::imm:
                 assert(!is_float(v));
-                temporary<ireg> reg(intregs);
+                temporary<ireg> reg(this);
                 auto imm = expected[i].as<uint32_t>();
                 masm::mov(code, imm, reg);
-                masm::str(code, intregs, true, dest, stackreg, reg.get());
+                masm::str(code, this, true, dest, stackreg, reg.get());
                 break;
             }
         }
@@ -1533,11 +1531,11 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
             if (is_float(v)) {
                 auto reg =
                     adapt_value_into<freg>(code, &expected[i], !discard_copied);
-                masm::str(code, intregs, true, dest, stackreg, reg.get());
+                masm::str(code, this, true, dest, stackreg, reg.get());
             } else {
                 auto reg =
                     adapt_value_into<ireg>(code, &expected[i], !discard_copied);
-                masm::str(code, intregs, true, dest, stackreg, reg.get());
+                masm::str(code, this, true, dest, stackreg, reg.get());
             }
         }
     }
@@ -1797,11 +1795,11 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                 prev = save{local, (int)reg, (int)offset, is_param, code};
 
                 if (is_param) {
-                    masm::ldr(code, intregs, true, offset, stackreg, ireg::x3);
-                    masm::str(code, intregs, true, offset, stackreg, reg);
+                    masm::ldr(code, this, true, offset, stackreg, ireg::x3);
+                    masm::str(code, this, true, offset, stackreg, reg);
                     raw::mov(code, true, ireg::x3, reg);
                 } else {
-                    masm::str(code, intregs, true, offset, stackreg, reg);
+                    masm::str(code, this, true, offset, stackreg, reg);
                     raw::mov(code, true, ireg::xzr, reg);
                 }
             }
@@ -1845,11 +1843,11 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                 prev = save{local, (int)reg, (int)offset, is_param, code};
 
                 if (is_param) {
-                    masm::ldr(code, intregs, true, offset, stackreg, freg::d0);
-                    masm::str(code, intregs, true, offset, stackreg, reg);
+                    masm::ldr(code, this, true, offset, stackreg, freg::d0);
+                    masm::str(code, this, true, offset, stackreg, reg);
                     raw::mov(code, ftype::double_, freg::d0, reg);
                 } else {
-                    masm::str(code, intregs, true, offset, stackreg, reg);
+                    masm::str(code, this, true, offset, stackreg, reg);
                     raw::mov(code, true, ftype::double_, ireg::xzr, reg);
                 }
             }
@@ -1857,7 +1855,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             locals[i] = value::multireg(reg);
         } else {
             if (!is_param) {
-                masm::str(code, intregs, true, offset, stackreg, ireg::xzr);
+                masm::str(code, this, true, offset, stackreg, ireg::xzr);
             }
 
             locals[i] = value::stack(offset);
@@ -1896,7 +1894,7 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
                 prev = restore{fn.locals[i], (int)locals[i].as<freg>(),
                                (int)offset, code};
 
-                masm::ldr(code, intregs, true, offset, stackreg,
+                masm::ldr(code, this, true, offset, stackreg,
                           locals[i].as<freg>());
             }
         } else {
@@ -1912,7 +1910,7 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
                 prev = restore{fn.locals[i], (int)locals[i].as<ireg>(),
                                (int)offset, code};
 
-                masm::ldr(code, intregs, true, offset, stackreg,
+                masm::ldr(code, this, true, offset, stackreg,
                           locals[i].as<ireg>());
             }
         }
@@ -1926,8 +1924,8 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
             auto final_offset = i * sizeof(runtime::WasmValue);
             auto current_offset = local_bytes + final_offset;
 
-            masm::ldr(code, intregs, true, current_offset, stackreg, ireg::x3);
-            masm::str(code, intregs, true, final_offset, stackreg, ireg::x3);
+            masm::ldr(code, this, true, current_offset, stackreg, ireg::x3);
+            masm::str(code, this, true, final_offset, stackreg, ireg::x3);
         }
     }
 
@@ -2206,7 +2204,7 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     constexpr auto function_ptr = ireg::x3, signature = ireg::x4;
 
     // load the FunctionInfo pointer
-    masm::ldr(code, intregs, true, func_offset * sizeof(void *), miscreg,
+    masm::ldr(code, this, true, func_offset * sizeof(void *), miscreg,
               function_ptr);
     if (fn.import) {
         static_assert(offsetof(runtime::FunctionInfo, memory) +
@@ -2223,9 +2221,9 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     raw::ldr(code, true, offsetof(runtime::FunctionInfo, signature),
              function_ptr, signature);
 
-    masm::add(code, intregs, true, stack_size, stackreg, stackreg);
+    masm::add(code, this, true, stack_size, stackreg, stackreg);
     raw::blr(code, signature);
-    masm::sub(code, intregs, true, stack_size, stackreg, stackreg);
+    masm::sub(code, this, true, stack_size, stackreg, stackreg);
 
     if (fn.import) {
         raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), miscreg,
@@ -2252,7 +2250,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
 
     stackify(code, type.params);
 
-    masm::ldr(code, intregs, true, table_offset * sizeof(void *), miscreg,
+    masm::ldr(code, this, true, table_offset * sizeof(void *), miscreg,
               table_ptr);
 
     static_assert(offsetof(runtime::WasmTable, current) == 0);
@@ -2304,9 +2302,9 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
              function_ptr, function_ptr);
 
     // todo: make this work with stack_size larger than 1 << 12
-    masm::add(code, intregs, true, stack_size, stackreg, stackreg);
+    masm::add(code, this, true, stack_size, stackreg, stackreg);
     raw::blr(code, function_ptr);
-    masm::sub(code, intregs, true, stack_size, stackreg, stackreg);
+    masm::sub(code, this, true, stack_size, stackreg, stackreg);
 
     raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), miscreg,
              ireg::sp, memreg);
@@ -2384,7 +2382,7 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             auto [out] = allocate_registers<std::tuple<>, iwant::freg>(code);
             auto reg = out.as<freg>();
 
-            masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg, reg);
+            masm::ldr(code, this, true, local.as<uint32_t>(), stackreg, reg);
 
             floatregs.keep_alive(reg);
             use(reg, {code, values, stack_size});
@@ -2398,7 +2396,7 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             auto [out] = allocate_registers<std::tuple<>, iwant::ireg>(code);
             auto reg = out.as<ireg>();
 
-            masm::ldr(code, intregs, true, local.as<uint32_t>(), stackreg, reg);
+            masm::ldr(code, this, true, local.as<uint32_t>(), stackreg, reg);
 
             intregs.keep_alive(reg);
             use(reg, {code, values, stack_size});
@@ -2457,7 +2455,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
 
         switch (v.where()) {
         case value::location::stack:
-            masm::ldr(code, intregs, true, v.as<uint32_t>(), stackreg, locreg);
+            masm::ldr(code, this, true, v.as<uint32_t>(), stackreg, locreg);
             purge(locreg);
             break;
         case value::location::reg: {
@@ -2540,7 +2538,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             purge(locreg);
             break;
         case value::location::stack:
-            masm::ldr(code, intregs, true, v.as<uint32_t>(), stackreg, locreg);
+            masm::ldr(code, this, true, v.as<uint32_t>(), stackreg, locreg);
             purge(locreg);
             break;
         case value::location::reg: {
@@ -2602,7 +2600,7 @@ void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
 
     clobber_flags(code);
 
-    masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
+    masm::ldr(code, this, true, misc_offset * sizeof(void *), miscreg,
               table_ptr);
 
     static_assert(offsetof(runtime::WasmTable, current) == 0);
@@ -2627,7 +2625,7 @@ void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
 
     clobber_flags(code);
 
-    masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
+    masm::ldr(code, this, true, misc_offset * sizeof(void *), miscreg,
               table_ptr);
 
     static_assert(offsetof(runtime::WasmTable, current) == 0);
@@ -2649,13 +2647,13 @@ void Arm64::globalget(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
     if (is_float(type)) {
         auto [res] = allocate_registers<std::tuple<>, iwant::freg>(code);
         temporary<ireg> addr(this);
-        masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
+        masm::ldr(code, this, true, misc_offset * sizeof(void *), miscreg,
                   addr);
         raw::ldr(code, true, addr, res.as<freg>());
         finalize(code, res.as<freg>());
     } else {
         auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
-        masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
+        masm::ldr(code, this, true, misc_offset * sizeof(void *), miscreg,
                   res.as<ireg>());
         raw::ldr(code, true, res.as<ireg>(), res.as<ireg>());
         finalize(code, res.as<ireg>());
@@ -2665,14 +2663,14 @@ void Arm64::globalset(SHARED_PARAMS, uint64_t misc_offset, valtype type) {
     if (is_float(type)) {
         auto [val] = allocate_registers<std::tuple<iwant::freg>>(code);
         temporary<ireg> addr(this);
-        masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
+        masm::ldr(code, this, true, misc_offset * sizeof(void *), miscreg,
                   addr);
         raw::str(code, true, addr, val.as<freg>());
         finalize(code);
     } else {
         auto [val] = allocate_registers<std::tuple<iwant::ireg>>(code);
         temporary<ireg> addr(this);
-        masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
+        masm::ldr(code, this, true, misc_offset * sizeof(void *), miscreg,
                   addr);
         raw::str(code, true, addr, val.as<ireg>());
         finalize(code);
@@ -2742,7 +2740,7 @@ void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
             addr = intregs.temporary();
             shoot_down(addr);
         }
-        masm::add(code, intregs, true, offset, base.template as<ireg>(), addr);
+        masm::add(code, this, true, offset, base.template as<ireg>(), addr);
     }
     raw::load(code, mtype, etype, indexttype::lsl, false, addr, memreg,
               res.template as<RegTy>());
@@ -2965,7 +2963,7 @@ void Arm64::i32add(SHARED_PARAMS) {
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        masm::add(code, intregs, false, p2.as<uint32_t>(), p1.as<ireg>(),
+        masm::add(code, this, false, p2.as<uint32_t>(), p1.as<ireg>(),
                   res.as<ireg>());
     } else {
         raw::add(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
@@ -2979,7 +2977,7 @@ void Arm64::i64add(SHARED_PARAMS) {
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        masm::add(code, intregs, true, p2.as<uint32_t>(), p1.as<ireg>(),
+        masm::add(code, this, true, p2.as<uint32_t>(), p1.as<ireg>(),
                   res.as<ireg>());
     } else {
         raw::add(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
@@ -3879,7 +3877,7 @@ void Arm64::ref_null(SHARED_PARAMS) {
 void Arm64::ref_is_null(SHARED_PARAMS) { i64eqz(code, stack); }
 void Arm64::ref_func(SHARED_PARAMS, uint64_t misc_offset) {
     auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
-    masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
+    masm::ldr(code, this, true, misc_offset * sizeof(void *), miscreg,
               res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
@@ -3947,7 +3945,7 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
     auto vparams = valtype_vector(params), vresults = valtype_vector(results);
     stackify(code, vparams);
 
-    masm::add(code, intregs, true, stack_size + vparams.bytesize(), stackreg,
+    masm::add(code, this, true, stack_size + vparams.bytesize(), stackreg,
               stackreg);
     if (temp1)
         masm::mov(code, *temp1, ireg::x3);
@@ -3956,7 +3954,7 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
     masm::mov(code, reinterpret_cast<uint64_t>(func), ireg::x5);
     raw::blr(code, ireg::x5);
 
-    masm::sub(code, intregs, true, stack_size + vresults.bytesize(), stackreg,
+    masm::sub(code, this, true, stack_size + vresults.bytesize(), stackreg,
               stackreg);
 
     for ([[maybe_unused]] auto result : results)
@@ -4008,7 +4006,7 @@ void Arm64::table_grow(SHARED_PARAMS, uint64_t misc_offset) {
 void Arm64::table_size(SHARED_PARAMS, uint64_t misc_offset) {
     auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
 
-    masm::ldr(code, intregs, true, misc_offset * sizeof(void *), miscreg,
+    masm::ldr(code, this, true, misc_offset * sizeof(void *), miscreg,
               res.as<ireg>());
     raw::ldr(code, true, res.as<ireg>(), res.as<ireg>());
 

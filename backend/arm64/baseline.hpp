@@ -129,28 +129,25 @@ class Arm64 {
                                                 Arm64::temp_int_manager,
                                                 Arm64::temp_float_manager>;
 
-        temporary(Arm64 *that) : temporary(that->regs_of<RegType>()) {}
-
-        temporary(manager_type &that) {
-            manager = &that;
-            reg = manager->temporary();
-        }
+        temporary(Arm64 *that)
+            : that(that),
+              reg(that->regs_of<RegType>()->temporary(that->locals)) {}
 
         temporary(RegType existing) {
-            manager = nullptr;
+            that = nullptr;
             reg = existing;
         }
 
         temporary(temporary<RegType> &existing) = delete;
         temporary(temporary<RegType> &&existing) {
-            manager = existing.manager;
+            that = existing.that;
             reg = existing.reg;
-            existing.manager = nullptr;
+            existing.that = nullptr;
         }
 
         ~temporary() {
-            if (manager)
-                manager->untemporary(reg);
+            if (that)
+                that->regs_of<RegType>()->untemporary(reg);
         }
 
         void operator=(temporary<RegType> &existing) = delete;
@@ -159,7 +156,7 @@ class Arm64 {
         RegType get() { return reg; }
 
       private:
-        manager_type *manager;
+        Arm64 *that = nullptr;
         RegType reg;
     };
 
