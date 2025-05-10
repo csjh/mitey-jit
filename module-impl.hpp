@@ -205,7 +205,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
             }
             iter += n_results;
 
-            types.emplace_back(fn);
+            types.emplace_back(std::move(fn));
         }
     });
 
@@ -257,7 +257,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     error<validation_error>("unknown type");
                 }
                 functions.emplace_back(
-                    FunctionShell(nullptr, types[typeidx], {}, {}, specifier));
+                    nullptr, types[typeidx], valtype_vector{},
+                    std::vector<uint32_t>{}, specifier, false);
                 n_fn_imports++;
             } else if (desc == ImExDesc::table) {
                 // table
@@ -267,8 +268,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 }
 
                 auto [initial, max] = get_table_limits(iter);
-                tables.emplace_back(TableShell(
-                    initial, max, static_cast<valtype>(reftype), specifier));
+                tables.emplace_back(initial, max, static_cast<valtype>(reftype),
+                                    specifier);
             } else if (desc == ImExDesc::mem) {
                 // mem
                 if (memory.exists) {
@@ -288,9 +289,9 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     error<malformed_error>("malformed mutability");
                 }
 
-                globals.emplace_back(GlobalShell(
-                    static_cast<valtype>(maybe_valtype),
-                    static_cast<mut>(mutability), nullptr, specifier));
+                globals.emplace_back(static_cast<valtype>(maybe_valtype),
+                                     static_cast<mut>(mutability), nullptr,
+                                     specifier);
             }
         }
     });
@@ -312,8 +313,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
             if (type_idx >= types.size()) {
                 error<validation_error>("unknown type");
             }
-            functions.emplace_back(
-                FunctionShell(nullptr, types[type_idx], {}, {}, std::nullopt));
+            functions.emplace_back(nullptr, types[type_idx], valtype_vector{},
+                                   std::vector<uint32_t>{}, std::nullopt);
         }
     });
 
@@ -335,8 +336,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
             }
 
             auto [initial, max] = get_table_limits(iter);
-            tables.emplace_back(TableShell(
-                initial, max, static_cast<valtype>(elem_type), std::nullopt));
+            tables.emplace_back(initial, max, static_cast<valtype>(elem_type),
+                                std::nullopt);
         }
     });
 
@@ -385,8 +386,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
             }
             auto global_mut = static_cast<mut>(maybe_mut);
 
-            globals.emplace_back(
-                GlobalShell(type, global_mut, iter.unsafe_ptr(), std::nullopt));
+            globals.emplace_back(type, global_mut, iter.unsafe_ptr(),
+                                 std::nullopt);
 
             validate_const(iter, type);
         }
@@ -490,7 +491,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                             // validate_const sets is_declared
                             validate_const(iter, reftype);
                         }
-                        elements.emplace_back(ElementShell(reftype));
+                        elements.push_back(ElementShell(reftype));
                     } else {
                         // flags = 3
                         // characteristics: declarative, elem kind + indices
@@ -506,7 +507,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                             }
                             functions[elem_idx].is_declared = true;
                         }
-                        elements.emplace_back(ElementShell(valtype::funcref));
+                        elements.push_back(ElementShell(valtype::funcref));
                     }
                 } else {
                     if (flags & 0b100) {
@@ -521,7 +522,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                         for (uint32_t j = 0; j < n_elements; j++) {
                             validate_const(iter, reftype);
                         }
-                        elements.emplace_back(ElementShell(reftype));
+                        elements.push_back(ElementShell(reftype));
                     } else {
                         // flags = 1
                         // characteristics: passive, elem kind + indices
@@ -538,7 +539,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                             // implicit declaration
                             functions[elem_idx].is_declared = true;
                         }
-                        elements.emplace_back(ElementShell(valtype::funcref));
+                        elements.push_back(ElementShell(valtype::funcref));
                     }
                 }
             } else {
@@ -591,7 +592,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                         functions[elem_idx].is_declared = true;
                     }
                 }
-                elements.emplace_back(ElementShell(reftype));
+                elements.push_back(ElementShell(reftype));
             }
         }
     });
@@ -743,8 +744,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                                 data_length);
                     iter += data_length;
 
-                    data_segments.emplace_back(runtime::Segment(
-                        memidx, data_length, std::move(segment), nullptr));
+                    data_segments.emplace_back(memidx, data_length,
+                                               std::move(segment), nullptr);
                 } else {
                     // active segment
                     if (!memory.exists) {
@@ -766,8 +767,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     iter += data_length;
 
                     // todo: this has to be instantiated
-                    data_segments.emplace_back(runtime::Segment(
-                        memidx, data_length, std::move(segment), initializer));
+                    data_segments.emplace_back(memidx, data_length,
+                                               std::move(segment), initializer);
                 }
             }
         },
@@ -949,10 +950,12 @@ HANDLER(block) {
     auto &signature = read_blocktype(mod.types, iter);
 
     stack.enter_flow(signature.params);
-    control_stack.emplace_back(ControlFlow(
-        signature.results, {}, {}, {}, signature, stack.polymorphism(),
+    control_stack.emplace_back(
+        signature.results, std::vector<std::byte *>{},
+        std::vector<std::byte *>{}, std::vector<PendingBrTable>{}, signature,
+        stack.polymorphism(),
         stack.polymorphism() || control_stack.back().unreachable,
-        stack.sp() - signature.params.bytesize(), Block()));
+        stack.sp() - signature.params.bytesize(), Block());
     stack.unpolymorphize();
 
     _(block, signature);
@@ -962,10 +965,12 @@ HANDLER(loop) {
     auto &signature = read_blocktype(mod.types, iter);
 
     stack.enter_flow(signature.params);
-    control_stack.emplace_back(ControlFlow(
-        signature.params, {}, {}, {}, signature, stack.polymorphism(),
+    control_stack.emplace_back(
+        signature.params, std::vector<std::byte *>{},
+        std::vector<std::byte *>{}, std::vector<PendingBrTable>{}, signature,
+        stack.polymorphism(),
         stack.polymorphism() || control_stack.back().unreachable,
-        stack.sp() - signature.params.bytesize(), Loop(nullptr)));
+        stack.sp() - signature.params.bytesize(), Loop(nullptr));
     stack.unpolymorphize();
 
     // todo: i might want more flexibility than this
@@ -979,10 +984,12 @@ HANDLER(if_) {
 
     stack.pop(valtype::i32);
     stack.enter_flow(signature.params);
-    control_stack.emplace_back(ControlFlow(
-        signature.results, {}, {}, {}, signature, stack.polymorphism(),
+    control_stack.emplace_back(
+        signature.results, std::vector<std::byte *>{},
+        std::vector<std::byte *>{}, std::vector<PendingBrTable>{}, signature,
+        stack.polymorphism(),
         stack.polymorphism() || control_stack.back().unreachable,
-        stack.sp() - signature.params.bytesize(), If(nullptr)));
+        stack.sp() - signature.params.bytesize(), If(nullptr));
 
     if (!control_stack.back().unreachable) {
         auto if_ptr = jit.if_(code, stack, signature);
@@ -1635,9 +1642,9 @@ std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
     stack.set_sp(fn.locals.bytesize());
 
     auto jit = Target();
-    auto control_stack = std::vector<ControlFlow>(
-        {ControlFlow(fn.type.results, {}, {}, {}, fn.type, false, false,
-                     stack.sp(), Function(fn))});
+    auto control_stack =
+        std::vector({ControlFlow(fn.type.results, {}, {}, {}, fn.type, false,
+                                 false, stack.sp(), Function(fn))});
 
     _(start_function, fn);
 

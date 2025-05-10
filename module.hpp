@@ -53,7 +53,7 @@ using ImportSpecifier = std::pair<std::string, std::string>;
 
 struct FunctionShell {
     std::byte *start;
-    WasmSignature type;
+    WasmSignature &type;
     valtype_vector locals;
     std::vector<uint32_t> local_bytes;
     std::optional<ImportSpecifier> import;
