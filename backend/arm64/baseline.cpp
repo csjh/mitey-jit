@@ -1740,7 +1740,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
     auto freg_alloc = fcallee_saved.begin();
 
     struct save {
-        valtype ty;
+        bool is_float;
         int reg;
         int offset;
         bool is_param;
@@ -1757,7 +1757,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             ireg_alloc != icallee_saved.end()) {
             auto reg = *ireg_alloc++;
             // save current value
-            if (prev && prev->ty == local && offset < 512) {
+            if (prev && !prev->is_float && offset < 512) {
                 code = prev->code;
                 offset = prev->offset;
                 auto preg = (ireg)prev->reg;
@@ -1786,7 +1786,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
 
                 prev = std::nullopt;
             } else {
-                prev = save{local, (int)reg, (int)offset, is_param, code};
+                prev = save{false, (int)reg, (int)offset, is_param, code};
 
                 if (is_param) {
                     masm::ldr(code, this, true, offset, stackreg, ireg::x3);
@@ -1803,7 +1803,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                    freg_alloc != fcallee_saved.end()) {
             auto reg = *freg_alloc++;
             // save current value
-            if (prev && prev->ty == local && offset < 512) {
+            if (prev && prev->is_float && offset < 512) {
                 code = prev->code;
                 offset = prev->offset;
                 auto preg = (freg)prev->reg;
@@ -1834,7 +1834,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
 
                 prev = std::nullopt;
             } else {
-                prev = save{local, (int)reg, (int)offset, is_param, code};
+                prev = save{true, (int)reg, (int)offset, is_param, code};
 
                 if (is_param) {
                     masm::ldr(code, this, true, offset, stackreg, freg::d0);
