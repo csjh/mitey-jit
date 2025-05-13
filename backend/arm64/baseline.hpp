@@ -11,8 +11,6 @@
 namespace mitey {
 namespace arm64 {
 
-using inst = uint32_t;
-
 class value {
   public:
     enum class location { reg, stack, imm, flags, multireg };
@@ -56,9 +54,9 @@ class value {
 
 class Arm64 {
     struct metadata {
+        std::byte *spilladdr = nullptr;
         value *value_offset = nullptr;
         uint32_t stack_offset = 0;
-        inst source;
     };
 
   public:
@@ -67,12 +65,12 @@ class Arm64 {
         size_t count = 0;
 
       public:
-        void use(std::byte *&, RegType, metadata);
+        void use(RegType, metadata);
         bool surrender(value *);
-        void purge(std::byte *&, RegType);
-        bool was_prior(RegType reg, std::byte *code);
-        void spill(std::byte *&, RegType, size_t i);
-        void spill(std::byte *&, RegType, value *v);
+        void purge(RegType);
+        bool adjust_spill(RegType reg, std::byte *&code);
+        void spill(RegType, size_t i);
+        void spill(RegType, value *v);
     };
 
     template <auto registers> class reg_manager {
@@ -90,24 +88,21 @@ class Arm64 {
 
         class local_manager {
             struct plane {
-                bool active : 1 = false;
-                bool pending : 1 = false;
-                uint16_t local_idx;
+                std::byte *dumpaddr;
+                uint32_t local_idx;
+                bool active = false;
             };
 
             std::array<plane, allocate ? N : 0> inflight_locals;
 
           public:
             void activate(std::byte *&code, std::span<value> local_locations,
-                          uint16_t local_idx, RegType reg, bool set);
-            void commit(std::byte *&code, RegType reg);
-            void commit_all(std::byte *&code);
-            void deactivate(std::byte *&code, std::span<value> local_locations,
-                            RegType reg);
-            void deactivate_all(std::byte *&code,
-                                std::span<value> local_locations);
+                          uint32_t local_idx, RegType reg, bool set);
+            void commit(RegType reg);
+            void commit_all();
+            void deactivate(std::span<value> local_locations, RegType reg);
+            void deactivate_all(std::span<value> local_locations);
             bool is_active(RegType reg);
-            bool is_pending(RegType reg);
         };
 
         local_manager locals;
@@ -129,23 +124,23 @@ class Arm64 {
         }
 
       public:
-        RegType result(std::byte *&code, std::span<value> local_locations);
-        RegType temporary(std::byte *&code, std::span<value> local_locations);
+        RegType result(std::span<value> local_locations);
+        RegType temporary(std::span<value> local_locations);
         void untemporary(RegType reg);
         void reset_temporaries();
 
         void activate(std::byte *&code, std::span<value> local_locations,
                       uint32_t local_idx, RegType reg, bool set);
-        void deactivate_all(std::byte *&code, std::span<value> local_locations);
-        void commit_all(std::byte *&code);
+        void deactivate_all(std::span<value> local_locations);
+        void commit_all();
 
-        void use(std::byte *&, RegType, metadata);
+        void use(RegType, metadata);
         void surrender(RegType, value *);
-        void purge(std::byte *&code, std::span<value> local_locations, RegType);
-        void clobber_all(std::byte *&code, std::span<value> local_locations);
+        void purge(std::span<value> local_locations, RegType);
+        void clobber_all(std::span<value> local_locations);
 
-        void spill(std::byte *&, RegType reg, value *v);
-        bool was_prior(RegType reg, std::byte *code);
+        void spill(RegType reg, value *v);
+        bool adjust_spill(RegType reg, std::byte *&code);
     };
 
     using temp_int_manager = reg_manager<icaller_saved>;
@@ -160,9 +155,9 @@ class Arm64 {
                                                 Arm64::temp_int_manager,
                                                 Arm64::temp_float_manager>;
 
-        temporary(Arm64 *that, std::byte *&code)
+        temporary(Arm64 *that)
             : that(that),
-              reg(that->regs_of<RegType>().temporary(code, that->locals)) {}
+              reg(that->regs_of<RegType>().temporary(that->locals)) {}
 
         temporary(RegType existing) {
             that = nullptr;
@@ -194,13 +189,14 @@ class Arm64 {
   private:
     void use(std::byte *&, value, valtype);
     void surrender(valtype, value *);
-    void spill(std::byte *&, valtype, value *);
+    void spill(valtype, value *);
 
     template <typename RegType> void use(std::byte *&, RegType);
     template <typename RegType> void surrender(RegType, value *);
-    template <typename RegType> void purge(std::byte *&, RegType);
-    template <typename RegType> void spill(std::byte *&, RegType reg, value *v);
-    template <typename RegType> bool was_prior(RegType reg, std::byte *code);
+    template <typename RegType> void purge(RegType);
+    template <typename RegType> void spill(RegType reg, value *v);
+    template <typename RegType>
+    bool adjust_spill(RegType reg, std::byte *&code);
 
     // caller saved registers
     temp_int_manager intregs;
@@ -248,7 +244,7 @@ class Arm64 {
     value *values = values_start.get();
 
     void clobber_flags(std::byte *&code);
-    void clobber_registers(std::byte *&code);
+    void clobber_registers();
 
     void push(value v);
 
@@ -270,6 +266,7 @@ class Arm64 {
         struct flags : thresholdless {};
     };
 
+    template <typename To> void despill(std::byte *&code, value *v);
     template <typename To> value adapt_value(std::byte *&code, value *v);
 
     template <typename To>
