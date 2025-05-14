@@ -78,7 +78,7 @@ int main(int argc, const char **argv) {
     // remove mitey-jit arg
     set_args(argc - 1, argv + 1);
 
-    auto path = "/tmp/jit-sandbox/";
+    auto path = ".";
     auto fd = open(path, O_RDONLY | O_DIRECTORY, 0666);
     register_preopen(fd, "/");
 
