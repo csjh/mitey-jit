@@ -198,6 +198,14 @@ class Arm64 {
     template <typename RegType>
     bool adjust_spill(RegType reg, std::byte *&code);
 
+    void polymorph(valtype ty, auto &&func) {
+        if (is_float(ty)) [[unlikely]] {
+            func(freg{});
+        } else {
+            func(ireg{});
+        }
+    }
+
     // caller saved registers
     temp_int_manager intregs;
     temp_float_manager floatregs;
