@@ -1163,11 +1163,11 @@ void Arm64::reg_manager<registers>::clobber_all(
 
 template <typename RegType, size_t N>
 void Arm64::reg_info<RegType, N>::spill(RegType reg, size_t i) {
-    auto [addr, v, offset] = data[i];
-    if (addr) {
-        masm::str_no_temp(addr, true, offset, stackreg, reg);
-        *v = value::stack(offset);
-        data[i].spilladdr = nullptr;
+    if (values[i]) {
+        auto addr = spilladdr;
+        masm::str_no_temp(addr, true, stack_offset, stackreg, reg);
+        *values[i] = value::stack(stack_offset);
+        values[i] = nullptr;
     }
 }
 
@@ -1175,20 +1175,22 @@ template <typename RegType, size_t N>
 void Arm64::reg_info<RegType, N>::spill(RegType reg, value *v) {
     assert(count > 0);
     count--;
-    auto [addr, v2, offset] = data[count % N];
-    assert(v == v2);
-    if (addr) {
-        masm::str_no_temp(addr, true, offset, stackreg, reg);
-        *v = value::stack(offset);
-        // todo: why is next line necessary?
-        data[count % N].spilladdr = nullptr;
-    }
+    assert(values[count % N] != nullptr);
+    assert(v == values[count % N]);
+    return spill(reg, count % N);
 }
 
 template <typename RegType, size_t N>
-void Arm64::reg_info<RegType, N>::use(RegType reg, metadata md) {
-    spill(reg, count % N);
-    data[count % N] = md;
+void Arm64::reg_info<RegType, N>::use(std::byte *&code, RegType reg,
+                                      metadata md) {
+    if (count == 0) {
+        spilladdr = code;
+        stack_offset = md.stack_offset;
+        masm::pad_spill(code, stack_offset);
+    } else {
+        spill(reg, count % N);
+    }
+    values[count % N] = md.value_offset;
     count++;
 }
 
@@ -1196,8 +1198,8 @@ template <typename RegType, size_t N>
 bool Arm64::reg_info<RegType, N>::surrender(value *v) {
     assert(count > 0);
     count--;
-    assert(data[count % N].value_offset == v);
-    data[count % N].spilladdr = nullptr;
+    assert(values[count % N] == v);
+    values[count % N] = nullptr;
     return count == 0;
 }
 
@@ -1212,7 +1214,7 @@ void Arm64::reg_info<RegType, N>::purge(RegType reg) {
 template <typename RegType, size_t N>
 bool Arm64::reg_info<RegType, N>::adjust_spill(RegType reg, std::byte *&code) {
     assert(count > 0);
-    if (data[(count - 1) % N].spilladdr == code - sizeof(inst)) {
+    if (count == 1 && spilladdr == code - sizeof(inst)) {
         code -= sizeof(inst);
         return true;
     }
@@ -1220,9 +1222,10 @@ bool Arm64::reg_info<RegType, N>::adjust_spill(RegType reg, std::byte *&code) {
 }
 
 template <auto registers>
-void Arm64::reg_manager<registers>::use(RegType reg, metadata md) {
+void Arm64::reg_manager<registers>::use(std::byte *&code, RegType reg,
+                                        metadata md) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    get_manager_of(reg).use(reg, md);
+    get_manager_of(reg).use(code, reg, md);
     if constexpr (allocate)
         reg_positions.use(to_index(reg));
 }
@@ -1280,13 +1283,12 @@ void Arm64::use(std::byte *&code, value v, valtype ty) {
 }
 
 template <typename RegType> void Arm64::use(std::byte *&code, RegType reg) {
-    auto md = metadata{code, values, stack_size};
+    auto md = metadata{values, stack_size};
     if (is_volatile(reg)) {
-        regs_of<RegType>().use(reg, md);
+        regs_of<RegType>().use(code, reg, md);
     } else {
-        locals_of<RegType>().use(reg, md);
+        locals_of<RegType>().use(code, reg, md);
     }
-    masm::pad_spill(code, stack_size);
 }
 
 void Arm64::surrender(valtype ty, value *v) {
@@ -1493,7 +1495,7 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
     auto start = code;
 
     auto expected = values - copied_values.size();
-    if (stack_offset == stack_size - copied_values.bytesize()) {
+    if (false && stack_offset == stack_size - copied_values.bytesize()) {
         for (auto i = ssize_t(copied_values.size()) - 1; i >= 0; i--) {
             auto dest = stack_offset + i * sizeof(runtime::WasmValue);
 
@@ -1509,7 +1511,12 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
                 clobber_flags(code);
                 break;
             case value::location::stack:
-                assert(expected[i].as<uint32_t>() == dest);
+                if (expected[i].as<uint32_t>() != dest) {
+                    temporary<ireg> reg(this);
+                    masm::ldr(code, this, true, expected[i].as<uint32_t>(),
+                              stackreg, reg);
+                    masm::str(code, this, true, dest, stackreg, reg.get());
+                }
                 break;
             case value::location::imm:
                 assert(!is_float(v));
@@ -1530,9 +1537,52 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
             }
 
             polymorph(copied_values[i], [&]<typename T>(T) {
-                auto reg =
-                    adapt_value_into<T>(code, &expected[i], !discard_copied);
-                masm::str(code, this, true, dest, stackreg, reg.get());
+                auto *v = &expected[i];
+                T container;
+
+                switch (v->where()) {
+                case value::location::reg:
+                case value::location::multireg: {
+                    adjust_spill(v->as<T>(), code);
+                    if (discard_copied) {
+                        surrender(v->as<T>(), v);
+                    }
+                    container = v->as<T>();
+                    break;
+                }
+                case value::location::stack: {
+                    temporary<T> reg(this);
+                    auto offset = v->as<uint32_t>();
+                    masm::ldr(code, this, true, offset, stackreg, reg);
+                    container = reg;
+                    break;
+                }
+                case value::location::imm: {
+                    if constexpr (std::is_same_v<T, freg>) {
+                        assert(false);
+                    } else {
+                        temporary<T> reg(this);
+                        auto imm = v->as<uint32_t>();
+                        masm::mov(code, imm, reg);
+                        container = reg;
+                        break;
+                    }
+                }
+                case value::location::flags: {
+                    if constexpr (std::is_same_v<T, freg>) {
+                        assert(false);
+                    } else {
+                        if (discard_copied)
+                            flag = flags();
+                        temporary<T> reg(this);
+                        raw::cset(code, false, v->as<cond>(), reg);
+                        container = reg;
+                        break;
+                    }
+                }
+                }
+
+                masm::str(code, this, true, dest, stackreg, container);
             });
         }
     }

@@ -54,18 +54,19 @@ class value {
 
 class Arm64 {
     struct metadata {
-        std::byte *spilladdr = nullptr;
         value *value_offset = nullptr;
         uint32_t stack_offset = 0;
     };
 
   public:
     template <typename RegType, size_t N> class reg_info {
-        metadata data[N];
+        std::byte *spilladdr = nullptr;
+        uint32_t stack_offset = 0;
+        value *values[N];
         size_t count = 0;
 
       public:
-        void use(RegType, metadata);
+        void use(std::byte *&, RegType, metadata);
         bool surrender(value *);
         void purge(RegType);
         bool adjust_spill(RegType reg, std::byte *&code);
@@ -134,7 +135,7 @@ class Arm64 {
         void deactivate_all(std::span<value> local_locations);
         void commit_all();
 
-        void use(RegType, metadata);
+        void use(std::byte *&, RegType, metadata);
         void surrender(RegType, value *);
         void purge(std::span<value> local_locations, RegType);
         void clobber_all(std::span<value> local_locations);
