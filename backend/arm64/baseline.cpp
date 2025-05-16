@@ -2410,30 +2410,34 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             if constexpr (is_float) {
                 assert(false);
             } else {
-                masm::mov(code, v.as<uint32_t>(), locreg);
                 purge(locreg);
+                masm::mov(code, v.as<uint32_t>(), locreg);
                 break;
             }
         case value::location::flags:
             if constexpr (is_float) {
                 assert(false);
             } else {
+                purge(locreg);
                 raw::cset(code, true, v.as<cond>(), locreg);
                 flag = flags();
-                purge(locreg);
                 break;
             }
         case value::location::stack:
-            masm::ldr(code, this, true, v.as<uint32_t>(), stackreg, locreg);
             purge(locreg);
+            masm::ldr(code, this, true, v.as<uint32_t>(), stackreg, locreg);
             break;
         case value::location::reg: {
             auto reg = v.as<T>();
             bool is_prior = adjust_spill(reg, code);
+            surrender(reg, values);
+
             if (in_caller_saved) {
                 if (is_volatile(reg) && is_prior) {
                     // overwrite instruction
                     code -= sizeof(inst);
+
+                    purge(locreg);
 
                     inst instruction;
                     std::memcpy(&instruction, code, sizeof(inst));
@@ -2442,26 +2446,25 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                     instruction |= (unsigned)locreg;
                     put(code, instruction);
                 } else {
+                    purge(locreg);
                     raw::mov(code, true, reg, locreg);
                 }
-                purge(locreg);
             } else {
                 assert(locreg == reg);
             }
-            surrender(reg, values);
             break;
         }
         case value::location::multireg: {
             auto reg = v.as<T>();
             adjust_spill(reg, code);
+            surrender(reg, values);
+
             // can't reuse non-volatile multiregs
             if (in_caller_saved || !is_volatile(reg)) {
-                raw::mov(code, true, reg, locreg);
-                surrender(reg, values);
                 purge(locreg);
+                raw::mov(code, true, reg, locreg);
             } else {
                 assert(locreg == reg);
-                surrender(reg, values);
             }
             break;
         }
