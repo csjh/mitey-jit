@@ -11,6 +11,8 @@
 namespace mitey {
 namespace arm64 {
 
+using inst = uint32_t;
+
 class value {
   public:
     enum class location { reg, stack, imm, flags, multireg };
@@ -62,16 +64,18 @@ class Arm64 {
     template <typename RegType, size_t N> class reg_info {
         std::byte *spilladdr = nullptr;
         uint32_t stack_offset = 0;
+        inst source;
         value *values[N];
         size_t count = 0;
 
       public:
         void use(std::byte *&, RegType, metadata);
         bool surrender(value *);
-        void purge(RegType);
-        bool adjust_spill(RegType reg, std::byte *&code);
-        void spill(RegType, size_t i);
-        void spill(RegType, value *v);
+        void purge(std::byte *&, RegType);
+        bool was_prior(RegType reg, std::byte *code);
+        void spill(std::byte *&, RegType, size_t i);
+        void spill(std::byte *&, RegType, value *v);
+        void set_spill(std::byte *&);
     };
 
     template <auto registers> class reg_manager {
@@ -125,8 +129,8 @@ class Arm64 {
         }
 
       public:
-        RegType result(std::span<value> local_locations);
-        RegType temporary(std::span<value> local_locations);
+        RegType result(std::byte *&, std::span<value> local_locations);
+        RegType temporary(std::byte *&, std::span<value> local_locations);
         void untemporary(RegType reg);
         void reset_temporaries();
 
@@ -137,11 +141,12 @@ class Arm64 {
 
         void use(std::byte *&, RegType, metadata);
         void surrender(RegType, value *);
-        void purge(std::span<value> local_locations, RegType);
-        void clobber_all(std::span<value> local_locations);
+        void purge(std::byte *&, std::span<value> local_locations, RegType);
+        void clobber_all(std::byte *&, std::span<value> local_locations);
+        void set_spills(std::byte *&);
 
-        void spill(RegType reg, value *v);
-        bool adjust_spill(RegType reg, std::byte *&code);
+        void spill(std::byte *&, RegType reg, value *v);
+        bool was_prior(RegType reg, std::byte *code);
     };
 
     using temp_int_manager = reg_manager<icaller_saved>;
@@ -156,9 +161,9 @@ class Arm64 {
                                                 Arm64::temp_int_manager,
                                                 Arm64::temp_float_manager>;
 
-        temporary(Arm64 *that)
+        temporary(Arm64 *that, std::byte *&code)
             : that(that),
-              reg(that->regs_of<RegType>().temporary(that->locals)) {}
+              reg(that->regs_of<RegType>().temporary(code, that->locals)) {}
 
         temporary(RegType existing) {
             that = nullptr;
@@ -190,14 +195,14 @@ class Arm64 {
   private:
     void use(std::byte *&, value, valtype);
     void surrender(valtype, value *);
-    void spill(valtype, value *);
+    void spill(std::byte *&, valtype, value *);
 
     template <typename RegType> void use(std::byte *&, RegType);
     template <typename RegType> void surrender(RegType, value *);
-    template <typename RegType> void purge(RegType);
-    template <typename RegType> void spill(RegType reg, value *v);
+    template <typename RegType> void purge(std::byte *&, RegType);
+    template <typename RegType> void spill(std::byte *&, RegType reg, value *v);
     template <typename RegType>
-    bool adjust_spill(RegType reg, std::byte *&code);
+    bool was_prior(RegType reg, std::byte *code);
 
     void polymorph(valtype ty, auto &&func) {
         if (is_float(ty)) [[unlikely]] {
@@ -253,7 +258,7 @@ class Arm64 {
     value *values = values_start.get();
 
     void clobber_flags(std::byte *&code);
-    void clobber_registers();
+    void clobber_registers(std::byte *&);
 
     void push(value v);
 
@@ -275,7 +280,6 @@ class Arm64 {
         struct flags : thresholdless {};
     };
 
-    template <typename To> void despill(std::byte *&code, value *v);
     template <typename To> value adapt_value(std::byte *&code, value *v);
 
     template <typename To>
