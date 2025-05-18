@@ -1165,28 +1165,19 @@ void Arm64::reg_manager<registers>::clobber_all(
 template <typename RegType, size_t N>
 void Arm64::reg_info<RegType, N>::spill(std::byte *&code, RegType reg,
                                         size_t i) {
-    if (values[i]) {
-        if (spilladdr) {
-            // i want code to update if it's used, but not spilladdr
-            auto addr = spilladdr;
-            masm::str_no_temp(addr, true, stack_offset, stackreg, reg);
-        } else {
-            spilladdr = code;
-            masm::str_no_temp(code, true, stack_offset, stackreg, reg);
-        }
-        *values[i] = value::stack(stack_offset);
-        values[i] = nullptr;
-    }
-}
+    if (!values[i]) [[unlikely]]
+        return;
 
-template <typename RegType, size_t N>
-void Arm64::reg_info<RegType, N>::spill(std::byte *&code, RegType reg,
-                                        value *v) {
-    assert(count > 0);
-    count--;
-    assert(values[count % N] != nullptr);
-    assert(v == values[count % N]);
-    return spill(code, reg, count % N);
+    if (spilladdr) {
+        // i want code to update if it's used, but not spilladdr
+        auto addr = spilladdr;
+        masm::str_no_temp(addr, true, stack_offset, stackreg, reg);
+    } else {
+        spilladdr = code;
+        masm::str_no_temp(code, true, stack_offset, stackreg, reg);
+    }
+    *values[i] = value::stack(stack_offset);
+    values[i] = nullptr;
 }
 
 template <typename RegType, size_t N>
@@ -1298,17 +1289,6 @@ bool Arm64::reg_manager<registers>::was_prior(RegType reg, std::byte *code) {
     return get_manager_of(reg).was_prior(reg, code);
 }
 
-template <auto registers>
-void Arm64::reg_manager<registers>::spill(std::byte *&code, RegType reg,
-                                          value *v) {
-    assert(std::ranges::find(registers, reg) != registers.end());
-    get_manager_of(reg).spill(code, reg, v);
-}
-
-void Arm64::use(std::byte *&code, value v, valtype ty) {
-    polymorph(ty, [&]<typename T>(T) { use(code, v.as<T>()); });
-}
-
 template <typename RegType> void Arm64::use(std::byte *&code, RegType reg) {
     auto md = metadata{values, stack_size};
     if (is_volatile(reg)) {
@@ -1316,10 +1296,6 @@ template <typename RegType> void Arm64::use(std::byte *&code, RegType reg) {
     } else {
         locals_of<RegType>().use(code, reg, md);
     }
-}
-
-void Arm64::surrender(valtype ty, value *v) {
-    polymorph(ty, [&]<typename T>(T) { surrender(v->as<T>(), v); });
 }
 
 template <typename RegType> void Arm64::surrender(RegType reg, value *v) {
@@ -1336,19 +1312,6 @@ template <typename RegType> void Arm64::purge(std::byte *&code, RegType reg) {
     } else {
         locals_of<RegType>().purge(code, locals, reg);
     }
-}
-
-template <typename RegType>
-void Arm64::spill(std::byte *&code, RegType reg, value *v) {
-    if (is_volatile(reg)) {
-        regs_of<RegType>().spill(code, reg, v);
-    } else {
-        locals_of<RegType>().spill(code, reg, v);
-    }
-}
-
-void Arm64::spill(std::byte *&code, valtype ty, value *v) {
-    polymorph(ty, [&]<typename T>(T) { spill(code, v->as<T>(), v); });
 }
 
 template <typename RegType>

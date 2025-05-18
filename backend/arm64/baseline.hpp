@@ -68,13 +68,13 @@ class Arm64 {
         value *values[N];
         size_t count = 0;
 
+        void spill(std::byte *&, RegType, size_t i);
+
       public:
         void use(std::byte *&, RegType, metadata);
         bool surrender(value *);
         void purge(std::byte *&, RegType);
         bool was_prior(RegType reg, std::byte *code);
-        void spill(std::byte *&, RegType, size_t i);
-        void spill(std::byte *&, RegType, value *v);
         void set_spill(std::byte *&);
     };
 
@@ -119,8 +119,6 @@ class Arm64 {
 
         reg_lru<allocate ? N : 0> reg_positions;
 
-        void spill(RegType, size_t);
-
         static uint8_t to_index(RegType reg) {
             return static_cast<uint8_t>(reg) - First;
         }
@@ -145,7 +143,6 @@ class Arm64 {
         void clobber_all(std::byte *&, std::span<value> local_locations);
         void set_spills(std::byte *&);
 
-        void spill(std::byte *&, RegType reg, value *v);
         bool was_prior(RegType reg, std::byte *code);
     };
 
@@ -193,16 +190,10 @@ class Arm64 {
     };
 
   private:
-    void use(std::byte *&, value, valtype);
-    void surrender(valtype, value *);
-    void spill(std::byte *&, valtype, value *);
-
     template <typename RegType> void use(std::byte *&, RegType);
     template <typename RegType> void surrender(RegType, value *);
     template <typename RegType> void purge(std::byte *&, RegType);
-    template <typename RegType> void spill(std::byte *&, RegType reg, value *v);
-    template <typename RegType>
-    bool was_prior(RegType reg, std::byte *code);
+    template <typename RegType> bool was_prior(RegType reg, std::byte *code);
 
     void polymorph(valtype ty, auto &&func) {
         if (is_float(ty)) [[unlikely]] {
