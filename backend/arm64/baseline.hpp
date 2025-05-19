@@ -3,7 +3,6 @@
 #include "../../module.hpp"
 #include "./enums.hpp"
 #include "./reg_lru.hpp"
-#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <span>

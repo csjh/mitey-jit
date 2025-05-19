@@ -1167,17 +1167,17 @@ void Arm64::reg_info<RegType, N>::spill(std::byte *&code, RegType reg,
                                         size_t i) {
     if (!values[i]) [[unlikely]]
         return;
+    *values[i] = value::stack(stack_offset);
+    values[i] = nullptr;
 
-    if (spilladdr) {
+    if (!spilladdr) {
+        spilladdr = code;
+        masm::str_no_temp(code, true, stack_offset, stackreg, reg);
+    } else {
         // i want code to update if it's used, but not spilladdr
         auto addr = spilladdr;
         masm::str_no_temp(addr, true, stack_offset, stackreg, reg);
-    } else {
-        spilladdr = code;
-        masm::str_no_temp(code, true, stack_offset, stackreg, reg);
     }
-    *values[i] = value::stack(stack_offset);
-    values[i] = nullptr;
 }
 
 template <typename RegType, size_t N>
@@ -1224,11 +1224,7 @@ bool Arm64::reg_info<RegType, N>::was_prior(RegType reg, std::byte *code) {
     assert(count > 0);
     inst current;
     std::memcpy(&current, code - sizeof(inst), sizeof(inst));
-    if (count == 1 && current == source) {
-        code -= sizeof(inst);
-        return true;
-    }
-    return false;
+    return count == 1 && current == source;
 }
 
 template <auto registers>
