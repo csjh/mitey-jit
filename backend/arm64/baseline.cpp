@@ -1162,9 +1162,9 @@ void Arm64::reg_manager<registers>::clobber_all(
     }
 }
 
-template <typename RegType, size_t N>
+template <typename RegType, uint32_t N>
 void Arm64::reg_info<RegType, N>::spill(std::byte *&code, RegType reg,
-                                        size_t i) {
+                                        uint32_t i) {
     if (!values[i]) [[unlikely]]
         return;
     *values[i] = value::stack(stack_offset);
@@ -1180,7 +1180,7 @@ void Arm64::reg_info<RegType, N>::spill(std::byte *&code, RegType reg,
     }
 }
 
-template <typename RegType, size_t N>
+template <typename RegType, uint32_t N>
 void Arm64::reg_info<RegType, N>::use(std::byte *&code, RegType reg,
                                       metadata md) {
     if (count == 0) {
@@ -1194,7 +1194,7 @@ void Arm64::reg_info<RegType, N>::use(std::byte *&code, RegType reg,
     count++;
 }
 
-template <typename RegType, size_t N>
+template <typename RegType, uint32_t N>
 void Arm64::reg_info<RegType, N>::set_spill(std::byte *&code) {
     if (count != 0 && !spilladdr) {
         spilladdr = code;
@@ -1202,7 +1202,7 @@ void Arm64::reg_info<RegType, N>::set_spill(std::byte *&code) {
     }
 }
 
-template <typename RegType, size_t N>
+template <typename RegType, uint32_t N>
 bool Arm64::reg_info<RegType, N>::surrender(value *v) {
     assert(count > 0);
     count--;
@@ -1211,7 +1211,7 @@ bool Arm64::reg_info<RegType, N>::surrender(value *v) {
     return count == 0;
 }
 
-template <typename RegType, size_t N>
+template <typename RegType, uint32_t N>
 void Arm64::reg_info<RegType, N>::purge(std::byte *&code, RegType reg) {
     for (size_t i = 0; i < std::min(count, N); i++) {
         spill(code, reg, i);
@@ -1219,7 +1219,7 @@ void Arm64::reg_info<RegType, N>::purge(std::byte *&code, RegType reg) {
     count = 0;
 }
 
-template <typename RegType, size_t N>
+template <typename RegType, uint32_t N>
 bool Arm64::reg_info<RegType, N>::was_prior(RegType reg, std::byte *code) {
     assert(count > 0);
     inst current;

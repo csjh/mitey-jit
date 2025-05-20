@@ -60,14 +60,13 @@ class Arm64 {
     };
 
   public:
-    template <typename RegType, size_t N> class reg_info {
+    template <typename RegType, uint32_t N> class reg_info {
         std::byte *spilladdr = nullptr;
         uint32_t stack_offset = 0;
-        inst source;
+        uint32_t count = 0;
         value *values[N];
-        size_t count = 0;
 
-        void spill(std::byte *&, RegType, size_t i);
+        void spill(std::byte *&, RegType, uint32_t i);
 
       public:
         void use(std::byte *&, RegType, metadata);
