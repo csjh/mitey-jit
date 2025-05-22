@@ -52,12 +52,23 @@ static inline bool is_imexdesc(uint8_t byte) {
 using ImportSpecifier = std::pair<std::string, std::string>;
 
 struct FunctionShell {
+    // clang-format off
+    // imported | exported | values
+    // false    | false    | start is function, trampoline is nil
+    // false    | true     | start is function, trampoline is boilerplate that does stack -> custom -> stack conversion
+    // true     | false    | start is nil, trampoline is boilerplate that does custom -> stack -> custom conversion
+    // true     | true     | start is nil, trampoline is boilerplate that does custom -> stack -> custom conversion
+    // clang-format on
     std::byte *start;
+    std::byte *trampoline;
+
+    std::optional<ImportSpecifier> import;
+    bool exported;
+
     WasmSignature &type;
     valtype_vector locals;
     std::vector<uint32_t> local_bytes;
-    std::optional<ImportSpecifier> import;
-    bool is_declared = false;
+    bool is_declared;
 };
 
 struct TableShell {
