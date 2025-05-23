@@ -181,7 +181,7 @@ HANDLER(call_extern) {
     gas([&] {
         auto &func = MISC_GET(FunctionInfo, tmp1);
         stack -= func.type.params;
-        func.signature(func.memory, func.misc, stack);
+        func.stack_signature(func.memory, func.misc, stack);
         stack += func.type.results;
     });
     POSTLUDE;
@@ -209,7 +209,7 @@ HANDLER(call_indirect) {
 
     gas([&] {
         stack -= info.type.params;
-        funcref->signature(funcref->memory, funcref->misc, stack);
+        funcref->stack_signature(funcref->memory, funcref->misc, stack);
         stack += info.type.results;
     });
 

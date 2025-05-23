@@ -3,6 +3,7 @@
 #include "interfacing.hpp"
 #include "runtime.hpp"
 #include "spec.hpp"
+#include <cassert>
 
 namespace mitey {
 
@@ -93,12 +94,19 @@ void Instance::initialize(const runtime::Imports &imports) {
                 functions[i].misc = misc.get();
                 functions[i].instance = self.lock();
             }
+
+            assert(functions[i].stack_signature);
+            assert(!fn.start);
+            assert(fn.trampoline);
+            functions[i].custom_signature =
+                reinterpret_cast<runtime::TemplessSignature *>(fn.trampoline);
         } else {
             auto memory = this->memory.get()->memory.get();
             auto misc = this->misc.get();
             functions[i] = runtime::FunctionInfo(
                 runtime::FunctionType(fn.type), memory, misc,
                 reinterpret_cast<runtime::TemplessSignature *>(fn.start),
+                reinterpret_cast<runtime::TemplessSignature *>(fn.trampoline),
                 self.lock());
         }
         misc_functions[i] = &functions[i];
@@ -281,7 +289,7 @@ void Instance::initialize(const runtime::Imports &imports) {
         }
         auto stack =
             reinterpret_cast<runtime::WasmValue *>(initial_stack.get());
-        fn.signature(fn.memory, fn.misc, stack);
+        fn.custom_signature(fn.memory, fn.misc, stack);
     }
 
     runtime::trap_buf = prev;

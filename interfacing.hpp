@@ -43,7 +43,7 @@ std::function<FunctionType> externalize(const runtime::FunctionInfo &fn) {
             error<trap_error>(runtime::trap_kind_to_string(result));
         }
 
-        fn.signature(fn.memory, fn.misc, stack);
+        fn.stack_signature(fn.memory, fn.misc, stack);
 
         runtime::trap_buf = prev_buf;
         runtime::call_stack_depth = prev_depth;
@@ -87,7 +87,7 @@ externalize(const runtime::FunctionInfo &fn) {
             error<trap_error>(runtime::trap_kind_to_string(result));
         }
 
-        fn.signature(fn.memory, fn.misc, stack);
+        fn.stack_signature(fn.memory, fn.misc, stack);
 
         runtime::trap_buf = prev_buf;
         runtime::call_stack_depth = prev_depth;
@@ -203,7 +203,8 @@ template <auto func> runtime::FunctionInfo internalize() {
         remove_first_param_t<std::remove_pointer_t<decltype(func)>>,
         decltype(func)>;
     return runtime::FunctionInfo(WasmSignature::from_type<WasmType>(), nullptr,
-                                 nullptr, wasm_functionify<func>(), nullptr);
+                                 nullptr, nullptr, wasm_functionify<func>(),
+                                 nullptr);
 }
 
 } // namespace mitey

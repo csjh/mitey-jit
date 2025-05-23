@@ -158,7 +158,10 @@ struct FunctionInfo {
     FunctionType type;
     std::byte *memory;
     void **misc;
-    TemplessSignature *signature;
+    // values are preferred in registers
+    TemplessSignature *custom_signature;
+    // values are passed on the stack
+    TemplessSignature *stack_signature;
     // this creates a circular dependency
     // todo: fix this
     std::shared_ptr<Instance> instance;

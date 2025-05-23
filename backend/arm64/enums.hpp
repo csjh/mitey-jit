@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 
 namespace mitey {
 namespace arm64 {
@@ -34,6 +35,24 @@ constexpr auto icaller_saved = std::to_array({
 
 constexpr auto fcaller_saved = std::to_array({
     freg::d0, freg::d1, freg::d2, freg::d3, freg::d4, freg::d5, freg::d6, freg::d7});
+
+// 2 registers are reserved for ldp/stp in prelude/postlude
+constexpr auto iargs = std::span(icaller_saved).subspan(0, icaller_saved.size() - 2);
+constexpr auto fargs = std::span(fcaller_saved).subspan(0, fcaller_saved.size() - 2);
+
+constexpr auto isafe = std::span(icaller_saved).subspan(icaller_saved.size() - 2, 2);
+constexpr auto fsafe = std::span(fcaller_saved).subspan(fcaller_saved.size() - 2, 2);
+
+template <typename T>
+constexpr auto convention_safe = [] {
+    if constexpr (std::is_same_v<T, ireg>) {
+        return isafe;
+    } else if constexpr (std::is_same_v<T, freg>) {
+        return fsafe;
+    } else {
+        static_assert(!std::is_same_v<T, T>, "Invalid register type");
+    }
+}();
 
 // todo: maybe put in callee saved? can bench
 constexpr auto memreg = ireg::x0;

@@ -62,6 +62,7 @@ class Arm64 {
   public:
     template <typename RegType, uint32_t N> class reg_info {
         std::byte *spilladdr = nullptr;
+        std::byte *source_location = nullptr;
         uint32_t stack_offset = 0;
         uint32_t count = 0;
         value *values[N];
@@ -280,6 +281,8 @@ class Arm64 {
                                    bool soft = false);
 
     void stackify(std::byte *&code, valtype_vector &values);
+    void move_single(std::byte *&code, valtype ty, value *expected,
+                     uint32_t dest, bool discard_copied, bool constrained);
     bool move_results(std::byte *&code, valtype_vector &copied_values,
                       uint32_t copy_to, bool discard_copied);
     void discard(std::byte *&code, WasmStack &stack, uint32_t skip,
@@ -314,10 +317,16 @@ class Arm64 {
                       std::optional<uint64_t> temp1 = std::nullopt,
                       std::optional<uint64_t> temp2 = std::nullopt);
 
+    void conventionalize(std::byte *&, WasmStack &, valtype_vector &);
+
   public:
     // todo: figure out what values for these
+    // todo: account for trampolines in function_overhead
     static constexpr size_t function_overhead = 100 * sizeof(uint32_t);
     static constexpr size_t max_instruction = 100 * sizeof(uint32_t);
+
+    static std::byte *generate_trampoline(std::byte *&, uint32_t,
+                                          FunctionShell &);
 
     void start_function(SHARED_PARAMS, FunctionShell &fn);
 

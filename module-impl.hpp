@@ -256,9 +256,9 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 if (typeidx >= types.size()) {
                     error<validation_error>("unknown type");
                 }
-                functions.emplace_back(
-                    nullptr, types[typeidx], valtype_vector{},
-                    std::vector<uint32_t>{}, specifier, false);
+                functions.emplace_back(nullptr, nullptr, specifier, false,
+                                       types[typeidx], valtype_vector{},
+                                       std::vector<uint32_t>{}, false);
                 n_fn_imports++;
             } else if (desc == ImExDesc::table) {
                 // table
@@ -313,8 +313,10 @@ void Module::initialize(std::span<uint8_t> bytes) {
             if (type_idx >= types.size()) {
                 error<validation_error>("unknown type");
             }
-            functions.emplace_back(nullptr, types[type_idx], valtype_vector{},
-                                   std::vector<uint32_t>{}, std::nullopt);
+
+            functions.emplace_back(nullptr, nullptr, std::nullopt, false,
+                                   types[type_idx], valtype_vector{},
+                                   std::vector<uint32_t>{}, false);
         }
     });
 
@@ -428,6 +430,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 }
                 // implicit declaration
                 functions[idx].is_declared = true;
+                functions[idx].exported = true;
             } else if (export_desc == ImExDesc::table) {
                 if (idx >= tables.size()) {
                     error<validation_error>("unknown table");
@@ -609,6 +612,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
 
     skip_custom_section();
 
+    // todo: move logic outside of code section
     // code section
     section(
         10,
@@ -620,7 +624,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     "function and code section have inconsistent lengths");
             }
 
-            auto ludes = n_functions * Target::function_overhead;
+            auto ludes = functions.size() * Target::function_overhead;
 
             auto other = section_length * Target::max_instruction;
 
@@ -629,11 +633,14 @@ void Module::initialize(std::span<uint8_t> bytes) {
 
             auto code = executable.get();
             Pager::write(executable, [&] {
-                for (FunctionShell &fn : functions) {
-                    if (fn.import) {
-                        // skip imported functions
-                        continue;
-                    }
+                auto funcs = functions.begin();
+                for (auto i = 0; i < n_fn_imports; i++, funcs++) {
+                    funcs->trampoline =
+                        Target::generate_trampoline(code, 1 + i, *funcs);
+                }
+                for (auto it = funcs; it != functions.end(); ++it) {
+                    auto &fn = *it;
+                    auto idx = it - functions.begin();
 
                     fn.locals = fn.type.params;
 
@@ -666,8 +673,11 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     }
                     std::reverse(fn.local_bytes.begin(), fn.local_bytes.end());
 
-                    auto body_length = function_length - (iter - start);
+                    fn.trampoline =
+                        Target::generate_trampoline(code, 1 + idx, fn);
                     fn.start = code;
+
+                    auto body_length = function_length - (iter - start);
                     if (!iter.has_n_left(body_length)) {
                         error<malformed_error>("length out of bounds");
                     }

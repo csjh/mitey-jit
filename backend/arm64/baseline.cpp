@@ -1038,6 +1038,20 @@ void ldr(std::byte *&code, Arm64 *that, bool sf, uint32_t offset, ireg rn,
 }
 
 template <typename RegType>
+void ldr_no_temp(std::byte *&code, bool sf, uint32_t offset, ireg rn,
+                 RegType rt) {
+    assert(offset < (1 << 24));
+
+    if (offset < 1 << 12) {
+        raw::ldr(code, sf, offset, rn, rt);
+    } else if (offset < 1 << 24) {
+        raw::add(code, true, offset >> 12, rn, rn, true);
+        raw::ldr(code, sf, offset & 0xfff, rn, rt);
+        raw::sub(code, true, offset >> 12, rn, rn, true);
+    }
+}
+
+template <typename RegType>
 void str_no_temp(std::byte *&code, bool sf, uint32_t offset, ireg rn,
                  RegType rt) {
     assert(offset < (1 << 24));
@@ -1186,7 +1200,7 @@ void Arm64::reg_info<RegType, N>::use(std::byte *&code, RegType reg,
     if (count == 0) {
         spilladdr = nullptr;
         stack_offset = md.stack_offset;
-        std::memcpy(&source, code - sizeof(inst), sizeof(inst));
+        source_location = code;
     } else if (count >= N) {
         spill(code, reg, count % N);
     }
@@ -1222,9 +1236,7 @@ void Arm64::reg_info<RegType, N>::purge(std::byte *&code, RegType reg) {
 template <typename RegType, uint32_t N>
 bool Arm64::reg_info<RegType, N>::was_prior(RegType reg, std::byte *code) {
     assert(count > 0);
-    inst current;
-    std::memcpy(&current, code - sizeof(inst), sizeof(inst));
-    return count == 1 && current == source;
+    return count == 1 && source_location == code;
 }
 
 template <auto registers>
@@ -1467,6 +1479,64 @@ void Arm64::stackify(std::byte *&code, valtype_vector &moved_values) {
                  true);
 }
 
+void Arm64::move_single(std::byte *&code, valtype ty, value *expected,
+                        uint32_t dest, bool discard_copied, bool constrained) {
+    if (expected->is<value::location::stack>() &&
+        expected->as<uint32_t>() == dest) {
+        return;
+    }
+
+    polymorph(ty, [&]<typename T>(T) {
+        T container;
+
+        switch (expected->where()) {
+        case value::location::reg:
+        case value::location::multireg: {
+            if (discard_copied) {
+                surrender(expected->as<T>(), expected);
+            }
+            container = expected->as<T>();
+            break;
+        }
+        case value::location::stack: {
+            auto reg = constrained ? temporary<T>(convention_safe<T>[0])
+                                   : temporary<T>(this, code);
+            auto offset = expected->as<uint32_t>();
+            masm::ldr(code, this, true, offset, stackreg, reg);
+            container = reg;
+            break;
+        }
+        case value::location::imm: {
+            if constexpr (std::is_same_v<T, freg>) {
+                assert(false);
+            } else {
+                auto reg = constrained ? temporary<T>(convention_safe<T>[0])
+                                       : temporary<T>(this, code);
+                auto imm = expected->as<uint32_t>();
+                masm::mov(code, imm, reg);
+                container = reg;
+                break;
+            }
+        }
+        case value::location::flags: {
+            if constexpr (std::is_same_v<T, freg>) {
+                assert(false);
+            } else {
+                if (discard_copied)
+                    flag = flags();
+                auto reg = constrained ? temporary<T>(convention_safe<T>[0])
+                                       : temporary<T>(this, code);
+                raw::cset(code, false, expected->as<cond>(), reg);
+                container = reg;
+                break;
+            }
+        }
+        }
+
+        masm::str(code, this, true, dest, stackreg, container);
+    });
+}
+
 bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
                          uint32_t stack_offset, bool discard_copied) {
     auto start = code;
@@ -1475,58 +1545,8 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
     for (auto i = ssize_t(copied_values.size()) - 1; i >= 0; i--) {
         auto dest = stack_offset + i * sizeof(runtime::WasmValue);
 
-        if (expected[i].is<value::location::stack>() &&
-            expected[i].as<uint32_t>() == dest) {
-            continue;
-        }
-
-        polymorph(copied_values[i], [&]<typename T>(T) {
-            auto *v = &expected[i];
-            T container;
-
-            switch (v->where()) {
-            case value::location::reg:
-            case value::location::multireg: {
-                if (discard_copied) {
-                    surrender(v->as<T>(), v);
-                }
-                container = v->as<T>();
-                break;
-            }
-            case value::location::stack: {
-                temporary<T> reg(this, code);
-                auto offset = v->as<uint32_t>();
-                masm::ldr(code, this, true, offset, stackreg, reg);
-                container = reg;
-                break;
-            }
-            case value::location::imm: {
-                if constexpr (std::is_same_v<T, freg>) {
-                    assert(false);
-                } else {
-                    temporary<T> reg(this, code);
-                    auto imm = v->as<uint32_t>();
-                    masm::mov(code, imm, reg);
-                    container = reg;
-                    break;
-                }
-            }
-            case value::location::flags: {
-                if constexpr (std::is_same_v<T, freg>) {
-                    assert(false);
-                } else {
-                    if (discard_copied)
-                        flag = flags();
-                    temporary<T> reg(this, code);
-                    raw::cset(code, false, v->as<cond>(), reg);
-                    container = reg;
-                    break;
-                }
-            }
-            }
-
-            masm::str(code, this, true, dest, stackreg, container);
-        });
+        move_single(code, copied_values[i], &expected[i], dest, discard_copied,
+                    false);
     }
 
     auto has_move = start != code;
@@ -1695,12 +1715,125 @@ void Arm64::finalize(std::byte *&code, Args... results) {
     (finalize(results), ...);
 }
 
+std::byte *Arm64::generate_trampoline(std::byte *&code,
+                                      uint32_t function_offset,
+                                      FunctionShell &fn) {
+    auto stack_to_custom = [&](valtype_vector &sig) {
+        auto ireg_alloc = iargs.begin();
+        auto freg_alloc = fargs.begin();
+
+        for (size_t i = 0; i < sig.size(); i++) {
+            auto offset = i * sizeof(runtime::WasmValue);
+            auto ty = sig[i];
+
+            if (is_float(ty) && freg_alloc != fargs.end()) {
+                auto reg = *freg_alloc++;
+                masm::ldr_no_temp(code, true, offset, stackreg, reg);
+            } else if (ireg_alloc != iargs.end()) {
+                auto reg = *ireg_alloc++;
+                masm::ldr_no_temp(code, true, offset, stackreg, reg);
+            } else {
+                // keep on stack
+            }
+        }
+    };
+    auto custom_to_stack = [&](valtype_vector &sig) {
+        auto ireg_alloc = iargs.begin();
+        auto freg_alloc = fargs.begin();
+
+        for (size_t i = 0; i < sig.size(); i++) {
+            auto offset = i * sizeof(runtime::WasmValue);
+            auto ty = sig[i];
+
+            if (is_float(ty) && freg_alloc != fargs.end()) {
+                auto reg = *freg_alloc++;
+                masm::str_no_temp(code, true, offset, stackreg, reg);
+            } else if (ireg_alloc != iargs.end()) {
+                auto reg = *ireg_alloc++;
+                masm::str_no_temp(code, true, offset, stackreg, reg);
+            } else {
+                // keep on stack
+            }
+        }
+    };
+
+    if (!fn.import && !fn.exported)
+        return nullptr;
+
+    auto start = code;
+
+    if (fn.import) {
+        // imported functions need a trampoline to be called
+        // from the JIT side
+        custom_to_stack(fn.type.params);
+
+        constexpr auto function_ptr = ireg::x17;
+        masm::ldr_no_temp(code, true, function_offset * sizeof(void *), miscreg,
+                          function_ptr);
+        raw::ldr(code, true, offsetof(runtime::FunctionInfo, stack_signature),
+                 function_ptr, function_ptr);
+        raw::br(code, function_ptr);
+    } else {
+        assert(fn.exported);
+
+        // JIT functions need a trampoline to be called
+        // from the host side
+        stack_to_custom(fn.type.params);
+
+        constexpr auto function_ptr = ireg::x17;
+        masm::ldr_no_temp(code, true, function_offset * sizeof(void *), miscreg,
+                          function_ptr);
+        raw::ldr(code, true, offsetof(runtime::FunctionInfo, custom_signature),
+                 function_ptr, function_ptr);
+        raw::br(code, function_ptr);
+    }
+
+    return start;
+}
+
+void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
+                            valtype_vector &type) {
+    auto ireg_alloc = iargs.begin();
+    auto freg_alloc = fargs.begin();
+
+    auto params = values - type.size();
+    auto offset = stack_size - type.bytesize();
+    for (size_t i = 0; i < type.size(); i++) {
+        auto ty = type[i];
+        auto stack_offset = offset + i * sizeof(runtime::WasmValue);
+
+        polymorph(ty, [&]<typename T>(T) {
+            std::optional<T> reg;
+            if constexpr (std::is_same_v<T, freg>) {
+                reg = freg_alloc == fargs.end()
+                          ? std::nullopt
+                          : std::make_optional(*freg_alloc++);
+            } else {
+                reg = ireg_alloc == iargs.end()
+                          ? std::nullopt
+                          : std::make_optional(*ireg_alloc++);
+            }
+
+            if (reg) {
+                regs_of<T>().purge(code, locals, *reg);
+                force_value_into(code, &params[i], *reg, true);
+            } else {
+                move_single(code, ty, &params[i], stack_offset, false, true);
+            }
+        });
+    }
+
+    for (size_t i = type.size(); i > 0; i--) {
+        drop(code, stack, type[i - 1]);
+    }
+}
+
 void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
     raw::stp(code, true, enctype::preidx, -0x20, ireg::x30, ireg::sp,
              ireg::x29);
     raw::add(code, true, 0, ireg::sp, ireg::x29);
 
-    constexpr auto exhaust_ptr = ireg::x3, exhaust = ireg::x4;
+    constexpr auto exhaust_ptr = ireg::x17, exhaust = ireg::x16;
 
     masm::mov(code, reinterpret_cast<uint64_t>(&runtime::call_stack_depth),
               exhaust_ptr);
@@ -1718,6 +1851,8 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
 
     locals = std::span(new value[fn.locals.size()], fn.locals.size());
 
+    auto iparams = iargs.begin();
+    auto fparams = fargs.begin();
     auto ireg_alloc = icallee_saved.begin();
     auto freg_alloc = fcallee_saved.begin();
 
@@ -1745,13 +1880,13 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                 auto preg = (ireg)prev->reg;
 
                 if (is_param && prev->is_param)
-                    raw::ldp(code, true, enctype::offset, offset, ireg::x4,
-                             stackreg, ireg::x3);
+                    raw::ldp(code, true, enctype::offset, offset, ireg::x17,
+                             stackreg, ireg::x16);
                 else if (is_param)
                     raw::ldr(code, true, offset + sizeof(runtime::WasmValue),
-                             stackreg, ireg::x4);
+                             stackreg, ireg::x17);
                 else if (prev->is_param)
-                    raw::ldr(code, true, offset, stackreg, ireg::x3);
+                    raw::ldr(code, true, offset, stackreg, ireg::x16);
 
                 raw::stp(code, true, enctype::offset, offset, reg, stackreg,
                          preg);
@@ -1759,21 +1894,21 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                 if (!prev->is_param)
                     raw::mov(code, true, ireg::xzr, preg);
                 else
-                    raw::mov(code, true, ireg::x3, preg);
+                    raw::mov(code, true, ireg::x16, preg);
 
                 if (!is_param)
                     raw::mov(code, true, ireg::xzr, reg);
                 else
-                    raw::mov(code, true, ireg::x4, reg);
+                    raw::mov(code, true, ireg::x17, reg);
 
                 prev = std::nullopt;
             } else {
                 prev = save{false, (int)reg, (int)offset, is_param, code};
 
                 if (is_param) {
-                    masm::ldr(code, this, true, offset, stackreg, ireg::x3);
+                    masm::ldr(code, this, true, offset, stackreg, ireg::x16);
                     masm::str(code, this, true, offset, stackreg, reg);
-                    raw::mov(code, true, ireg::x3, reg);
+                    raw::mov(code, true, ireg::x16, reg);
                 } else {
                     masm::str(code, this, true, offset, stackreg, reg);
                     raw::mov(code, true, ireg::xzr, reg);
@@ -1791,15 +1926,15 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                 auto preg = (freg)prev->reg;
 
                 raw::ldp(code, ftype::double_, enctype::offset, offset,
-                         freg::d1, stackreg, freg::d0);
+                         freg::d7, stackreg, freg::d6);
                 if (is_param && prev->is_param)
                     raw::ldp(code, ftype::double_, enctype::offset, offset,
-                             freg::d1, stackreg, freg::d0);
+                             freg::d7, stackreg, freg::d6);
                 else if (is_param)
                     raw::ldr(code, true, offset - sizeof(runtime::WasmValue),
-                             stackreg, freg::d1);
+                             stackreg, freg::d7);
                 else if (prev->is_param)
-                    raw::ldr(code, true, offset, stackreg, freg::d0);
+                    raw::ldr(code, true, offset, stackreg, freg::d6);
 
                 raw::stp(code, ftype::double_, enctype::offset, offset, reg,
                          stackreg, preg);
@@ -1807,12 +1942,12 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                 if (!prev->is_param)
                     raw::mov(code, true, ftype::double_, ireg::xzr, preg);
                 else
-                    raw::mov(code, ftype::double_, freg::d0, preg);
+                    raw::mov(code, ftype::double_, freg::d6, preg);
 
                 if (!is_param)
                     raw::mov(code, true, ftype::double_, ireg::xzr, reg);
                 else
-                    raw::mov(code, ftype::double_, freg::d1, reg);
+                    raw::mov(code, ftype::double_, freg::d7, reg);
 
                 prev = std::nullopt;
             } else {
@@ -1829,6 +1964,12 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
             }
 
             locals[i] = value::multireg(reg);
+        } else if (is_param && is_float(local) && fparams != fargs.end()) {
+            auto reg = *fparams++;
+            floatregs.activate(code, locals, i, reg, true);
+        } else if (is_param && !is_float(local) && iparams != iargs.end()) {
+            auto reg = *iparams++;
+            intregs.activate(code, locals, i, reg, true);
         } else {
             if (!is_param) {
                 masm::str(code, this, true, offset, stackreg, ireg::xzr);
@@ -1895,17 +2036,17 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     if (auto local_bytes = fn.locals.bytesize()) {
         // return values should be in [local_bytes, ...), so copy them backwards
         // into the local area
-        // clobber at will (in this case x3)
+        // clobber at will (in this case x17)
         for (size_t i = 0; i < fn.type.results.size(); i++) {
             auto final_offset = i * sizeof(runtime::WasmValue);
             auto current_offset = local_bytes + final_offset;
 
-            masm::ldr(code, this, true, current_offset, stackreg, ireg::x3);
-            masm::str(code, this, true, final_offset, stackreg, ireg::x3);
+            masm::ldr(code, this, true, current_offset, stackreg, ireg::x17);
+            masm::str(code, this, true, final_offset, stackreg, ireg::x17);
         }
     }
 
-    constexpr auto exhaust_ptr = ireg::x3, exhaust = ireg::x4;
+    constexpr auto exhaust_ptr = ireg::x17, exhaust = ireg::x16;
     raw::ldp(code, true, enctype::offset, 0x10, exhaust, ireg::sp, exhaust_ptr);
     raw::str(code, false, exhaust_ptr, exhaust);
 
@@ -1928,6 +2069,8 @@ void Arm64::nop(SHARED_PARAMS) {}
 void Arm64::block(SHARED_PARAMS, WasmSignature &) {
     intregs.set_spills(code);
     floatregs.set_spills(code);
+    intlocals.set_spills(code);
+    floatlocals.set_spills(code);
 }
 void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
     intregs.deactivate_all(locals);
@@ -1940,6 +2083,8 @@ void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
 
     intregs.set_spills(code);
     floatregs.set_spills(code);
+    intlocals.set_spills(code);
+    floatlocals.set_spills(code);
 }
 std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
     // don't force land here, because it's like entering a block
@@ -1959,6 +2104,8 @@ std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
 
     intregs.set_spills(code);
     floatregs.set_spills(code);
+    intlocals.set_spills(code);
+    floatlocals.set_spills(code);
 
     std::byte *imm = code;
     if (condition.is<value::location::flags>()) {
@@ -2182,15 +2329,15 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
     allocate_registers<std::tuple<>>(code);
 
+    conventionalize(code, stack, fn.type.params);
+
     intregs.deactivate_all(locals);
     floatregs.deactivate_all(locals);
 
     clobber_flags(code);
     clobber_registers(code);
 
-    stackify(code, fn.type.params);
-
-    constexpr auto function_ptr = ireg::x3, signature = ireg::x4;
+    constexpr auto function_ptr = ireg::x30, signature = ireg::x17;
 
     // load the FunctionInfo pointer
     masm::ldr(code, this, true, func_offset * sizeof(void *), miscreg,
@@ -2207,7 +2354,7 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
                  memreg);
     }
 
-    raw::ldr(code, true, offsetof(runtime::FunctionInfo, signature),
+    raw::ldr(code, true, offsetof(runtime::FunctionInfo, custom_signature),
              function_ptr, signature);
 
     masm::add(code, this, true, stack_size, stackreg, stackreg);
@@ -2231,21 +2378,24 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     floatregs.deactivate_all(locals);
 
     auto [v] = allocate_registers<std::tuple<iwant::ireg>>(code);
-    auto idx = v.as<ireg>();
-    temporary<ireg> table_ptr(this, code), current(this, code),
-        elements(this, code), function_ptr(this, code),
-        expected_sig(this, code), given_sig(this, code);
+
+    constexpr auto idx = ireg::x30;
+    raw::mov(code, true, v.as<ireg>(), idx);
+
+    conventionalize(code, stack, type.params);
 
     clobber_flags(code);
     clobber_registers(code);
 
-    stackify(code, type.params);
-
+    constexpr auto table_ptr = ireg::x17;
+    // masm is dangerous here, temps really shouldn't be used
+    // how can I work around this
     masm::ldr(code, this, true, table_offset * sizeof(void *), miscreg,
               table_ptr);
 
     static_assert(offsetof(runtime::WasmTable, current) == 0);
     static_assert(offsetof(runtime::WasmTable, elements) == 8);
+    constexpr auto elements = table_ptr, current = ireg::x16;
     raw::ldp(code, true, enctype::offset, 0, elements, table_ptr, current);
 
     raw::cmp(code, false, idx, current);
@@ -2259,6 +2409,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
                          }));
     amend_br_if(not_undefined, code);
 
+    constexpr auto function_ptr = idx;
     raw::load(code, memtype::x, resexttype::uns, indexttype::lsl, true, idx,
               elements, function_ptr);
 
@@ -2271,6 +2422,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     std::memcpy(&p2, (char *)&rttype + sizeof(p1), sizeof(p2));
     static_assert(sizeof(p1) + sizeof(p2) == sizeof(rttype));
 
+    constexpr auto expected_sig = elements, given_sig = current;
     masm::mov(code, p1, expected_sig);
     raw::ldr(code, true, offsetof(runtime::FunctionInfo, type), function_ptr,
              given_sig);
@@ -2289,7 +2441,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
              offsetof(runtime::FunctionInfo, memory), miscreg, function_ptr,
              memreg);
 
-    raw::ldr(code, true, offsetof(runtime::FunctionInfo, signature),
+    raw::ldr(code, true, offsetof(runtime::FunctionInfo, custom_signature),
              function_ptr, function_ptr);
 
     // todo: make this work with stack_size larger than 1 << 12
