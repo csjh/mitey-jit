@@ -2435,6 +2435,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     raw::ccmp(code, false, expected_sig, cond::eq, given_sig, 0);
     raw::bcond(code, type_mismatch_loc - code, cond::ne);
 
+    // todo: should be possible to optimize this into generate_trampoline
     raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t), miscreg,
              ireg::sp, memreg);
     raw::ldp(code, true, enctype::offset,
