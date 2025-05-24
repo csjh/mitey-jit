@@ -88,18 +88,21 @@ void Instance::initialize(const runtime::Imports &imports) {
                     "incompatible import type: function type doesn't match");
             }
 
+            assert(imported_function.stack_signature);
+            assert(!fn.start);
+            assert(fn.trampoline);
+
             functions[i] = imported_function;
             if (!functions[i].instance) {
                 functions[i].memory = memory.get()->memory.get();
                 functions[i].misc = misc.get();
                 functions[i].instance = self.lock();
-            }
 
-            assert(functions[i].stack_signature);
-            assert(!fn.start);
-            assert(fn.trampoline);
-            functions[i].custom_signature =
-                reinterpret_cast<runtime::TemplessSignature *>(fn.trampoline);
+                assert(!functions[i].custom_signature);
+                functions[i].custom_signature =
+                    reinterpret_cast<runtime::TemplessSignature *>(
+                        fn.trampoline);
+            }
         } else {
             auto memory = this->memory.get()->memory.get();
             auto misc = this->misc.get();

@@ -1757,6 +1757,9 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
         }
     };
 
+    if (!fn.import && !fn.is_declared)
+        return nullptr;
+
     auto start = code;
 
     if (fn.import) {
@@ -1771,6 +1774,8 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
                  function_ptr, function_ptr);
         raw::br(code, function_ptr);
     } else {
+        assert(fn.is_declared);
+
         // JIT functions need a trampoline to be called
         // from the host side
         stack_to_custom(fn.type.params);

@@ -132,7 +132,9 @@ void Module::initialize(std::span<uint8_t> bytes) {
 
     auto section = [&](
                        uint32_t id, auto body,
-                       std::function<void()> else_ = [] {}) {
+                       std::function<void()> else_ = [] {},
+                       std::function<void(uint32_t)> finally =
+                           [](uint32_t) {}) {
         static_assert(arity<decltype(body)> <= 1);
 
         if (!iter.empty() && *iter == id) {
@@ -148,6 +150,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
             } else {
                 body();
             }
+            finally(section_length);
 
             if (iter - section_start != section_length) {
                 error<malformed_error>("section size mismatch");
@@ -161,6 +164,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
             error<malformed_error>("malformed section id");
         } else {
             else_();
+            finally(0);
         }
     };
 
@@ -256,7 +260,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 if (typeidx >= types.size()) {
                     error<validation_error>("unknown type");
                 }
-                functions.emplace_back(nullptr, nullptr, specifier, false,
+                functions.emplace_back(nullptr, nullptr, specifier,
                                        types[typeidx], valtype_vector{},
                                        std::vector<uint32_t>{}, false);
                 n_fn_imports++;
@@ -314,7 +318,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 error<validation_error>("unknown type");
             }
 
-            functions.emplace_back(nullptr, nullptr, std::nullopt, false,
+            functions.emplace_back(nullptr, nullptr, std::nullopt,
                                    types[type_idx], valtype_vector{},
                                    std::vector<uint32_t>{}, false);
         }
@@ -430,7 +434,6 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 }
                 // implicit declaration
                 functions[idx].is_declared = true;
-                functions[idx].exported = true;
             } else if (export_desc == ImExDesc::table) {
                 if (idx >= tables.size()) {
                     error<validation_error>("unknown table");
@@ -612,18 +615,24 @@ void Module::initialize(std::span<uint8_t> bytes) {
 
     skip_custom_section();
 
-    // todo: move logic outside of code section
     // code section
     section(
         10,
-        [&](uint32_t section_length) {
+        [&] {
             auto n_functions = safe_read_leb128<uint32_t>(iter);
 
             if (n_functions + n_fn_imports != functions.size()) {
                 error<malformed_error>(
                     "function and code section have inconsistent lengths");
             }
-
+        },
+        [&] {
+            if (functions.size() != n_fn_imports) {
+                error<malformed_error>(
+                    "function and code section have inconsistent lengths");
+            }
+        },
+        [&](uint32_t section_length) {
             auto ludes = functions.size() * Target::function_overhead;
 
             auto other = section_length * Target::max_instruction;
@@ -701,12 +710,6 @@ void Module::initialize(std::span<uint8_t> bytes) {
 
                 return code - executable.get();
             });
-        },
-        [&] {
-            if (functions.size() != n_fn_imports) {
-                error<malformed_error>(
-                    "function and code section have inconsistent lengths");
-            }
         });
 
     skip_custom_section();
