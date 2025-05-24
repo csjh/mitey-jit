@@ -1729,7 +1729,7 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
             if (is_float(ty) && freg_alloc != fargs.end()) {
                 auto reg = *freg_alloc++;
                 masm::ldr_no_temp(code, true, offset, stackreg, reg);
-            } else if (ireg_alloc != iargs.end()) {
+            } else if (!is_float(ty) && ireg_alloc != iargs.end()) {
                 auto reg = *ireg_alloc++;
                 masm::ldr_no_temp(code, true, offset, stackreg, reg);
             } else {
@@ -1748,7 +1748,7 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
             if (is_float(ty) && freg_alloc != fargs.end()) {
                 auto reg = *freg_alloc++;
                 masm::str_no_temp(code, true, offset, stackreg, reg);
-            } else if (ireg_alloc != iargs.end()) {
+            } else if (!is_float(ty) && ireg_alloc != iargs.end()) {
                 auto reg = *ireg_alloc++;
                 masm::str_no_temp(code, true, offset, stackreg, reg);
             } else {
@@ -1756,9 +1756,6 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
             }
         }
     };
-
-    if (!fn.import && !fn.exported)
-        return nullptr;
 
     auto start = code;
 
@@ -1774,8 +1771,6 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
                  function_ptr, function_ptr);
         raw::br(code, function_ptr);
     } else {
-        assert(fn.exported);
-
         // JIT functions need a trampoline to be called
         // from the host side
         stack_to_custom(fn.type.params);
