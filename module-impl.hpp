@@ -1670,6 +1670,7 @@ std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
 #undef STORE
 #undef HANDLER
 #undef nextop
+#undef _
 
 #pragma clang diagnostic pop
 
