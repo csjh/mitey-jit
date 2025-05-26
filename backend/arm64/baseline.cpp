@@ -1780,12 +1780,8 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
         // from the host side
         stack_to_custom(fn.type.params);
 
-        constexpr auto function_ptr = ireg::x17;
-        masm::ldr_no_temp(code, true, function_offset * sizeof(void *), miscreg,
-                          function_ptr);
-        raw::ldr(code, true, offsetof(runtime::FunctionInfo, custom_signature),
-                 function_ptr, function_ptr);
-        raw::br(code, function_ptr);
+        // once the parameters are converted to the custom calling convention,
+        // we can just fall through to the real function definition
     }
 
     return start;
