@@ -1789,38 +1789,47 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
 
 void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
                             valtype_vector &type) {
-    auto ireg_alloc = iargs.begin();
-    auto freg_alloc = fargs.begin();
-
-    auto params = values - type.size();
-    auto offset = stack_size - type.bytesize();
+    size_t n_float = 0;
     for (size_t i = 0; i < type.size(); i++) {
-        auto ty = type[i];
-        auto stack_offset = offset + i * sizeof(runtime::WasmValue);
+        if (is_float(type[i])) {
+            n_float++;
+        }
+    }
+    size_t n_int = type.size() - n_float;
+
+    values -= type.size();
+    stack_size -= type.bytesize();
+
+    for (size_t i = type.size(); i > 0; i--) {
+        auto ty = type[i - 1];
+        auto stack_offset = stack_size + (i - 1) * sizeof(runtime::WasmValue);
 
         polymorph(ty, [&]<typename T>(T) {
             std::optional<T> reg;
             if constexpr (std::is_same_v<T, freg>) {
-                reg = freg_alloc == fargs.end()
-                          ? std::nullopt
-                          : std::make_optional(*freg_alloc++);
+                n_float--;
+                reg = n_float < fargs.size()
+                          ? std::make_optional(fargs[n_float])
+                          : std::nullopt;
             } else {
-                reg = ireg_alloc == iargs.end()
-                          ? std::nullopt
-                          : std::make_optional(*ireg_alloc++);
+                n_int--;
+                reg = n_int < iargs.size() ? std::make_optional(iargs[n_int])
+                                           : std::nullopt;
+            }
+
+            auto &v = values[i - 1];
+            if (reg && v.is<value::location::reg>() && v.as<T>() == *reg) {
+                surrender(v.as<T>(), &v);
+                return;
             }
 
             if (reg) {
                 regs_of<T>().purge(code, locals, *reg);
-                force_value_into(code, &params[i], *reg, true);
+                force_value_into(code, &v, *reg);
             } else {
-                move_single(code, ty, &params[i], stack_offset, false, true);
+                move_single(code, ty, &v, stack_offset, true, true);
             }
         });
-    }
-
-    for (size_t i = type.size(); i > 0; i--) {
-        drop(code, stack, type[i - 1]);
     }
 }
 
