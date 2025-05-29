@@ -2427,6 +2427,12 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     std::memcpy(&p2, (char *)&rttype + sizeof(p1), sizeof(p2));
     static_assert(sizeof(p1) + sizeof(p2) == sizeof(rttype));
 
+    // todo: make this guaranteed to be safe
+    // - uint16_t * 2 for params / results
+    //   -> for fast path, 64-bit hash that's guaranteed to be unique
+    //   -> for slow path, 64-bit pointer to WasmSignature struct,
+    //      jump to `std::vector::operator ==`?
+
     constexpr auto expected_sig = elements, given_sig = current;
     masm::mov(code, p1, expected_sig);
     raw::ldr(code, true, offsetof(runtime::FunctionInfo, type), function_ptr,
@@ -2450,7 +2456,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     raw::ldr(code, true, offsetof(runtime::FunctionInfo, custom_signature),
              function_ptr, function_ptr);
 
-    // todo: make this work with stack_size larger than 1 << 12
+    // masm is also dangerous here, need to figure that one out
     masm::add(code, this, true, stack_size, stackreg, stackreg);
     raw::blr(code, function_ptr);
     masm::sub(code, this, true, stack_size, stackreg, stackreg);
