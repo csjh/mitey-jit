@@ -283,6 +283,8 @@ class Arm64 {
     void stackify(std::byte *&code, valtype_vector &values);
     void move_single(std::byte *&code, valtype ty, value *expected,
                      uint32_t dest, bool discard_copied, bool constrained);
+    bool move_block_results(std::byte *&code, valtype_vector &copied_values,
+                            uint32_t copy_to, bool discard_copied);
     bool move_results(std::byte *&code, valtype_vector &copied_values,
                       uint32_t copy_to, bool discard_copied);
     void discard(std::byte *&code, WasmStack &stack, uint32_t skip,

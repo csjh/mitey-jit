@@ -916,6 +916,10 @@ constexpr std::optional<LogicalImm> tryLogicalImm(uint32_t val) {
     return tryLogicalImm(val64);
 }
 
+inline bool is_fast_compatible(valtype_vector &vec) {
+    return vec.size() == 1 && !is_float(vec[0]);
+}
+
 namespace masm {
 
 void mov(std::byte *&code, uint32_t imm, ireg dst) {
@@ -1560,6 +1564,21 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
     return has_move;
 }
 
+bool Arm64::move_block_results(std::byte *&code, valtype_vector &copied_values,
+                               uint32_t stack_offset, bool discard_copied) {
+    if (is_fast_compatible(copied_values)) {
+        purge(code, ireg::x17);
+        force_value_into(code, &values[-1], ireg::x17, !discard_copied);
+        if (discard_copied) {
+            values--;
+            stack_size -= sizeof(runtime::WasmValue);
+        }
+        return true;
+    } else {
+        return move_results(code, copied_values, stack_offset, discard_copied);
+    }
+}
+
 void Arm64::discard(std::byte *&code, WasmStack &stack, uint32_t skip,
                     uint32_t to) {
     auto discarded = (stack_size - to) / sizeof(runtime::WasmValue);
@@ -2038,7 +2057,9 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
         }
     }
 
-    if (auto local_bytes = fn.locals.bytesize()) {
+    if (is_fast_compatible(fn.type.results)) {
+        masm::str(code, this, true, 0, stackreg, ireg::x17);
+    } else if (auto local_bytes = fn.locals.bytesize()) {
         // return values should be in [local_bytes, ...), so copy them backwards
         // into the local area
         // clobber at will (in this case x17)
@@ -2141,27 +2162,29 @@ void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     }
 }
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
-    if (std::holds_alternative<Loop>(flow.construct)) {
-        if (stack.polymorphism()) {
-            for ([[maybe_unused]] auto result : flow.sig.results) {
-                push(value::stack(stack_size));
-            }
-        }
-    } else {
+    if (!std::holds_alternative<Loop>(flow.construct)) {
         intregs.deactivate_all(locals);
         floatregs.deactivate_all(locals);
 
         intregs.reset_temporaries();
         floatregs.reset_temporaries();
+    }
 
-        if (!stack.polymorphism()) {
-            stackify(code, flow.sig.results);
-        }
-
+    if (!stack.polymorphism()) {
+        move_block_results(code, flow.sig.results,
+                           stack_size - flow.sig.results.bytesize(), true);
+    }
+    if (is_fast_compatible(flow.sig.results)) {
+        use(code, ireg::x17);
+        // this is a weird hack
+        push(value::multireg(ireg::x17));
+    } else {
         for ([[maybe_unused]] auto result : flow.sig.results) {
             push(value::stack(stack_size));
         }
+    }
 
+    if (!std::holds_alternative<Loop>(flow.construct)) {
         if (std::holds_alternative<If>(flow.construct)) {
             amend_br_if(std::get<If>(flow.construct).else_jump, code);
         }
@@ -2196,7 +2219,7 @@ void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 
     auto &flow = control_stack[control_stack.size() - depth - 1];
 
-    move_results(code, flow.expected, flow.stack_offset, true);
+    move_block_results(code, flow.expected, flow.stack_offset, true);
     discard(code, stack, flow.expected.size(),
             control_stack.back().stack_offset);
 
@@ -2224,7 +2247,7 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     code += sizeof(inst);
 
     std::byte *imm;
-    if (move_results(code, flow.expected, flow.stack_offset, false)) {
+    if (move_block_results(code, flow.expected, flow.stack_offset, false)) {
         imm = code;
         raw::b(code, 0);
 
@@ -2279,15 +2302,20 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     // [$result_offset, $jump_offset] = ldpsw($addr)
     raw::ldpsw(code, 0, result_offset, addr, jump_offset);
 
-    auto expected = values - wanted.size();
-    for (auto i = ssize_t(wanted.size()) - 1; i >= 0; i--) {
-        polymorph(wanted[i], [&]<typename T>(T) {
-            auto reg = adapt_value_into<T>(code, &expected[i]);
-            raw::load(code, memtype::x, resexttype::str, indexttype::lsl, false,
-                      result_offset, stackreg, reg);
-            raw::sub(code, true, sizeof(runtime::WasmValue), result_offset,
-                     result_offset);
-        });
+    if (is_fast_compatible(wanted)) {
+        purge(code, ireg::x17);
+        force_value_into(code, &values[-1], ireg::x17, false);
+    } else {
+        auto expected = values - wanted.size();
+        for (auto i = ssize_t(wanted.size()) - 1; i >= 0; i--) {
+            polymorph(wanted[i], [&]<typename T>(T) {
+                auto reg = adapt_value_into<T>(code, &expected[i]);
+                raw::load(code, memtype::x, resexttype::str, indexttype::lsl,
+                          false, result_offset, stackreg, reg);
+                raw::sub(code, true, sizeof(runtime::WasmValue), result_offset,
+                         result_offset);
+            });
+        }
     }
 
     values -= wanted.size();
