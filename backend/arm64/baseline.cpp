@@ -1393,34 +1393,36 @@ template <typename _To> value Arm64::adapt_value(std::byte *&code, value *v) {
         return value::reg(reg);
     }
     case value::location::imm: {
-        auto better_not = !std::is_same_v<To, iwant::freg>;
-        assert(better_not);
+        if constexpr (std::is_same_v<To, iwant::freg>) {
+            assert(false);
+        } else {
+            auto imm = v->as<uint32_t>();
 
-        auto imm = v->as<uint32_t>();
+            if constexpr (is_value_specialization_of<iwant::literal, To>)
+                if (imm < To::threshold)
+                    return *v;
+            if constexpr (is_specialization_of<iwant::bitmask, To>)
+                if (auto mask = tryLogicalImm((typename To::type)imm))
+                    return value::imm(std::bit_cast<uint32_t>(*mask));
 
-        if constexpr (is_value_specialization_of<iwant::literal, To>)
-            if (imm < To::threshold)
-                return *v;
-        if constexpr (is_specialization_of<iwant::bitmask, To>)
-            if (auto mask = tryLogicalImm((typename To::type)imm))
-                return value::imm(std::bit_cast<uint32_t>(*mask));
-
-        auto reg = intregs.temporary(code, locals);
-        masm::mov(code, imm, reg);
-        return value::reg(reg);
+            auto reg = intregs.temporary(code, locals);
+            masm::mov(code, imm, reg);
+            return value::reg(reg);
+        }
     }
     case value::location::flags: {
-        auto better_not = !std::is_same_v<To, iwant::freg>;
-        assert(better_not);
-
-        flag = flags();
-
-        if constexpr (std::is_same_v<To, iwant::flags>) {
-            return *v;
+        if constexpr (std::is_same_v<To, iwant::freg>) {
+            assert(false);
         } else {
-            auto reg = intregs.temporary(code, locals);
-            raw::cset(code, false, v->as<cond>(), reg);
-            return value::reg(reg);
+            flag = flags();
+
+            if constexpr (std::is_same_v<To, iwant::flags>) {
+                return *v;
+            } else {
+                auto reg = intregs.temporary(code, locals);
+                raw::cset(code, false, v->as<cond>(), reg);
+                return value::reg(reg);
+            }
         }
     }
     }
