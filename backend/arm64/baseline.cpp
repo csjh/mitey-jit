@@ -1581,6 +1581,18 @@ bool Arm64::move_block_results(std::byte *&code, valtype_vector &copied_values,
     }
 }
 
+void Arm64::push_block_results(std::byte *&code, valtype_vector &values) {
+    if (is_fast_compatible(values)) {
+        use(code, ireg::x17);
+        // this is a weird hack
+        push(value::multireg(ireg::x17));
+    } else {
+        for ([[maybe_unused]] auto param : values) {
+            push(value::stack(stack_size));
+        }
+    }
+}
+
 void Arm64::discard(std::byte *&code, WasmStack &stack, uint32_t skip,
                     uint32_t to) {
     auto discarded = (stack_size - to) / sizeof(runtime::WasmValue);
@@ -2104,10 +2116,9 @@ void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
     intregs.deactivate_all(locals);
     floatregs.deactivate_all(locals);
 
-    stackify(code, sig.params);
-    for ([[maybe_unused]] auto param : sig.params) {
-        push(value::stack(stack_size));
-    }
+    move_block_results(code, sig.params, stack_size - sig.params.bytesize(),
+                       true);
+    push_block_results(code, sig.params);
 
     intregs.set_spills(code);
     floatregs.set_spills(code);
@@ -2172,24 +2183,33 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
         floatregs.reset_temporaries();
     }
 
-    if (!stack.polymorphism()) {
-        move_block_results(code, flow.sig.results,
-                           stack_size - flow.sig.results.bytesize(), true);
-    }
-    if (is_fast_compatible(flow.sig.results)) {
-        use(code, ireg::x17);
-        // this is a weird hack
-        push(value::multireg(ireg::x17));
-    } else {
-        for ([[maybe_unused]] auto result : flow.sig.results) {
-            push(value::stack(stack_size));
+    auto &results = flow.sig.results;
+    if (std::holds_alternative<If>(flow.construct)) {
+        if (!stack.polymorphism()) {
+            move_block_results(code, results, flow.stack_offset, true);
+            discard(code, stack, results.size(), flow.stack_offset);
         }
-    }
+        if (is_fast_compatible(results)) {
+            auto pos = code;
+            raw::b(code, 0);
 
-    if (!std::holds_alternative<Loop>(flow.construct)) {
-        if (std::holds_alternative<If>(flow.construct)) {
+            amend_br_if(std::get<If>(flow.construct).else_jump, code);
+
+            for ([[maybe_unused]] auto ty : flow.sig.params) {
+                push(value::stack(stack_size));
+            }
+            move_block_results(code, results, flow.stack_offset, true);
+
+            amend_br(pos, code);
+        } else {
             amend_br_if(std::get<If>(flow.construct).else_jump, code);
         }
+    } else if (!stack.polymorphism()) {
+        move_block_results(code, results, flow.stack_offset, true);
+    }
+    push_block_results(code, results);
+
+    if (!std::holds_alternative<Loop>(flow.construct)) {
         for (auto target : flow.pending_br) {
             amend_br(target, code);
         }
