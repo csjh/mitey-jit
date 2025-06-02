@@ -2217,10 +2217,8 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
             amend_br_if(target, code);
         }
         for (auto [table, target] : flow.pending_br_tables) {
-            auto diff = code - table;
-            auto idiff = static_cast<int32_t>(diff);
-            ensure(idiff == diff, "branch target out of range");
-            std::memcpy(target, &idiff, sizeof(idiff));
+            auto diff = static_cast<int32_t>(code - table);
+            put(target, diff);
         }
 
         if (std::holds_alternative<Function>(flow.construct)) {
