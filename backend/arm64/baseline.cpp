@@ -2136,10 +2136,9 @@ std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
 
     // todo: take another look at duping values
     // the downside is that it makes reasoning about the stack harder
-    stackify(code, sig.params);
-    for ([[maybe_unused]] auto param : sig.params) {
-        push(value::stack(stack_size));
-    }
+    move_block_results(code, sig.params, stack_size - sig.params.bytesize(),
+                       true);
+    push_block_results(code, sig.params);
 
     intregs.set_spills(code);
     floatregs.set_spills(code);
@@ -2170,9 +2169,7 @@ void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     auto &if_flow = control_stack.back();
     amend_br_if(std::get<If>(if_flow.construct).else_jump, code);
 
-    for ([[maybe_unused]] auto ty : if_flow.sig.params) {
-        push(value::stack(stack_size));
-    }
+    push_block_results(code, if_flow.sig.params);
 }
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
     if (!std::holds_alternative<Loop>(flow.construct)) {
@@ -2183,33 +2180,15 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
         floatregs.reset_temporaries();
     }
 
-    auto &results = flow.sig.results;
-    if (std::holds_alternative<If>(flow.construct)) {
-        if (!stack.polymorphism()) {
-            move_block_results(code, results, flow.stack_offset, true);
-            discard(code, stack, results.size(), flow.stack_offset);
-        }
-        if (is_fast_compatible(results)) {
-            auto pos = code;
-            raw::b(code, 0);
-
-            amend_br_if(std::get<If>(flow.construct).else_jump, code);
-
-            for ([[maybe_unused]] auto ty : flow.sig.params) {
-                push(value::stack(stack_size));
-            }
-            move_block_results(code, results, flow.stack_offset, true);
-
-            amend_br(pos, code);
-        } else {
-            amend_br_if(std::get<If>(flow.construct).else_jump, code);
-        }
-    } else if (!stack.polymorphism()) {
-        move_block_results(code, results, flow.stack_offset, true);
+    if (!stack.polymorphism()) {
+        move_block_results(code, flow.sig.results, flow.stack_offset, true);
     }
-    push_block_results(code, results);
+    push_block_results(code, flow.sig.results);
 
     if (!std::holds_alternative<Loop>(flow.construct)) {
+        if (std::holds_alternative<If>(flow.construct)) {
+            amend_br_if(std::get<If>(flow.construct).else_jump, code);
+        }
         for (auto target : flow.pending_br) {
             amend_br(target, code);
         }
