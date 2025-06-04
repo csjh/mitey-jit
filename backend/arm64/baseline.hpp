@@ -305,8 +305,8 @@ class Arm64 {
     template <typename... Args>
     void finalize(std::byte *&code, Args... results);
 
-    void amend_br(std::byte *br, std::byte *target);
-    void amend_br_if(std::byte *br, std::byte *target);
+    static void amend_br(std::byte *br, std::byte *target);
+    static void amend_br_if(std::byte *br, std::byte *target);
 
     void exit_function(SHARED_PARAMS, ControlFlow &flow);
 

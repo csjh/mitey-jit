@@ -407,6 +407,16 @@ void b(std::byte *&code, int32_t _imm26) {
                   (static_cast<uint32_t>(imm26) << 0));
 }
 
+void bl(std::byte *&code, int32_t _imm26) {
+    assert(std::abs(_imm26) < (1 << 26) * (int)sizeof(inst));
+
+    uint32_t imm26 = _imm26 / sizeof(inst);
+    imm26 &= 0x3ffffff;
+
+    put(code, 0b10010100000000000000000000000000 |
+                  (static_cast<uint32_t>(imm26) << 0));
+}
+
 void bcond(std::byte *&code, int32_t _imm19, cond c) {
     assert(std::abs(_imm19) < (1 << 19) * (int)sizeof(inst));
 
@@ -1790,6 +1800,9 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
 
     auto start = code;
 
+    raw::stp(code, true, enctype::preidx, -0x20, ireg::x30, ireg::sp,
+             ireg::x29);
+
     if (fn.import) {
         // imported functions need a trampoline to be called
         // from the JIT side
@@ -1800,7 +1813,15 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
                           function_ptr);
         raw::ldr(code, true, offsetof(runtime::FunctionInfo, stack_signature),
                  function_ptr, function_ptr);
-        raw::br(code, function_ptr);
+        raw::blr(code, function_ptr);
+
+        if (is_fast_compatible(fn.type.results)) {
+            raw::ldr(code, true, stackreg, ireg::x17);
+        }
+
+        raw::ldp(code, true, enctype::pstidx, 0x20, ireg::x30, ireg::sp,
+                 ireg::x29);
+        raw::ret(code);
     } else {
         assert(fn.is_declared);
 
@@ -1808,8 +1829,19 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
         // from the host side
         stack_to_custom(fn.type.params);
 
-        // once the parameters are converted to the custom calling convention,
-        // we can just fall through to the real function definition
+        auto bl_addr = code;
+        raw::bl(code, 0);
+
+        if (is_fast_compatible(fn.type.results)) {
+            raw::str(code, true, stackreg, ireg::x17);
+        }
+
+        raw::ldp(code, true, enctype::pstidx, 0x20, ireg::x30, ireg::sp,
+                 ireg::x29);
+        raw::ret(code);
+
+        amend_br(bl_addr, code);
+        // assume the function is just under the current code
     }
 
     return start;
@@ -2067,7 +2099,7 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     }
 
     if (is_fast_compatible(fn.type.results)) {
-        masm::str(code, this, true, 0, stackreg, ireg::x17);
+        // result is already in x17
     } else if (auto local_bytes = fn.locals.bytesize()) {
         // return values should be in [local_bytes, ...), so copy them backwards
         // into the local area
@@ -2081,7 +2113,7 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
         }
     }
 
-    constexpr auto exhaust_ptr = ireg::x17, exhaust = ireg::x16;
+    constexpr auto exhaust_ptr = ireg::x30, exhaust = ireg::x16;
     raw::ldp(code, true, enctype::offset, 0x10, exhaust, ireg::sp, exhaust_ptr);
     raw::str(code, false, exhaust_ptr, exhaust);
 
@@ -2393,9 +2425,7 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
                  ireg::sp, memreg);
     }
 
-    for ([[maybe_unused]] auto result : fn.type.results) {
-        push(value::stack(stack_size));
-    }
+    push_block_results(code, fn.type.results);
 
     finalize(code);
 }
@@ -2486,9 +2516,7 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), miscreg,
              ireg::sp, memreg);
 
-    for ([[maybe_unused]] auto result : type.results) {
-        push(value::stack(stack_size));
-    }
+    push_block_results(code, type.results);
 
     finalize(code);
 }
