@@ -1480,11 +1480,6 @@ Arm64::temporary<To> Arm64::adapt_value_into(std::byte *&code, value *v,
     return reg;
 }
 
-void Arm64::stackify(std::byte *&code, valtype_vector &moved_values) {
-    move_results(code, moved_values, stack_size - moved_values.bytesize(),
-                 true);
-}
-
 void Arm64::move_single(std::byte *&code, valtype ty, value *expected,
                         uint32_t dest, bool discard_copied, bool constrained) {
     if (expected->is<value::location::stack>() &&
@@ -4015,7 +4010,7 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
     clobber_registers(code);
 
     auto vparams = valtype_vector(params), vresults = valtype_vector(results);
-    stackify(code, vparams);
+    move_results(code, vparams, stack_size - vparams.bytesize(), true);
 
     masm::add(code, this, true, stack_size + vparams.bytesize(), stackreg,
               stackreg);

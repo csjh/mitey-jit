@@ -280,7 +280,6 @@ class Arm64 {
     temporary<To> adapt_value_into(std::byte *&code, value *v,
                                    bool soft = false);
 
-    void stackify(std::byte *&code, valtype_vector &values);
     void move_single(std::byte *&code, valtype ty, value *expected,
                      uint32_t dest, bool discard_copied, bool constrained);
     bool move_results(std::byte *&code, valtype_vector &copied_values,
