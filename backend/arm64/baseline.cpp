@@ -2060,6 +2060,10 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     for (size_t i = 0; i < fn.locals.size(); i++) {
         if (!locals[i].is<value::location::multireg>())
             continue;
+        if (is_volatile(locals[i].as<ireg>()) && !is_float(fn.locals[i]))
+            continue;
+        if (is_volatile(locals[i].as<freg>()) && is_float(fn.locals[i]))
+            continue;
 
         auto offset = i * sizeof(runtime::WasmValue);
 
@@ -2200,8 +2204,10 @@ void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
 }
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
     if (!std::holds_alternative<Loop>(flow.construct)) {
-        intregs.deactivate_all(locals);
-        floatregs.deactivate_all(locals);
+        if (!std::holds_alternative<Function>(flow.construct)) {
+            intregs.deactivate_all(locals);
+            floatregs.deactivate_all(locals);
+        }
 
         intregs.reset_temporaries();
         floatregs.reset_temporaries();
