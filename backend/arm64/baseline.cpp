@@ -1683,7 +1683,7 @@ template <auto registers>
 void Arm64::reg_manager<registers>::local_manager::commit(RegType reg) {
     assert(is_active(reg));
 
-    auto local = inflight_locals[to_index(reg)];
+    auto &local = inflight_locals[to_index(reg)];
     if (!local.dumpaddr)
         return;
 
