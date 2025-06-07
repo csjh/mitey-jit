@@ -1632,13 +1632,14 @@ void Arm64::reg_manager<registers>::local_manager::activate(
 
     uint32_t stack_offset = local_idx * sizeof(runtime::WasmValue);
 
-    for (auto &local : inflight_locals) {
-        if (local.active && local.local_idx == local_idx) {
-            // non-set activations should only happen
-            // when the local is on the stack
-            assert(set);
-            local.active = false;
-            break;
+    // non-set activations should only happen
+    // when the local is on the stack
+    if (set) {
+        for (auto &local : inflight_locals) {
+            if (local.active && local.local_idx == local_idx) {
+                local.active = false;
+                break;
+            }
         }
     }
     auto &local = inflight_locals[to_index(reg)];
