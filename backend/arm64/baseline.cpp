@@ -1574,13 +1574,14 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
 bool Arm64::move_block_results(std::byte *&code, valtype_vector &copied_values,
                                uint32_t stack_offset, bool discard_copied) {
     if (is_fast_compatible(copied_values)) {
+        auto start = code;
         purge(code, ireg::x17);
         force_value_into(code, &values[-1], ireg::x17, !discard_copied);
         if (discard_copied) {
             values--;
             stack_size -= sizeof(runtime::WasmValue);
         }
-        return true;
+        return code != start;
     } else {
         return move_results(code, copied_values, stack_offset, discard_copied);
     }
