@@ -540,12 +540,20 @@ void mov(std::byte *&code, bool sf, ftype ft, ireg src, freg dst) {
                   (static_cast<uint32_t>(dst) << 0));
 }
 
+void mov(std::byte *&code, bool sf, ireg src, freg dst) {
+    return mov(code, sf, sf ? ftype::double_ : ftype::single, src, dst);
+}
+
 void mov(std::byte *&code, bool sf, ftype ft, freg src, ireg dst) {
     put(code, 0b00011110001001100000000000000000 |
                   (static_cast<uint32_t>(sf) << 31) |
                   (static_cast<uint32_t>(ft) << 22) |
                   (static_cast<uint32_t>(src) << 5) |
                   (static_cast<uint32_t>(dst) << 0));
+}
+
+void mov(std::byte *&code, bool sf, freg src, ireg dst) {
+    return mov(code, sf, sf ? ftype::double_ : ftype::single, src, dst);
 }
 
 void mov(std::byte *&code, ftype ft, freg src, freg dst) {
@@ -1849,8 +1857,86 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
     return start;
 }
 
+template <typename T>
+void Arm64::negotiate_registers(std::byte *&code,
+                                std::span<edge<T>> param_edges) {
+    constexpr auto tiebreaker = convention_safe<freg>[0];
+    constexpr auto max_regs = 32;
+    constexpr auto invalid = (T)max_regs;
+
+    constexpr std::span<const T> FullDestRegs = [] {
+        if constexpr (std::is_same_v<T, ireg>)
+            return iargs;
+        else
+            return fargs;
+    }();
+
+    auto dest_regs = FullDestRegs.subspan(0, param_edges.size());
+
+    std::bitset<max_regs> has_incoming = 0;
+    for (auto pair : param_edges) {
+        has_incoming.set((uint8_t)pair.dest);
+    }
+
+    auto traverse_line = [&](const auto &self, T node) -> void {
+        for (auto &pair : param_edges) {
+            if (pair.src == node) {
+                self(self, pair.dest);
+                raw::mov(code, true, pair.src, pair.dest);
+                pair = edge<T>(invalid, invalid);
+            }
+        }
+    };
+
+    auto traverse_maybe_cycle = [&](T node) -> void {
+        raw::mov(code, true, node, tiebreaker);
+
+        for (auto &pair : param_edges) {
+            if (pair.src == node) {
+                auto dest = pair.dest;
+                pair = edge<T>(invalid, invalid);
+                traverse_line(traverse_line, dest);
+                raw::mov(code, true, tiebreaker, dest);
+            }
+        }
+    };
+
+    for (auto pair : param_edges) {
+        if (pair.src == invalid)
+            continue;
+        if (pair.src == pair.dest)
+            continue;
+        if (has_incoming.test((uint8_t)pair.src))
+            continue;
+
+        traverse_line(traverse_line, pair.src);
+    }
+
+    for (auto pair : param_edges) {
+        if (pair.src == invalid)
+            continue;
+        if (pair.src == pair.dest)
+            continue;
+        if (!has_incoming.test((uint8_t)pair.src))
+            continue;
+
+        traverse_maybe_cycle(pair.src);
+    }
+}
+
 void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
                             valtype_vector &type) {
+    // purge for use in `negotiate_registers`
+    // a float reg is used because they're usually pretty rarely seen
+    purge(code, convention_safe<freg>[0]);
+
+    for (size_t i = type.size(); i > 0; i--) {
+        drop(code, stack, type[i - 1]);
+    }
+
+    clobber_flags(code);
+    clobber_registers(code);
+
     size_t n_float = 0;
     for (size_t i = 0; i < type.size(); i++) {
         if (is_float(type[i])) {
@@ -1859,39 +1945,57 @@ void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
     }
     size_t n_int = type.size() - n_float;
 
-    values -= type.size();
-    stack_size -= type.bytesize();
+    // todo: make an inplace_vector implementation somewhere
+    std::array<edge<value *, ireg>, iargs.size()> nonreg_iparams;
+    std::array<edge<value *, freg>, fargs.size()> nonreg_fparams;
+    size_t n_nonreg_int = 0, n_nonreg_float = 0;
+
+    std::array<edge<ireg>, iargs.size()> reg_iparams;
+    std::array<edge<freg>, fargs.size()> reg_fparams;
+    size_t n_reg_int = 0, n_reg_float = 0;
 
     for (size_t i = type.size(); i > 0; i--) {
+        auto &v = values[i - 1];
         auto ty = type[i - 1];
         auto stack_offset = stack_size + (i - 1) * sizeof(runtime::WasmValue);
 
-        polymorph(ty, [&]<typename T>(T) {
-            std::optional<T> reg;
-            if constexpr (std::is_same_v<T, freg>) {
-                n_float--;
-                reg = n_float < fargs.size()
-                          ? std::make_optional(fargs[n_float])
-                          : std::nullopt;
+        if (is_float(ty)) {
+            n_float--;
+            if (n_float < fargs.size()) {
+                if (v.is<value::location::reg>() ||
+                    v.is<value::location::multireg>()) {
+                    reg_fparams[n_reg_float++] = {v.as<freg>(), fargs[n_float]};
+                } else {
+                    nonreg_fparams[n_nonreg_float++] = {&v, fargs[n_float]};
+                }
             } else {
-                n_int--;
-                reg = n_int < iargs.size() ? std::make_optional(iargs[n_int])
-                                           : std::nullopt;
+                move_single(code, ty, &v, stack_offset, false, true);
             }
-
-            auto &v = values[i - 1];
-            if (reg && v.is<value::location::reg>() && v.as<T>() == *reg) {
-                surrender(v.as<T>(), &v);
-                return;
-            }
-
-            if (reg) {
-                regs_of<T>().purge(code, locals, *reg);
-                force_value_into(code, &v, *reg);
+        } else {
+            n_int--;
+            if (n_int < iargs.size()) {
+                if (v.is<value::location::reg>() ||
+                    v.is<value::location::multireg>()) {
+                    reg_iparams[n_reg_int++] = {v.as<ireg>(), iargs[n_int]};
+                } else {
+                    nonreg_iparams[n_nonreg_int++] = {&v, iargs[n_int]};
+                }
             } else {
-                move_single(code, ty, &v, stack_offset, true, true);
+                move_single(code, ty, &v, stack_offset, false, true);
             }
-        });
+        }
+    }
+
+    negotiate_registers(code, std::span(reg_iparams.data(), n_reg_int));
+    negotiate_registers(code, std::span(reg_fparams.data(), n_reg_float));
+
+    while (n_nonreg_int) {
+        auto pair = nonreg_iparams[--n_nonreg_int];
+        force_value_into(code, pair.src, pair.dest, true);
+    }
+    while (n_nonreg_float) {
+        auto pair = nonreg_fparams[--n_nonreg_float];
+        force_value_into(code, pair.src, pair.dest, true);
     }
 }
 
@@ -2394,15 +2498,12 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
 }
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
-    allocate_registers<std::tuple<>>(code);
-
-    conventionalize(code, stack, fn.type.params);
-
     intregs.deactivate_all(locals);
     floatregs.deactivate_all(locals);
 
-    clobber_flags(code);
-    clobber_registers(code);
+    allocate_registers<std::tuple<>>(code);
+
+    conventionalize(code, stack, fn.type.params);
 
     constexpr auto function_ptr = ireg::x30, signature = ireg::x17;
 
@@ -2448,9 +2549,6 @@ void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
     raw::mov(code, true, v.as<ireg>(), idx);
 
     conventionalize(code, stack, type.params);
-
-    clobber_flags(code);
-    clobber_registers(code);
 
     constexpr auto table_ptr = ireg::x17;
     // masm is dangerous here, temps really shouldn't be used

@@ -319,6 +319,13 @@ class Arm64 {
                       std::optional<uint64_t> temp1 = std::nullopt,
                       std::optional<uint64_t> temp2 = std::nullopt);
 
+    template <typename Src, typename Dest = Src> struct edge {
+        Src src;
+        Dest dest;
+    };
+
+    template <typename T>
+    void negotiate_registers(std::byte *&, std::span<edge<T>>);
     void conventionalize(std::byte *&, WasmStack &, valtype_vector &);
 
   public:
