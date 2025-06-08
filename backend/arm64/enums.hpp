@@ -97,6 +97,12 @@ enum class ftype : uint8_t {
     half = 0b11,    // Half-precision
 };
 
+enum class rmode : uint8_t {
+    top_half = 0b1,
+    regular = 0b0,
+    bottom_half = regular,
+};
+
 enum class memtype : uint8_t {
     b = 0b00, // Byte
     h = 0b01, // Halfword
