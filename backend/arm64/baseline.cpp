@@ -1201,7 +1201,7 @@ void Arm64::reg_manager<registers>::untemporary(RegType reg) {
 }
 
 template <auto registers>
-void Arm64::reg_manager<registers>::clobber_all(
+void Arm64::reg_manager<registers>::spill_all(
     std::byte *&code, std::span<value> local_locations) {
     for (auto reg : registers) {
         purge(code, local_locations, reg);
@@ -1363,15 +1363,9 @@ bool Arm64::was_prior(RegType reg, std::byte *code) {
     }
 }
 
-void Arm64::clobber_flags(std::byte *&code) {
-    // todo: check if this is vulnerable to being messed up by if/else
-
+void Arm64::spill_flags_to_stack(std::byte *&code) {
     if (!flag.val)
         return;
-
-    // todo: this should go into a .result register (and stay there)
-    // but flag clobbering has to happen first thing after allocate_registers
-    // so the cset into the .result register could clobber a real value
 
     auto reg = ireg::x30;
     raw::cset(code, false, flag.val->as<cond>(), reg);
@@ -1381,9 +1375,23 @@ void Arm64::clobber_flags(std::byte *&code) {
     flag = flags();
 }
 
-void Arm64::clobber_registers(std::byte *&code) {
-    intregs.clobber_all(code, locals);
-    floatregs.clobber_all(code, locals);
+void Arm64::spill_flags_to_register(std::byte *&code) {
+    if (!flag.val)
+        return;
+
+    intregs.reset_temporaries();
+
+    auto reg = intregs.result(code, locals);
+    raw::cset(code, false, flag.val->as<cond>(), reg);
+    intregs.use(code, reg, metadata(flag.val, flag.stack_offset));
+
+    *flag.val = value::reg(reg);
+    flag = flags();
+}
+
+void Arm64::spill_registers(std::byte *&code) {
+    intregs.spill_all(code, locals);
+    floatregs.spill_all(code, locals);
 }
 
 void Arm64::push(value v) {
@@ -1937,8 +1945,8 @@ void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
         drop(code, stack, type[i - 1]);
     }
 
-    clobber_flags(code);
-    clobber_registers(code);
+    spill_flags_to_stack(code);
+    spill_registers(code);
 
     size_t n_float = 0;
     for (size_t i = 0; i < type.size(); i++) {
@@ -2416,12 +2424,12 @@ void Arm64::br_if(SHARED_PARAMS, std::span<ControlFlow> control_stack,
 }
 void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                      std::span<uint32_t> targets) {
+    spill_flags_to_register(code);
+
     intregs.deactivate_all(locals);
     floatregs.deactivate_all(locals);
 
     auto [input] = allocate_registers<std::tuple<iwant::ireg>>(code);
-
-    clobber_flags(code);
 
     auto base = control_stack.size() - 1;
     auto &wanted = control_stack[base - targets.back()].expected;
@@ -2661,7 +2669,7 @@ void Arm64::select(SHARED_PARAMS, valtype vtype) {
             allocate_registers<std::tuple<T, T, iwant::flags>, T>(code);
 
         if (!condition.template is<value::location::flags>()) {
-            clobber_flags(code);
+            spill_flags_to_stack(code);
             raw::cmp(code, false, ireg::xzr, condition.template as<ireg>());
             condition = value::flag(cond::ne);
         }
@@ -2810,12 +2818,12 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     });
 }
 void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
+    spill_flags_to_register(code);
+
     auto [idx, res] =
         allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
     temporary<ireg> table_ptr(this, code), elements(this, code),
         &current = table_ptr;
-
-    clobber_flags(code);
 
     masm::ldr(code, this, true, misc_offset * sizeof(void *), miscreg,
               table_ptr);
@@ -2836,12 +2844,12 @@ void Arm64::tableget(SHARED_PARAMS, uint64_t misc_offset) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::tableset(SHARED_PARAMS, uint64_t misc_offset) {
+    spill_flags_to_register(code);
+
     auto [idx, value] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>>(code);
     temporary<ireg> table_ptr(this, code), elements(this, code),
         &current = table_ptr;
-
-    clobber_flags(code);
 
     masm::ldr(code, this, true, misc_offset * sizeof(void *), miscreg,
               table_ptr);
@@ -3025,8 +3033,9 @@ void Arm64::i64store32(SHARED_PARAMS, uint64_t offset, uint64_t) {
     abstract_memop<memtype::w, resexttype::str>(code, stack, offset);
 }
 void Arm64::i32eqz(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
     auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
-    clobber_flags(code);
 
     raw::cmp(code, false, ireg::xzr, p.as<ireg>());
     push(value::flag(cond::eq));
@@ -3034,8 +3043,9 @@ void Arm64::i32eqz(SHARED_PARAMS) {
     finalize(code);
 }
 void Arm64::i64eqz(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
     auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
-    clobber_flags(code);
 
     raw::cmp(code, true, ireg::xzr, p.as<ireg>());
     push(value::flag(cond::eq));
@@ -3045,9 +3055,9 @@ void Arm64::i64eqz(SHARED_PARAMS) {
 
 #define COMPARISON(is_64, op)                                                  \
     do {                                                                       \
+        spill_flags_to_register(code);                                         \
         auto [p1, p2] = allocate_registers<                                    \
             std::tuple<iwant::ireg, iwant::literal<1 << 12>>>(code);           \
-        clobber_flags(code);                                                   \
         if (p2.is<value::location::imm>()) {                                   \
             raw::cmp(code, is_64, p2.as<uint32_t>(), p1.as<ireg>());           \
         } else {                                                               \
@@ -3080,9 +3090,9 @@ void Arm64::i64ge_u(SHARED_PARAMS) { COMPARISON(true, cs); }
 #undef COMPARISON
 #define COMPARISON(is_64, op)                                                  \
     do {                                                                       \
+        spill_flags_to_register(code);                                         \
         auto [p1, p2] =                                                        \
             allocate_registers<std::tuple<iwant::freg, iwant::freg>>(code);    \
-        clobber_flags(code);                                                   \
         raw::fcmp(code, is_64, p1.as<freg>(), p2.as<freg>());                  \
         push(value::flag(cond::op));                                           \
         finalize(code);                                                        \
@@ -3232,11 +3242,11 @@ void Arm64::i64mul(SHARED_PARAMS) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::i32div_s(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-
-    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, false, 0, p2.as<ireg>());
@@ -3252,11 +3262,11 @@ void Arm64::i32div_s(SHARED_PARAMS) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64div_s(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-
-    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, true, 0, p2.as<ireg>());
@@ -3272,11 +3282,11 @@ void Arm64::i64div_s(SHARED_PARAMS) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::i32div_u(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-
-    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, false, 0, p2.as<ireg>());
@@ -3287,11 +3297,11 @@ void Arm64::i32div_u(SHARED_PARAMS) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64div_u(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-
-    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, true, 0, p2.as<ireg>());
@@ -3302,10 +3312,11 @@ void Arm64::i64div_u(SHARED_PARAMS) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::i32rem_s(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, false, 0, p2.as<ireg>());
@@ -3318,10 +3329,11 @@ void Arm64::i32rem_s(SHARED_PARAMS) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64rem_s(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, true, 0, p2.as<ireg>());
@@ -3334,10 +3346,11 @@ void Arm64::i64rem_s(SHARED_PARAMS) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::i32rem_u(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, false, 0, p2.as<ireg>());
@@ -3350,10 +3363,11 @@ void Arm64::i32rem_u(SHARED_PARAMS) {
     finalize(code, res.as<ireg>());
 }
 void Arm64::i64rem_u(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
             code);
-    clobber_flags(code);
 
     auto zero_check = code;
     raw::cbnz(code, true, 0, p2.as<ireg>());
@@ -3842,7 +3856,7 @@ void Arm64::validate_trunc(std::byte *&code, freg v, FloatType lower,
                                        : (IntType)0x7FFF'FFFF'FFFF'FFFF;
     static_assert(tryLogicalImm(signless_bits) != std::nullopt);
 
-    clobber_flags(code);
+    spill_flags_to_stack(code);
 
     temporary<ireg> int_bits(ireg::x30), int_comparison(this, code);
     temporary<freg> float_comparison(this, code);
@@ -4147,8 +4161,8 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
 
     allocate_registers<std::tuple<>>(code);
 
-    clobber_flags(code);
-    clobber_registers(code);
+    spill_flags_to_stack(code);
+    spill_registers(code);
 
     auto vparams = valtype_vector(params), vresults = valtype_vector(results);
     move_results(code, vparams, stack_size - vparams.bytesize(), true);

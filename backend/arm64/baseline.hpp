@@ -139,7 +139,7 @@ class Arm64 {
         void use(std::byte *&, RegType, metadata);
         void surrender(RegType, value *);
         void purge(std::byte *&, std::span<value> local_locations, RegType);
-        void clobber_all(std::byte *&, std::span<value> local_locations);
+        void spill_all(std::byte *&, std::span<value> local_locations);
         void set_spills(std::byte *&);
 
         bool was_prior(RegType reg, std::byte *code);
@@ -247,8 +247,9 @@ class Arm64 {
         std::make_unique_for_overwrite<value[]>(65536);
     value *values = values_start.get();
 
-    void clobber_flags(std::byte *&code);
-    void clobber_registers(std::byte *&);
+    void spill_flags_to_register(std::byte *&code);
+    void spill_flags_to_stack(std::byte *&code);
+    void spill_registers(std::byte *&);
 
     void push(value v);
 
