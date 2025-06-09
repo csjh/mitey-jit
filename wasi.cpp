@@ -1,3 +1,6 @@
+// get error codes from
+// https://github.com/WebAssembly/wasi-libc/blob/main/libc-bottom-half/headers/public/wasi/api.h
+
 #include "./wasi.hpp"
 
 #include <cassert>
@@ -425,8 +428,16 @@ int32_t path_open(int32_t fd, int32_t dirflags, const char *path,
         flags |= O_TRUNC;
 
     int new_fd = openat(fd, path_buf, flags, 0666);
-    if (new_fd < 0) {
-        return 28;
+    if (new_fd == -1) {
+        if (errno == ENOENT) {
+            return 44;
+        } else if (errno == ENOTDIR) {
+            return 54;
+        } else if (errno == EBADF) {
+            return 8;
+        } else {
+            assert(false);
+        }
     }
 
     *opened_fd = new_fd;
