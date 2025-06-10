@@ -477,7 +477,13 @@ int32_t path_unlink_file(int32_t fd, const char *path, wasm_size_t path_len) {
     return 0;
 }
 
-void proc_exit(int32_t rval) { exit(rval); }
+std::jmp_buf proc_buf;
+int32_t proc_status;
+
+void proc_exit(int32_t rval) {
+    proc_status = rval;
+    std::longjmp(proc_buf, 1);
+}
 
 int32_t random_get(void *buf, wasm_size_t buf_len) {
     // On a real system, this should use a cryptographically secure source

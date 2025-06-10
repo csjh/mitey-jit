@@ -1,3 +1,4 @@
+#include <csetjmp>
 #include <cstddef>
 #include <stdint.h>
 
@@ -159,6 +160,9 @@ int32_t path_unlink_file(int32_t fd,          // Base directory FD
                          const char *path,    // Path
                          wasm_size_t path_len // Path length
 );
+
+extern std::jmp_buf proc_buf;
+extern int32_t proc_status;
 
 // Process control
 void proc_exit(int32_t rval // Exit code

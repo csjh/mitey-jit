@@ -89,11 +89,18 @@ int main(int argc, const char **argv) {
 
     auto func = externalize<void()>(
         std::get<runtime::FunctionInfo>(exports.at("_start")));
+
+    int32_t status = 0;
     try {
-        func();
+        if (setjmp(proc_buf)) {
+            status = proc_status;
+        } else {
+            func();
+        }
     } catch (const std::exception &e) {
         printf("Exception: %s\n", e.what());
+        status = 255;
     }
 
-    return 0;
+    return status;
 }
