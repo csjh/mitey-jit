@@ -1,3 +1,5 @@
+note: This repo contains two JIT backends: the [minimal backend](https://github.com/csjh/mitey-jit/blob/main/backend/arm64/minimal.cpp) (described below), and the [baseline backend](https://github.com/csjh/mitey-jit/blob/main/backend/arm64/baseline.cpp), which is a more traditional single-pass compiler.
+
 # The Mitey JIT
 
 Mitey JIT is a WebAssembly JIT compiler that's meant to explore how much impact different optimizations have on the performance of WebAssembly code. Not meant for production use, but passes the WebAssembly spec tests.
@@ -24,4 +26,3 @@ Planned:
 
 -   Further (ab)use registers by using the floating point registers as general purpose registers
 -   Try to speed up stack handling by using offsets instead of incrementing/decrementing in each operation
--   Eventually properly JIT everything instead of using handler functions
