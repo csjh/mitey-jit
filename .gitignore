@@ -3,3 +3,4 @@ main
 *.dSYM
 test/core/wast-json
 test/executor
+*.bin
