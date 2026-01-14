@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <functional>
 #include <libkern/OSCacheControl.h>
+#include <pthread/pthread.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/mman.h>

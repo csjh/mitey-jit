@@ -69,22 +69,22 @@ inline bool is_float(valtype ty) {
     return ty == valtype::f32 || ty == valtype::f64;
 }
 
-template <typename T> static constexpr auto Valtype = valtype::null;
-template <> static constexpr auto Valtype<int> = valtype::i32;
-template <> static constexpr auto Valtype<unsigned> = valtype::i32;
-template <> static constexpr auto Valtype<long> = valtype::i64;
-template <> static constexpr auto Valtype<unsigned long> = valtype::i64;
-template <> static constexpr auto Valtype<long long> = valtype::i64;
-template <> static constexpr auto Valtype<unsigned long long> = valtype::i64;
-template <> static constexpr auto Valtype<float> = valtype::f32;
-template <> static constexpr auto Valtype<double> = valtype::f64;
+template <typename T> inline constexpr auto Valtype = valtype::null;
+template <> inline constexpr auto Valtype<int> = valtype::i32;
+template <> inline constexpr auto Valtype<unsigned> = valtype::i32;
+template <> inline constexpr auto Valtype<long> = valtype::i64;
+template <> inline constexpr auto Valtype<unsigned long> = valtype::i64;
+template <> inline constexpr auto Valtype<long long> = valtype::i64;
+template <> inline constexpr auto Valtype<unsigned long long> = valtype::i64;
+template <> inline constexpr auto Valtype<float> = valtype::f32;
+template <> inline constexpr auto Valtype<double> = valtype::f64;
 namespace runtime {
 struct FunctionInfo;
 }
 template <>
-static constexpr auto Valtype<runtime::FunctionInfo *> = valtype::funcref;
-template <> static constexpr auto Valtype<Externref> = valtype::externref;
-template <typename T> static constexpr auto Valtype<T *> = valtype::i32;
+inline constexpr auto Valtype<runtime::FunctionInfo *> = valtype::funcref;
+template <> inline constexpr auto Valtype<Externref> = valtype::externref;
+template <typename T> inline constexpr auto Valtype<T *> = valtype::i32;
 
 consteval auto make_valtype_names() {
     std::array<std::string, 256> names{};
