@@ -126,9 +126,10 @@ struct ControlFlow {
 };
 
 class WasmStack {
+    static valtype buffer_start[65536];
+
     bool polymorphized = false;
-    valtype buffer_start[65536];
-    valtype *buffer;
+    valtype *buffer = buffer_start;
     uint32_t stack_size = 0;
 
     template <typename T> auto find_diverging(const T &expected) const;

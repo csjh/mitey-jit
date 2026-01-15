@@ -240,7 +240,9 @@ std::shared_ptr<Instance> Module::instantiate(const runtime::Imports &imports) {
 
 Module::Module() : executable(nullptr, [](auto) {}), memory{} {}
 
-WasmStack::WasmStack() : buffer(buffer_start) {
+valtype WasmStack::buffer_start[65536] = {};
+
+WasmStack::WasmStack() {
     std::fill_n(buffer, 1024, valtype::null);
     buffer += 1024;
 }
