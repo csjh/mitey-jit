@@ -283,9 +283,11 @@ void WasmStack::apply(const WasmSignature &signature) {
     push(signature.results);
 }
 
-void WasmStack::enter_flow(const valtype_vector &expected) {
+void WasmStack::enter_flow(std::span<valtype> expected) {
     pop(expected);
     push(valtype::null);
+    // valtype::null doesn't take space on the stack
+    set_sp(sp() - sizeof(runtime::WasmValue));
     push(expected);
 }
 

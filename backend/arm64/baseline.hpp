@@ -283,11 +283,11 @@ class Arm64 {
 
     void move_single(std::byte *&code, valtype ty, value *expected,
                      uint32_t dest, bool discard_copied, bool constrained);
-    bool move_results(std::byte *&code, valtype_vector &copied_values,
+    bool move_results(std::byte *&code, std::span<valtype> copied_values,
                       uint32_t copy_to, bool discard_copied);
-    bool move_block_results(std::byte *&code, valtype_vector &copied_values,
+    bool move_block_results(std::byte *&code, std::span<valtype> copied_values,
                             uint32_t copy_to, bool discard_copied);
-    void push_block_results(std::byte *&code, valtype_vector &values);
+    void push_block_results(std::byte *&code, std::span<valtype> values);
     void discard(std::byte *&code, WasmStack &stack, uint32_t skip,
                  uint32_t discard_to);
 
@@ -327,7 +327,7 @@ class Arm64 {
 
     template <typename T>
     void negotiate_registers(std::byte *&, std::span<edge<T>>);
-    void conventionalize(std::byte *&, WasmStack &, valtype_vector &);
+    void conventionalize(std::byte *&, WasmStack &, std::span<valtype>);
 
   public:
     // todo: figure out what values for these

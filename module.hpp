@@ -58,8 +58,7 @@ struct FunctionShell {
     std::optional<ImportSpecifier> import;
 
     WasmSignature &type;
-    valtype_vector locals;
-    std::vector<uint32_t> local_bytes;
+    std::vector<valtype> locals;
     bool is_declared;
 };
 
@@ -115,7 +114,7 @@ struct PendingBrTable {
 };
 
 struct ControlFlow {
-    valtype_vector &expected;
+    std::span<valtype> expected;
     std::vector<std::byte *> pending_br;
     std::vector<std::byte *> pending_br_if;
     std::vector<PendingBrTable> pending_br_tables;
@@ -171,7 +170,7 @@ class WasmStack {
     void apply(std::array<valtype, pc> params, std::array<valtype, rc> results);
 
     void apply(const WasmSignature &signature);
-    void enter_flow(const valtype_vector &expected);
+    void enter_flow(std::span<valtype> expected);
     void set_sp(uint64_t sp) { stack_size = sp; }
     void check_br(std::vector<ControlFlow> &control_stack, uint32_t depth);
 };

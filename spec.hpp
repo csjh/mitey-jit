@@ -101,21 +101,6 @@ consteval auto make_valtype_names() {
 
 static constexpr auto valtype_names = make_valtype_names();
 
-static inline uint32_t valtype_size(valtype type) {
-    switch (type) {
-    case valtype::any:
-    case valtype::null:
-        return 0;
-    case valtype::i32:
-    case valtype::i64:
-    case valtype::f32:
-    case valtype::f64:
-    case valtype::funcref:
-    case valtype::externref:
-        return 8;
-    }
-}
-
 static inline bool is_reftype(uint32_t byte) {
     return byte == static_cast<uint8_t>(valtype::funcref) ||
            byte == static_cast<uint8_t>(valtype::externref);
@@ -144,49 +129,13 @@ static inline bool is_valtype(valtype type) {
     return is_valtype(static_cast<uint8_t>(type));
 }
 
-class valtype_vector : protected std::vector<valtype> {
-    uint32_t byte_size = 0;
-
-  public:
-    valtype_vector() = default;
-
-    using std::vector<valtype>::operator[];
-    using std::vector<valtype>::begin;
-    using std::vector<valtype>::end;
-    using std::vector<valtype>::rbegin;
-    using std::vector<valtype>::rend;
-    using std::vector<valtype>::size;
-
-    valtype_vector(std::initializer_list<valtype> il)
-        : std::vector<valtype>(il) {
-        for (auto type : il) {
-            byte_size += valtype_size(type);
-        }
-    }
-
-    valtype_vector(std::span<valtype> span)
-        : std::vector<valtype>(span.begin(), span.end()) {
-        for (auto type : span) {
-            byte_size += valtype_size(type);
-        }
-    }
-
-    bool operator==(const valtype_vector &rhs) const {
-        return static_cast<const std::vector<valtype> &>(*this) == rhs;
-    }
-
-    void push_back(valtype type) {
-        std::vector<valtype>::push_back(type);
-        byte_size += valtype_size(type);
-    }
-    void reserve(size_t n) { std::vector<valtype>::reserve(n); }
-
-    ssize_t bytesize() const { return byte_size; }
-};
+static inline ssize_t bytesize(std::span<const valtype> types) {
+    return sizeof(uint64_t) * types.size();
+}
 
 struct WasmSignature {
-    valtype_vector params;
-    valtype_vector results;
+    std::vector<valtype> params;
+    std::vector<valtype> results;
 
     template <typename Func> static WasmSignature from_type() {
         using Traits = function_traits<Func>;
@@ -208,7 +157,8 @@ struct WasmSignature {
 
   private:
     template <typename Args, size_t... Is>
-    static void fold_vector(valtype_vector &vec, std::index_sequence<Is...>) {
+    static void fold_vector(std::vector<valtype> &vec,
+                            std::index_sequence<Is...>) {
         (vec.push_back(Valtype<std::tuple_element_t<Is, Args>>), ...);
     }
 };

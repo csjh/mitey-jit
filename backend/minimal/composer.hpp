@@ -34,8 +34,8 @@ template <typename Target> class Composer {
 
     void exit_function(SHARED_PARAMS, FunctionShell &fn) {
         // move results past locals
-        Target::put_temp1(code, -fn.locals.bytesize());
-        auto byte_results = fn.type.results.bytesize();
+        Target::put_temp1(code, -bytesize(fn.locals));
+        auto byte_results = bytesize(fn.type.results);
         if (byte_results == 0) {
             Target::put_call(code, runtime::move_0_results);
         } else if (byte_results == 8) {
@@ -55,10 +55,10 @@ template <typename Target> class Composer {
         Target::max_call_size + Target::max_temp1_size + Target::max_temp2_size;
 
     void start_function(SHARED_PARAMS, FunctionShell &fn) {
-        auto locals_bytes = fn.locals.bytesize() - fn.type.params.bytesize();
+        auto locals_bytes = bytesize(fn.locals) - bytesize(fn.type.params);
 
         Target::put_prelude(code);
-        Target::put_temp1(code, fn.type.params.bytesize());
+        Target::put_temp1(code, bytesize(fn.type.params));
         Target::put_temp2(code, locals_bytes);
         Target::put_call(code, runtime::clear_locals);
     }
@@ -103,7 +103,7 @@ template <typename Target> class Composer {
             uint32_t depth) {
         auto &flow = control_stack[control_stack.size() - depth - 1];
 
-        auto imm = Target::put_br(code, flow.expected.bytesize(),
+        auto imm = Target::put_br(code, bytesize(flow.expected),
                                   flow.stack_offset - stack.sp());
 
         if (std::holds_alternative<Loop>(flow.construct)) {
@@ -116,7 +116,7 @@ template <typename Target> class Composer {
                uint32_t depth) {
         auto &flow = control_stack[control_stack.size() - depth - 1];
 
-        auto imm = Target::put_br_if(code, flow.expected.bytesize(),
+        auto imm = Target::put_br_if(code, bytesize(flow.expected),
                                      flow.stack_offset - stack.sp());
 
         if (std::holds_alternative<Loop>(flow.construct)) {
@@ -141,7 +141,7 @@ template <typename Target> class Composer {
         auto &default_target = control_stack[base - targets.back()].expected;
 
         auto info =
-            runtime::BrInfo(targets.size() - 1, default_target.bytesize());
+            runtime::BrInfo(targets.size() - 1, bytesize(default_target));
         if (info.arity == 0) {
             Target::put_call(call_addr, runtime::br_table_0);
         } else if (info.arity == 8) {
@@ -195,17 +195,20 @@ template <typename Target> class Composer {
         Target::put_call(code, runtime::select_t);
     }
     void localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-        Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx] -
-                                  valtype_size(fn.locals[local_idx])));
+        Target::put_temp1(code, -(stack.sp() -
+                                  sizeof(runtime::WasmValue) * local_idx -
+                                  sizeof(runtime::WasmValue)));
         Target::put_call(code, runtime::localget);
     }
     void localset(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-        Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx] +
-                                  valtype_size(fn.locals[local_idx])));
+        Target::put_temp1(code, -(stack.sp() -
+                                  sizeof(runtime::WasmValue) * local_idx +
+                                  sizeof(runtime::WasmValue)));
         Target::put_call(code, runtime::localset);
     }
     void localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
-        Target::put_temp1(code, -(stack.sp() + fn.local_bytes[local_idx]));
+        Target::put_temp1(
+            code, -(stack.sp() - sizeof(runtime::WasmValue) * local_idx));
         Target::put_call(code, runtime::localtee);
     }
     unary(tableget);

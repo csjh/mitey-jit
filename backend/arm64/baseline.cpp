@@ -944,7 +944,7 @@ constexpr std::optional<LogicalImm> tryLogicalImm(uint32_t val) {
     return tryLogicalImm(val64);
 }
 
-inline bool is_fast_compatible(valtype_vector &vec) {
+inline bool is_fast_compatible(std::span<valtype> vec) {
     return vec.size() == 1 && !is_float(vec[0]);
 }
 
@@ -1571,7 +1571,7 @@ void Arm64::move_single(std::byte *&code, valtype ty, value *expected,
     });
 }
 
-bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
+bool Arm64::move_results(std::byte *&code, std::span<valtype> copied_values,
                          uint32_t stack_offset, bool discard_copied) {
     auto start = code;
 
@@ -1589,12 +1589,13 @@ bool Arm64::move_results(std::byte *&code, valtype_vector &copied_values,
         return has_move;
 
     values -= copied_values.size();
-    stack_size -= copied_values.bytesize();
+    stack_size -= bytesize(copied_values);
 
     return has_move;
 }
 
-bool Arm64::move_block_results(std::byte *&code, valtype_vector &copied_values,
+bool Arm64::move_block_results(std::byte *&code,
+                               std::span<valtype> copied_values,
                                uint32_t stack_offset, bool discard_copied) {
     if (is_fast_compatible(copied_values)) {
         auto start = code;
@@ -1610,7 +1611,7 @@ bool Arm64::move_block_results(std::byte *&code, valtype_vector &copied_values,
     }
 }
 
-void Arm64::push_block_results(std::byte *&code, valtype_vector &values) {
+void Arm64::push_block_results(std::byte *&code, std::span<valtype> values) {
     if (is_fast_compatible(values)) {
         use(code, ireg::x17);
         // this is a weird hack
@@ -1781,7 +1782,7 @@ void Arm64::finalize(std::byte *&code, Args... results) {
 std::byte *Arm64::generate_trampoline(std::byte *&code,
                                       uint32_t function_offset,
                                       FunctionShell &fn) {
-    auto stack_to_custom = [&](valtype_vector &sig) {
+    auto stack_to_custom = [&](std::span<valtype> sig) {
         auto ireg_alloc = iargs.begin();
         auto freg_alloc = fargs.begin();
 
@@ -1800,7 +1801,7 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
             }
         }
     };
-    auto custom_to_stack = [&](valtype_vector &sig) {
+    auto custom_to_stack = [&](std::span<valtype> sig) {
         auto ireg_alloc = iargs.begin();
         auto freg_alloc = fargs.begin();
 
@@ -1940,7 +1941,7 @@ void Arm64::negotiate_registers(std::byte *&code,
 }
 
 void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
-                            valtype_vector &type) {
+                            std::span<valtype> type) {
     for (size_t i = type.size(); i > 0; i--) {
         drop(code, stack, type[i - 1]);
     }
@@ -2161,7 +2162,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
         }
     }
 
-    stack_size = fn.locals.size() * sizeof(runtime::WasmValue);
+    stack_size = bytesize(fn.locals);
 }
 void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     auto &fn = std::get<Function>(flow.construct).fn;
@@ -2221,7 +2222,7 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
 
     if (is_fast_compatible(fn.type.results)) {
         // result is already in x17
-    } else if (auto local_bytes = fn.locals.bytesize()) {
+    } else if (auto local_bytes = bytesize(fn.locals)) {
         // return values should be in [local_bytes, ...), so copy them backwards
         // into the local area
         // clobber at will (in this case x17)
@@ -2264,7 +2265,7 @@ void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
     intregs.deactivate_all(locals);
     floatregs.deactivate_all(locals);
 
-    move_block_results(code, sig.params, stack_size - sig.params.bytesize(),
+    move_block_results(code, sig.params, stack_size - bytesize(sig.params),
                        true);
     push_block_results(code, sig.params);
 
@@ -2284,7 +2285,7 @@ std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
 
     // todo: take another look at duping values
     // the downside is that it makes reasoning about the stack harder
-    move_block_results(code, sig.params, stack_size - sig.params.bytesize(),
+    move_block_results(code, sig.params, stack_size - bytesize(sig.params),
                        true);
     push_block_results(code, sig.params);
 
@@ -2468,7 +2469,7 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
     }
 
     values -= wanted.size();
-    stack_size -= wanted.bytesize();
+    stack_size -= bytesize(wanted);
 
     discard(code, stack, wanted.size(), control_stack.back().stack_offset);
 
@@ -4164,10 +4165,9 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
     spill_flags_to_stack(code);
     spill_registers(code);
 
-    auto vparams = valtype_vector(params), vresults = valtype_vector(results);
-    move_results(code, vparams, stack_size - vparams.bytesize(), true);
+    move_results(code, params, stack_size - bytesize(params), true);
 
-    masm::add(code, this, true, stack_size + vparams.bytesize(), stackreg,
+    masm::add(code, this, true, stack_size + bytesize(params), stackreg,
               stackreg);
     if (temp1)
         masm::mov(code, *temp1, ireg::x3);
@@ -4176,7 +4176,7 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
     masm::mov(code, reinterpret_cast<uint64_t>(func), ireg::x5);
     raw::blr(code, ireg::x5);
 
-    masm::sub(code, this, true, stack_size + vresults.bytesize(), stackreg,
+    masm::sub(code, this, true, stack_size + bytesize(results), stackreg,
               stackreg);
 
     for ([[maybe_unused]] auto result : results)

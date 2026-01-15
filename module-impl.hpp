@@ -261,8 +261,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     error<validation_error>("unknown type");
                 }
                 functions.emplace_back(nullptr, nullptr, specifier,
-                                       types[typeidx], valtype_vector{},
-                                       std::vector<uint32_t>{}, false);
+                                       types[typeidx], std::vector<valtype>{},
+                                       false);
                 n_fn_imports++;
             } else if (desc == ImExDesc::table) {
                 // table
@@ -319,8 +319,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
             }
 
             functions.emplace_back(nullptr, nullptr, std::nullopt,
-                                   types[type_idx], valtype_vector{},
-                                   std::vector<uint32_t>{}, false);
+                                   types[type_idx], std::vector<valtype>{},
+                                   false);
         }
     });
 
@@ -673,14 +673,6 @@ void Module::initialize(std::span<uint8_t> bytes) {
                             }
                         }
                     }
-                    fn.local_bytes.reserve(fn.locals.size());
-                    uint32_t psum = 0;
-                    for (auto it = fn.locals.rbegin(); it != fn.locals.rend();
-                         ++it) {
-                        psum += valtype_size(*it);
-                        fn.local_bytes.push_back(psum);
-                    }
-                    std::reverse(fn.local_bytes.begin(), fn.local_bytes.end());
 
                     fn.trampoline =
                         Target::generate_trampoline(code, 1 + idx, fn);
@@ -830,18 +822,14 @@ template <typename T> bool WasmStack::operator==(const T &rhs) const {
 template <typename T> void WasmStack::push(const T &values) {
     std::copy(values.begin(), values.end(), buffer);
     buffer += values.size();
-    stack_size +=
-        std::reduce(values.begin(), values.end(), 0,
-                    [](auto a, auto b) { return a + valtype_size(b); });
+    stack_size += bytesize(values);
 }
 template <typename T> void WasmStack::pop(const T &expected) {
     ensure(check(expected), "type mismatch");
 
     auto diverge = find_diverging(expected);
     buffer -= std::distance(rbegin(), diverge);
-    stack_size -=
-        std::reduce(expected.begin(), expected.end(), 0,
-                    [](auto a, auto b) { return a + valtype_size(b); });
+    stack_size -= bytesize(expected);
 }
 
 template <size_t pc, size_t rc>
@@ -968,7 +956,7 @@ HANDLER(block) {
         std::vector<std::byte *>{}, std::vector<PendingBrTable>{}, signature,
         stack.polymorphism(),
         stack.polymorphism() || control_stack.back().unreachable,
-        stack.sp() - signature.params.bytesize(), Block());
+        stack.sp() - bytesize(signature.params), Block());
     stack.unpolymorphize();
 
     _(block, signature);
@@ -983,7 +971,7 @@ HANDLER(loop) {
         std::vector<std::byte *>{}, std::vector<PendingBrTable>{}, signature,
         stack.polymorphism(),
         stack.polymorphism() || control_stack.back().unreachable,
-        stack.sp() - signature.params.bytesize(), Loop(nullptr));
+        stack.sp() - bytesize(signature.params), Loop(nullptr));
     stack.unpolymorphize();
 
     // todo: i might want more flexibility than this
@@ -1002,7 +990,7 @@ HANDLER(if_) {
         std::vector<std::byte *>{}, std::vector<PendingBrTable>{}, signature,
         stack.polymorphism(),
         stack.polymorphism() || control_stack.back().unreachable,
-        stack.sp() - signature.params.bytesize(), If(nullptr));
+        stack.sp() - bytesize(signature.params), If(nullptr));
 
     if (!control_stack.back().unreachable) {
         auto if_ptr = jit.if_(code, stack, signature);
@@ -1027,7 +1015,7 @@ HANDLER(else_) {
     stack.push(sig.params);
 
     // necessary in case of polymorphic stack
-    stack.set_sp(stack_offset + sig.params.bytesize());
+    stack.set_sp(stack_offset + bytesize(sig.params));
 
     control_stack.back().construct = IfElse();
     stack.unpolymorphize();
@@ -1055,6 +1043,8 @@ HANDLER(end) {
 
     stack.pop(sig.results);
     stack.pop(valtype::null);
+    // valtype::null doesn't take space on the stack
+    stack.set_sp(stack.sp() + sizeof(runtime::WasmValue));
 
     stack.set_polymorphism(polymorphism);
 
@@ -1104,7 +1094,10 @@ HANDLER(br_table) {
             ensure(default_target.size() == target.size(), "type mismatch");
         } else {
             stack.check_br(control_stack, depth);
-            ensure(default_target == target, "type mismatch");
+            ensure(target.size() == default_target.size() &&
+                       std::equal(target.begin(), target.end(),
+                                  default_target.begin()),
+                   "type mismatch");
         }
     }
 
@@ -1652,7 +1645,7 @@ template <typename Pager, typename Target>
 std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
                                         std::byte *code, FunctionShell &fn) {
     auto stack = WasmStack();
-    stack.set_sp(fn.locals.bytesize());
+    stack.set_sp(bytesize(fn.locals));
 
     auto jit = Target();
     auto control_stack =
