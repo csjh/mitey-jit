@@ -306,7 +306,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
     section(3, [&] {
         auto n_functions = safe_read_leb128<uint32_t>(iter);
 
-        functions.reserve(n_functions);
+        functions.reserve(functions.size() + n_functions);
 
         for (uint32_t i = 0; i < n_functions; ++i) {
             if (iter.empty()) {
