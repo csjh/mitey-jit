@@ -329,6 +329,7 @@ struct CallIndirectInfo {
 static_assert(sizeof(CallIndirectInfo) == 2 * sizeof(uint64_t));
 
 Signature ifXXconst;
+Signature trampoline;
 Signature clear_locals;
 Signature jump;
 Signature call_extern;

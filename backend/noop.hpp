@@ -11,6 +11,11 @@ class Noop {
     static constexpr size_t function_overhead = 1;
     static constexpr size_t max_instruction = 1;
 
+    static std::byte *generate_trampoline(std::byte *&, uint32_t,
+                                          FunctionShell &) {
+        return nullptr;
+    }
+
     void start_function(SHARED_PARAMS, FunctionShell &) {}
     void exit_function(SHARED_PARAMS, FunctionShell &) {}
 

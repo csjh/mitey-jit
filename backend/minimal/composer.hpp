@@ -54,6 +54,19 @@ template <typename Target> class Composer {
     static constexpr size_t max_instruction =
         Target::max_call_size + Target::max_temp1_size + Target::max_temp2_size;
 
+    static std::byte *generate_trampoline(std::byte *&code, uint32_t i,
+                                          FunctionShell &fn) {
+        if (fn.import) {
+            auto start = code;
+            Target::put_prelude(code);
+            Target::put_temp1(code, i);
+            Target::put_call(code, runtime::trampoline);
+            Target::put_postlude(code);
+            return start;
+        } else
+            return code;
+    }
+
     void start_function(SHARED_PARAMS, FunctionShell &fn) {
         auto locals_bytes = bytesize(fn.locals) - bytesize(fn.type.params);
 

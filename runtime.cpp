@@ -60,6 +60,15 @@ __attribute__((noinline)) void dummy(std::byte *memory, void **misc,
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
 // non-instruction handlers
+HANDLER(trampoline) {
+    // tmp1 = function index
+    PRELUDE;
+    auto &func = MISC_GET(FunctionInfo, tmp1);
+    stack -= func.type.params;
+    func.stack_signature(func.memory, func.misc, stack);
+    stack += func.type.results;
+    POSTLUDE;
+}
 HANDLER(clear_locals) {
     // tmp1 = parameter local bytes
     // tmp2 = non-parameter local bytes
