@@ -172,8 +172,10 @@ class Mac {
         auto written = cb();
         pthread_jit_write_protect_np(true);
 
-        // flush instruction cache to ensure code is executable
-        sys_icache_invalidate(alloc.get(), written);
+        // don't think this is actually necessary unless we write dynamically
+        // icache wouldn't have shit in it if it hasn't been used as code
+        // // flush instruction cache to ensure code is executable
+        // sys_icache_invalidate(alloc.get(), written);
     }
 
     static int grow(runtime::WasmMemory &memory, size_t delta) {
