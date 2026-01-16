@@ -243,9 +243,8 @@ class Arm64 {
     flags flag;
 
     uint32_t stack_size = 0;
-    std::unique_ptr<value[]> values_start =
-        std::make_unique_for_overwrite<value[]>(65536);
-    value *values = values_start.get();
+    static value values_start[65536];
+    value *values = values_start;
 
     void spill_flags_to_register(std::byte *&code);
     void spill_flags_to_stack(std::byte *&code);

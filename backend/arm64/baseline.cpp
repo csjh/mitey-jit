@@ -1172,6 +1172,8 @@ bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
 
 }; // namespace
 
+value Arm64::values_start[65536];
+
 template <auto registers>
 void Arm64::reg_manager<registers>::reset_temporaries() {
     reg_positions.reset_temporaries();
