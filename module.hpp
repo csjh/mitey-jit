@@ -129,8 +129,8 @@ class WasmStack {
     static valtype buffer_start[65536];
 
     bool polymorphized = false;
-    valtype *buffer = buffer_start;
-    uint32_t stack_size = 0;
+    valtype *__restrict__ buffer = buffer_start;
+    uint64_t stack_size = 0;
 
     template <typename T> auto find_diverging(const T &expected) const;
 
@@ -148,6 +148,7 @@ class WasmStack {
     auto end() const { return buffer; }
     auto size() const { return std::distance(begin(), end()); }
 
+    template <typename T> bool check_polymorphic(const T &expected) const;
     template <typename T> bool check(const T &expected) const;
 
     template <typename T> bool operator==(const T &rhs) const;
@@ -160,6 +161,7 @@ class WasmStack {
     void push(valtype ty);
     template <typename T> void push(const T &values);
     void pop(valtype expected_ty);
+    template <typename T> void pop_polymorphic(const T &expected);
     template <typename T> void pop(const T &expected);
 
     bool empty() const;

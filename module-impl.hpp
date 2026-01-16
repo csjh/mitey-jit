@@ -802,12 +802,19 @@ template <typename T> auto WasmStack::find_diverging(const T &expected) const {
     return abegin;
 }
 
-template <typename T> bool WasmStack::check(const T &expected) const {
+template <typename T>
+bool WasmStack::check_polymorphic(const T &expected) const {
     auto diverge = find_diverging(expected);
     if (static_cast<size_t>(std::distance(rbegin(), diverge)) ==
         expected.size())
         return true;
     return polymorphized && *diverge == valtype::null;
+}
+
+template <typename T> bool WasmStack::check(const T &expected) const {
+    if (polymorphized) [[unlikely]]
+        return check_polymorphic(expected);
+    return std::equal(end() - expected.size(), end(), expected.begin());
 }
 
 template <typename T> bool WasmStack::operator==(const T &rhs) const {
@@ -824,11 +831,22 @@ template <typename T> void WasmStack::push(const T &values) {
     buffer += values.size();
     stack_size += bytesize(values);
 }
-template <typename T> void WasmStack::pop(const T &expected) {
+
+template <typename T> void WasmStack::pop_polymorphic(const T &expected) {
     ensure(check(expected), "type mismatch");
 
     auto diverge = find_diverging(expected);
     buffer -= std::distance(rbegin(), diverge);
+    stack_size -= bytesize(expected);
+}
+
+template <typename T> void WasmStack::pop(const T &expected) {
+    if (polymorphized) [[unlikely]]
+        return pop_polymorphic(expected);
+
+    ensure(check(expected), "type mismatch");
+
+    buffer -= expected.size();
     stack_size -= bytesize(expected);
 }
 
