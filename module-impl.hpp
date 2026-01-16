@@ -895,10 +895,10 @@ void WasmStack::apply(std::array<valtype, pc> params,
 
 #define HANDLER(name)                                                          \
     template <typename Target>                                                 \
-    std::byte *validate_##name(Module &mod, safe_byte_iterator &iter,          \
-                               FunctionShell &fn, WasmStack &stack,            \
-                               std::vector<ControlFlow> &control_stack,        \
-                               std::byte *code, Target &jit)
+    __attribute__((preserve_none)) std::byte *validate_##name(                 \
+        Module &mod, safe_byte_iterator &iter, FunctionShell &fn,              \
+        WasmStack &stack, std::vector<ControlFlow> &control_stack,             \
+        std::byte *code, Target &jit)
 
 #define V(name, _, byte) HANDLER(name);
 FOREACH_INSTRUCTION(V)

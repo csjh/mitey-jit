@@ -51,7 +51,7 @@ static inline bool is_imexdesc(uint8_t byte) {
 
 using ImportSpecifier = std::pair<std::string, std::string>;
 
-struct FunctionShell {
+struct alignas(128) FunctionShell {
     std::byte *start;
     std::byte *trampoline;
 
@@ -181,10 +181,9 @@ class WasmStack {
 class Module;
 
 template <typename Target>
-using CompilationHandler = std::byte *(Module &, safe_byte_iterator &,
-                                       FunctionShell &, WasmStack &,
-                                       std::vector<ControlFlow> &, std::byte *,
-                                       Target &);
+using CompilationHandler = __attribute__((preserve_none))
+std::byte *(Module &, safe_byte_iterator &, FunctionShell &, WasmStack &,
+            std::vector<ControlFlow> &, std::byte *, Target &);
 
 class Module {
     friend class Instance;
