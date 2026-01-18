@@ -688,16 +688,16 @@ void Module::initialize(std::span<uint8_t> bytes) {
                               << &fn - functions.data() << " at "
                               << iter - bytes.data() << std::endl;
 #endif
-                    auto fn_iter = iter;
-                    code =
-                        validate_and_compile<Pager, Target>(fn_iter, code, fn);
+                    uint8_t *fn_iter;
+                    std::tie(fn_iter, code) =
+                        validate_and_compile<Pager, Target>(iter, code, fn);
                     if (fn_iter[-1] != static_cast<uint8_t>(Instruction::end)) {
                         error<malformed_error>("END opcode expected");
                     }
-                    if (fn_iter - start != function_length) {
+                    if (fn_iter - start.unsafe_ptr() != function_length) {
                         error<malformed_error>("section size mismatch");
                     }
-                    iter = fn_iter;
+                    iter += (fn_iter - iter.unsafe_ptr());
                 }
 
                 return code - executable.get();
@@ -895,10 +895,11 @@ void WasmStack::apply(std::array<valtype, pc> params,
 
 #define HANDLER(name)                                                          \
     template <typename Target>                                                 \
-    __attribute__((preserve_none)) std::byte *validate_##name(                 \
-        Module &mod, safe_byte_iterator &iter, FunctionShell &fn,              \
-        WasmStack &stack, std::vector<ControlFlow> &control_stack,             \
-        std::byte *code, Target &jit)
+    __attribute__((preserve_none)) std::pair<uint8_t *, std::byte *>           \
+        validate_##name(Module &mod, safe_byte_iterator iter,                  \
+                        FunctionShell &fn, WasmStack &stack,                   \
+                        std::vector<ControlFlow> &control_stack,               \
+                        std::byte *code, Target &jit)
 
 #define V(name, _, byte) HANDLER(name);
 FOREACH_INSTRUCTION(V)
@@ -1056,7 +1057,7 @@ HANDLER(end) {
     }
 
     if (std::holds_alternative<Function>(construct)) {
-        return code;
+        return {iter.unsafe_ptr(), code};
     }
 
     stack.pop(sig.results);
@@ -1660,8 +1661,9 @@ HANDLER(multibyte) {
 }
 
 template <typename Pager, typename Target>
-std::byte *Module::validate_and_compile(safe_byte_iterator &iter,
-                                        std::byte *code, FunctionShell &fn) {
+std::pair<uint8_t *, std::byte *>
+Module::validate_and_compile(safe_byte_iterator iter, std::byte *code,
+                             FunctionShell &fn) {
     auto stack = WasmStack();
     stack.set_sp(bytesize(fn.locals));
 

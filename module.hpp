@@ -182,8 +182,9 @@ class Module;
 
 template <typename Target>
 using CompilationHandler = __attribute__((preserve_none))
-std::byte *(Module &, safe_byte_iterator &, FunctionShell &, WasmStack &,
-            std::vector<ControlFlow> &, std::byte *, Target &);
+std::pair<uint8_t *, std::byte *>(Module &, safe_byte_iterator, FunctionShell &,
+                                  WasmStack &, std::vector<ControlFlow> &,
+                                  std::byte *, Target &);
 
 class Module {
     friend class Instance;
@@ -214,8 +215,9 @@ class Module {
     std::vector<runtime::Segment> data_segments;
 
     template <typename Pager, typename Target>
-    std::byte *validate_and_compile(safe_byte_iterator &iter, std::byte *code,
-                                    FunctionShell &fn);
+    std::pair<std::uint8_t *, std::byte *>
+    validate_and_compile(safe_byte_iterator iter, std::byte *code,
+                         FunctionShell &fn);
 
     void validate_const(safe_byte_iterator &iter, valtype expected);
 
