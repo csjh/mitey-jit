@@ -50,6 +50,11 @@ class value {
     template <location loc> bool is() const { return where() == loc; }
 };
 
+template <typename Src, typename Dest = Src> struct edge {
+    Src src;
+    Dest dest;
+};
+
 #define SHARED_PARAMS                                                          \
     [[maybe_unused]] std::byte *&code, [[maybe_unused]] WasmStack &stack
 
@@ -318,11 +323,6 @@ class Arm64 {
                       std::array<valtype, NR> results,
                       std::optional<uint64_t> temp1 = std::nullopt,
                       std::optional<uint64_t> temp2 = std::nullopt);
-
-    template <typename Src, typename Dest = Src> struct edge {
-        Src src;
-        Dest dest;
-    };
 
     template <typename T>
     void negotiate_registers(std::byte *&, std::span<edge<T>>);

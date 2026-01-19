@@ -1876,6 +1876,40 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
 }
 
 template <typename T>
+void traverse_line(std::byte *&code, std::span<edge<T>> param_edges,
+                          T node) {
+    constexpr auto max_regs = 32;
+    constexpr auto invalid = (T)max_regs;
+
+    for (auto &pair : param_edges) {
+        if (pair.src == node) {
+            traverse_line(code, param_edges, pair.dest);
+            raw::mov(code, true, pair.src, pair.dest);
+            pair = edge<T>(invalid, invalid);
+        }
+    }
+}
+
+template <typename T>
+void traverse_maybe_cycle(std::byte *&code,
+                                 std::span<edge<T>> param_edges, T node) {
+    constexpr auto tiebreaker = ireg::x30;
+    constexpr auto max_regs = 32;
+    constexpr auto invalid = (T)max_regs;
+
+    raw::mov(code, true, node, tiebreaker);
+
+    for (auto &pair : param_edges) {
+        if (pair.src == node) {
+            auto dest = pair.dest;
+            pair = edge<T>(invalid, invalid);
+            traverse_line(code, param_edges, dest);
+            raw::mov(code, true, tiebreaker, dest);
+        }
+    }
+};
+
+template <typename T>
 void Arm64::negotiate_registers(std::byte *&code,
                                 std::span<edge<T>> param_edges) {
     constexpr auto tiebreaker = ireg::x30;
@@ -1896,29 +1930,6 @@ void Arm64::negotiate_registers(std::byte *&code,
         has_incoming.set((uint8_t)pair.dest);
     }
 
-    auto traverse_line = [&](const auto &self, T node) -> void {
-        for (auto &pair : param_edges) {
-            if (pair.src == node) {
-                self(self, pair.dest);
-                raw::mov(code, true, pair.src, pair.dest);
-                pair = edge<T>(invalid, invalid);
-            }
-        }
-    };
-
-    auto traverse_maybe_cycle = [&](T node) -> void {
-        raw::mov(code, true, node, tiebreaker);
-
-        for (auto &pair : param_edges) {
-            if (pair.src == node) {
-                auto dest = pair.dest;
-                pair = edge<T>(invalid, invalid);
-                traverse_line(traverse_line, dest);
-                raw::mov(code, true, tiebreaker, dest);
-            }
-        }
-    };
-
     for (auto pair : param_edges) {
         if (pair.src == invalid)
             continue;
@@ -1927,7 +1938,7 @@ void Arm64::negotiate_registers(std::byte *&code,
         if (has_incoming.test((uint8_t)pair.src))
             continue;
 
-        traverse_line(traverse_line, pair.src);
+        traverse_line(code, param_edges, pair.src);
     }
 
     for (auto pair : param_edges) {
@@ -1938,7 +1949,7 @@ void Arm64::negotiate_registers(std::byte *&code,
         if (!has_incoming.test((uint8_t)pair.src))
             continue;
 
-        traverse_maybe_cycle(pair.src);
+        traverse_maybe_cycle(code, param_edges, pair.src);
     }
 }
 
