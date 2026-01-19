@@ -21,7 +21,7 @@ template <typename T> T rotr(T x, T n) {
     return (x >> n) | (x << (sizeof(T) * 8 - n));
 }
 
-Segment Segment::empty(0, 0, nullptr, nullptr);
+Segment Segment::empty(0, std::span((uint8_t *)nullptr, 0), nullptr);
 WasmMemory WasmMemory::empty = WasmMemory();
 Allocation (*WasmMemory::default_make_memory)(size_t, AllocationKind) = nullptr;
 int (*WasmMemory::default_grow_memory)(WasmMemory &, size_t) = nullptr;
@@ -759,10 +759,10 @@ uint32_t WasmMemory::grow(uint32_t delta) {
 void WasmMemory::copy_into(uint32_t dest, uint32_t src, const Segment &segment,
                            uint32_t length) {
     if (static_cast<uint64_t>(dest) + length > current * PAGE_SIZE ||
-        src + length > segment.size) {
+        src + length > segment.data.size()) {
         trap(TrapKind::out_of_bounds_memory_access);
     }
-    std::memcpy(memory.get() + dest, segment.data.get() + src, length);
+    std::memcpy(memory.get() + dest, segment.data.data() + src, length);
 }
 
 void WasmMemory::memcpy(uint32_t dst, uint32_t src, uint32_t length) {

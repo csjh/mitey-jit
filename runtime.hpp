@@ -243,8 +243,7 @@ struct WasmTable {
 
 struct Segment {
     uint32_t memidx;
-    uint32_t size;
-    std::unique_ptr<uint8_t[]> data;
+    std::span<uint8_t> data;
     uint8_t *initializer;
 
     static Segment empty;

@@ -743,14 +743,11 @@ void Module::initialize(std::span<uint8_t> bytes) {
                             "unexpected end of section or function");
                     }
 
-                    auto segment = std::make_unique<uint8_t[]>(data_length);
-                    std::memcpy(segment.get(),
-                                iter.get_with_at_least(data_length),
-                                data_length);
+                    auto segment = std::span(
+                        iter.get_with_at_least(data_length), data_length);
                     iter += data_length;
 
-                    data_segments.emplace_back(memidx, data_length,
-                                               std::move(segment), nullptr);
+                    data_segments.emplace_back(memidx, segment, nullptr);
                 } else {
                     // active segment
                     if (!memory.exists) {
@@ -765,15 +762,11 @@ void Module::initialize(std::span<uint8_t> bytes) {
                             "unexpected end of section or function");
                     }
 
-                    auto segment = std::make_unique<uint8_t[]>(data_length);
-                    std::memcpy(segment.get(),
-                                iter.get_with_at_least(data_length),
-                                data_length);
+                    auto segment = std::span(
+                        iter.get_with_at_least(data_length), data_length);
                     iter += data_length;
 
-                    // todo: this has to be instantiated
-                    data_segments.emplace_back(memidx, data_length,
-                                               std::move(segment), initializer);
+                    data_segments.emplace_back(memidx, segment, initializer);
                 }
             }
         },

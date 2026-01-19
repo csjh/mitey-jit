@@ -256,15 +256,15 @@ void Instance::initialize(const runtime::Imports &imports) {
     }
 
     for (uint32_t i = 0; i < module->data_segments.size(); i++) {
-        auto &data = module->data_segments[i];
-        if (data.initializer) {
-            auto offset = interpret_const_inplace(data.initializer).u32;
+        auto &segment = module->data_segments[i];
+        if (segment.initializer) {
+            auto offset = interpret_const_inplace(segment.initializer).u32;
 
-            memory->copy_into(offset, 0, data, data.size);
+            memory->copy_into(offset, 0, segment, segment.data.size());
 
             misc_segments[i] = &runtime::Segment::empty;
         } else {
-            misc_segments[i] = &data;
+            misc_segments[i] = &segment;
         }
     }
 

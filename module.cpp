@@ -127,7 +127,26 @@ WasmSignature &read_blocktype(std::vector<WasmSignature> &types,
 }
 
 void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
+    using enum Instruction;
+
+    bool fastpath_attempt = false;
+    if (static_cast<Instruction>(*iter) == i32const) [[likely]] {
+        iter++;
+        safe_read_leb128<int32_t>(iter);
+        fastpath_attempt = true;
+        if (static_cast<Instruction>(*iter) == end) [[likely]] {
+            iter++;
+            if (expected != valtype::i32) [[unlikely]] {
+                error<validation_error>("type mismatch");
+            }
+            return;
+        }
+    }
+
     std::vector<valtype> stack_types;
+    if (fastpath_attempt) {
+        stack_types.push_back(valtype::i32);
+    }
 
 #define OP(ty, op)                                                             \
     {                                                                          \
@@ -149,7 +168,6 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
     while (1) {
         auto byte = *iter++;
 
-        using enum Instruction;
         if (static_cast<Instruction>(byte) == end) {
             break;
         }
