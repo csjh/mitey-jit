@@ -326,6 +326,10 @@ class Arm64 {
 
     template <typename T>
     void negotiate_registers(std::byte *&, std::span<edge<T>>);
+    template <typename T>
+    void __attribute__((noinline, preserve_most))
+    negotiate_registers_slowpath(std::byte *&, std::span<edge<T>>);
+
     void conventionalize(std::byte *&, WasmStack &, std::span<valtype>);
 
   public:

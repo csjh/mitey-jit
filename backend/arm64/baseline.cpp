@@ -1876,8 +1876,7 @@ std::byte *Arm64::generate_trampoline(std::byte *&code,
 }
 
 template <typename T>
-void traverse_line(std::byte *&code, std::span<edge<T>> param_edges,
-                          T node) {
+void traverse_line(std::byte *&code, std::span<edge<T>> param_edges, T node) {
     constexpr auto max_regs = 32;
     constexpr auto invalid = (T)max_regs;
 
@@ -1891,8 +1890,8 @@ void traverse_line(std::byte *&code, std::span<edge<T>> param_edges,
 }
 
 template <typename T>
-void traverse_maybe_cycle(std::byte *&code,
-                                 std::span<edge<T>> param_edges, T node) {
+void traverse_maybe_cycle(std::byte *&code, std::span<edge<T>> param_edges,
+                          T node) {
     constexpr auto tiebreaker = ireg::x30;
     constexpr auto max_regs = 32;
     constexpr auto invalid = (T)max_regs;
@@ -1910,20 +1909,14 @@ void traverse_maybe_cycle(std::byte *&code,
 };
 
 template <typename T>
-void Arm64::negotiate_registers(std::byte *&code,
-                                std::span<edge<T>> param_edges) {
+void Arm64::negotiate_registers_slowpath(std::byte *&code,
+                                         std::span<edge<T>> param_edges) {
     constexpr auto tiebreaker = ireg::x30;
     constexpr auto max_regs = 32;
     constexpr auto invalid = (T)max_regs;
 
-    constexpr std::span<const T> FullDestRegs = [] {
-        if constexpr (std::is_same_v<T, ireg>)
-            return iargs;
-        else
-            return fargs;
-    }();
-
-    auto dest_regs = FullDestRegs.subspan(0, param_edges.size());
+    if (param_edges.size() > arg_regs<T>.size())
+        __builtin_unreachable();
 
     std::bitset<max_regs> has_incoming = 0;
     for (auto pair : param_edges) {
@@ -1935,7 +1928,7 @@ void Arm64::negotiate_registers(std::byte *&code,
             continue;
         if (pair.src == pair.dest)
             continue;
-        if (has_incoming.test((uint8_t)pair.src))
+        if (has_incoming[(uint8_t)pair.src])
             continue;
 
         traverse_line(code, param_edges, pair.src);
@@ -1946,11 +1939,34 @@ void Arm64::negotiate_registers(std::byte *&code,
             continue;
         if (pair.src == pair.dest)
             continue;
-        if (!has_incoming.test((uint8_t)pair.src))
+        if (!has_incoming[(uint8_t)pair.src])
             continue;
 
         traverse_maybe_cycle(code, param_edges, pair.src);
     }
+}
+template <typename T>
+void Arm64::negotiate_registers(std::byte *&code,
+                                std::span<edge<T>> param_edges) {
+    constexpr auto max_regs = 32;
+
+    if (param_edges.size() > arg_regs<T>.size())
+        __builtin_unreachable();
+
+    std::bitset<max_regs> has_incoming, has_outgoing;
+    for (auto pair : param_edges) {
+        has_incoming.set((uint8_t)pair.dest);
+        has_outgoing.set((uint8_t)pair.src);
+    }
+
+    if ((has_incoming & has_outgoing) == 0) [[likely]] {
+        for (auto pair : param_edges) {
+            raw::mov(code, true, pair.src, pair.dest);
+        }
+        return;
+    }
+
+    return negotiate_registers_slowpath(code, param_edges);
 }
 
 void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
@@ -1984,12 +2000,15 @@ void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
         auto ty = type[i - 1];
         auto stack_offset = stack_size + (i - 1) * sizeof(runtime::WasmValue);
 
-        if (is_float(ty)) {
+        if (is_float(ty)) [[unlikely]] {
             n_float--;
-            if (n_float < fargs.size()) {
+            if (n_float < fargs.size()) [[likely]] {
                 if (v.is<value::location::reg>() ||
-                    v.is<value::location::multireg>()) {
-                    reg_fparams[n_reg_float++] = {v.as<freg>(), fargs[n_float]};
+                    v.is<value::location::multireg>()) [[likely]] {
+                    if (v.as<freg>() != fargs[n_float]) [[likely]] {
+                        reg_fparams[n_reg_float++] = {v.as<freg>(),
+                                                      fargs[n_float]};
+                    }
                 } else {
                     nonreg_fparams[n_nonreg_float++] = {&v, fargs[n_float]};
                 }
@@ -1998,10 +2017,12 @@ void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
             }
         } else {
             n_int--;
-            if (n_int < iargs.size()) {
+            if (n_int < iargs.size()) [[likely]] {
                 if (v.is<value::location::reg>() ||
-                    v.is<value::location::multireg>()) {
-                    reg_iparams[n_reg_int++] = {v.as<ireg>(), iargs[n_int]};
+                    v.is<value::location::multireg>()) [[likely]] {
+                    if (v.as<ireg>() != iargs[n_int]) [[likely]] {
+                        reg_iparams[n_reg_int++] = {v.as<ireg>(), iargs[n_int]};
+                    }
                 } else {
                     nonreg_iparams[n_nonreg_int++] = {&v, iargs[n_int]};
                 }

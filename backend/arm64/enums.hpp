@@ -40,6 +40,16 @@ constexpr auto fcaller_saved = std::to_array({
 constexpr auto iargs = std::span(icaller_saved).subspan(0, icaller_saved.size() - 2);
 constexpr auto fargs = std::span(fcaller_saved).subspan(0, fcaller_saved.size() - 2);
 
+template <typename T>
+constexpr std::span<const T> arg_regs = [] {
+        if constexpr (std::is_same_v<T, ireg>)
+            return iargs;
+        else if constexpr (std::is_same_v<T, freg>)
+            return fargs;
+        else
+            static_assert(!std::is_same_v<T, T>, "Invalid register type");
+    }();
+
 constexpr auto isafe = std::span(icaller_saved).subspan(icaller_saved.size() - 2, 2);
 constexpr auto fsafe = std::span(fcaller_saved).subspan(fcaller_saved.size() - 2, 2);
 
