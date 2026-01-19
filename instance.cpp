@@ -324,10 +324,10 @@ runtime::WasmValue Instance::interpret_const(uint8_t *&iter) {
         }
         switch (static_cast<Instruction>(byte)) {
         case i32const:
-            stack.push_back(safe_read_sleb128<int32_t>(iter));
+            stack.push_back(safe_read_leb128<int32_t>(iter));
             break;
         case i64const:
-            stack.push_back(safe_read_sleb128<int64_t>(iter));
+            stack.push_back(safe_read_leb128<int64_t>(iter));
             break;
         case f32const: {
             float x;
@@ -344,7 +344,7 @@ runtime::WasmValue Instance::interpret_const(uint8_t *&iter) {
             break;
         }
         case globalget:
-            stack.push_back(globals[safe_read_leb128<int32_t>(iter)]->value);
+            stack.push_back(globals[safe_read_leb128<uint32_t>(iter)]->value);
             break;
         case i32add:
             I32_OP(+);

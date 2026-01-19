@@ -121,7 +121,7 @@ WasmSignature &read_blocktype(std::vector<WasmSignature> &types,
         ++iter;
         return singles[byte];
     } else {
-        int64_t n = safe_read_sleb128<int64_t, 33>(iter);
+        int64_t n = safe_read_leb128<int64_t, 33>(iter);
         return types[n];
     }
 }
@@ -155,11 +155,11 @@ void Module::validate_const(safe_byte_iterator &iter, valtype expected) {
         }
         switch (static_cast<Instruction>(byte)) {
         case i32const:
-            safe_read_sleb128<int32_t>(iter);
+            safe_read_leb128<int32_t>(iter);
             stack_types.push_back(valtype::i32);
             break;
         case i64const:
-            safe_read_sleb128<int64_t>(iter);
+            safe_read_leb128<int64_t>(iter);
             stack_types.push_back(valtype::i64);
             break;
         case f32const: {

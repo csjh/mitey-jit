@@ -225,10 +225,11 @@ static inline bool is_valid_utf8(const uint8_t *bytes, size_t length) {
 }
 
 template <typename T, uint8_t BITS = sizeof(T) * 8, typename Iter>
-static inline T safe_read_sleb128(Iter &iter) {
-    auto start = iter;
+static inline T safe_read_leb128(Iter &iter) {
+    constexpr auto is_signed = std::is_signed_v<T>;
 
-    int64_t result = 0;
+    auto start = iter;
+    std::conditional_t<is_signed, int64_t, uint64_t> result = 0;
     uint64_t shift = 0;
     uint64_t byte;
     do {
@@ -236,41 +237,31 @@ static inline T safe_read_sleb128(Iter &iter) {
         result |= (byte & 0x7f) << shift;
         shift += 7;
     } while (byte & 0x80 && shift < BITS);
-    if (shift < 64 && (byte & 0x40)) {
+    if (is_signed && shift < 64 && (byte & 0x40)) {
         result |= static_cast<int64_t>(-1) << shift;
     }
 
-    if (result > static_cast<int64_t>((1ULL << (BITS - 1)) - 1)) {
-        error<malformed_error>("integer too large");
-    }
-    if (result < static_cast<int64_t>(-(1ULL << (BITS - 1)))) {
-        error<malformed_error>("integer too large");
-    }
-    if (shift >= BITS && (byte & 0x80)) {
-        error<malformed_error>("integer representation too long");
-    }
-    if (((iter[-1] != 0 && iter[-1] != 127) + (iter - start - 1) * 7) >= BITS) {
-        error<malformed_error>("integer too large");
-    }
-    return static_cast<T>(result);
-}
-
-template <typename T, uint8_t BITS = sizeof(T) * 8, typename Iter>
-static inline T safe_read_leb128(Iter &iter) {
-    uint64_t result = 0;
-    uint64_t shift = 0;
-    uint64_t byte;
-    do {
-        byte = *iter++;
-        result |= (byte & 0x7f) << shift;
-        shift += 7;
-    } while (byte & 0x80 && shift < BITS);
-
-    if (shift >= BITS && (byte & 0x80)) {
-        error<malformed_error>("integer representation too long");
-    }
-    if (sizeof(T) != 8 && result > (1ULL << BITS) - 1) {
-        error<malformed_error>("integer too large");
+    if constexpr (is_signed) {
+        if (result > static_cast<int64_t>((1ULL << (BITS - 1)) - 1)) {
+            error<malformed_error>("integer too large");
+        }
+        if (result < static_cast<int64_t>(-(1ULL << (BITS - 1)))) {
+            error<malformed_error>("integer too large");
+        }
+        if (shift >= BITS && (byte & 0x80)) {
+            error<malformed_error>("integer representation too long");
+        }
+        if (((iter[-1] != 0 && iter[-1] != 127) + (iter - start - 1) * 7) >=
+            BITS) {
+            error<malformed_error>("integer too large");
+        }
+    } else {
+        if (shift >= BITS && (byte & 0x80)) {
+            error<malformed_error>("integer representation too long");
+        }
+        if (sizeof(T) != 8 && result > (1ULL << BITS) - 1) {
+            error<malformed_error>("integer too large");
+        }
     }
     return static_cast<T>(result);
 }

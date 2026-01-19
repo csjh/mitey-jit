@@ -1288,14 +1288,14 @@ HANDLER(memorygrow) {
 HANDLER(i32const) {
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i32});
 
-    auto v = safe_read_sleb128<uint32_t>(iter);
+    auto v = safe_read_leb128<int32_t>(iter);
     _(i32const, v);
     nextop();
 }
 HANDLER(i64const) {
     stack.apply(std::array<valtype, 0>(), std::array{valtype::i64});
 
-    auto v = safe_read_sleb128<uint64_t>(iter);
+    auto v = safe_read_leb128<int64_t>(iter);
     _(i64const, v);
     nextop();
 }
@@ -1655,7 +1655,7 @@ consteval std::array<CompilationHandler<Target> *, 256> make_fc_funcs() {
 HANDLER(multibyte) {
     constexpr auto fc_funcs = make_fc_funcs<Target>();
 
-    auto byte = safe_read_leb128<uint8_t, 32>(iter);
+    auto byte = safe_read_leb128<uint8_t>(iter);
     [[clang::musttail]] return fc_funcs[byte](mod, iter, fn, stack,
                                               control_stack, code, jit);
 }
