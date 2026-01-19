@@ -70,6 +70,13 @@ int main(int argc, const char **argv) {
         {"path_symlink", internalize<path_symlink>()},
         {"path_rename", internalize<path_rename>()},
         {"fd_tell", internalize<fd_tell>()},
+        {"sched_yield", internalize<sched_yield>()},
+        {"fd_filestat_set_size", internalize<fd_filestat_set_size>()},
+        {"fd_pread", internalize<fd_pread>()},
+        {"fd_pwrite", internalize<fd_pwrite>()},
+        {"path_create_directory", internalize<path_create_directory>()},
+        {"sock_accept", internalize<sock_accept>()},
+        {"sock_shutdown", internalize<sock_shutdown>()},
     };
     auto imports = runtime::Imports{{"wasi_snapshot_preview1", wasi}};
 

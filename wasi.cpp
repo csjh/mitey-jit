@@ -594,3 +594,88 @@ int32_t path_rename(__WASM_MEMORY, int32_t old_fd, char *old_path,
     }
     return 0;
 }
+
+int32_t fd_filestat_set_size(int32_t fd, uint64_t size) {
+    if (ftruncate(fd, size) != 0) {
+        return errno;
+    }
+    return 0;
+}
+
+int32_t fd_pread(__WASM_MEMORY, int32_t fd, const iovec *iovs,
+                 wasm_size_t iovs_len, uint64_t offset, wasm_size_t *nread) {
+    assert_alignment(iovs);
+    assert_alignment(nread);
+
+    wasm_size_t total_read = 0;
+    uint64_t current_offset = offset;
+
+    for (wasm_size_t i = 0; i < iovs_len; i++) {
+        ssize_t bytes_read =
+            pread(fd, memory + iovs[i].buf.v, iovs[i].buf_len, current_offset);
+        if (bytes_read < 0) {
+            return errno;
+        }
+        total_read += bytes_read;
+        current_offset += bytes_read;
+        if ((wasm_size_t)bytes_read < iovs[i].buf_len) {
+            break; // End of file reached
+        }
+    }
+
+    *nread = total_read;
+    return 0;
+}
+
+int32_t fd_pwrite(__WASM_MEMORY, int32_t fd, const iovec *iovs,
+                  wasm_size_t iovs_len, uint64_t offset,
+                  wasm_size_t *nwritten) {
+    assert_alignment(iovs);
+    assert_alignment(nwritten);
+
+    wasm_size_t total_written = 0;
+    uint64_t current_offset = offset;
+
+    for (wasm_size_t i = 0; i < iovs_len; i++) {
+        ssize_t written =
+            pwrite(fd, memory + iovs[i].buf.v, iovs[i].buf_len, current_offset);
+        if (written < 0) {
+            return errno;
+        }
+        total_written += written;
+        current_offset += written;
+    }
+
+    *nwritten = total_written;
+    return 0;
+}
+
+int32_t path_create_directory(int32_t fd, const char *path,
+                              wasm_size_t path_len) {
+    char path_buf[PATH_MAX];
+    if (path_len >= PATH_MAX) {
+        return ENAMETOOLONG;
+    }
+
+    memcpy(path_buf, path, path_len);
+    path_buf[path_len] = '\0';
+
+    if (mkdirat(fd, path_buf, 0755) != 0) {
+        return errno;
+    }
+
+    return 0;
+}
+
+int32_t sock_accept(int32_t fd, int32_t flags, int32_t *new_fd) {
+    assert_alignment(new_fd);
+    // Socket operations not supported in this basic WASI implementation
+    return 58; // ENOTSUP
+}
+
+int32_t sock_shutdown(int32_t fd, int32_t how) {
+    // Socket operations not supported in this basic WASI implementation
+    return 58; // ENOTSUP
+}
+
+int32_t sched_yield() { return 0; }

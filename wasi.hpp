@@ -196,6 +196,46 @@ int32_t path_rename(__WASM_MEMORY, int32_t old_fd, char *old_path,
                     wasm_size_t old_path_len, int32_t new_fd, char *new_path,
                     wasm_size_t new_path_len);
 
+// File size operations
+int32_t fd_filestat_set_size(int32_t fd,   // File descriptor
+                             uint64_t size // New size
+);
+
+// Positional read/write
+int32_t fd_pread(__WASM_MEMORY,        // non-standard: wasm memory passed in
+                 int32_t fd,           // File descriptor
+                 const iovec *iovs,    // Array of iovec structs
+                 wasm_size_t iovs_len, // Number of iovecs
+                 uint64_t offset,      // Offset to read from
+                 wasm_size_t *nread    // Bytes read
+);
+
+int32_t fd_pwrite(__WASM_MEMORY,        // non-standard: wasm memory passed in
+                  int32_t fd,           // File descriptor
+                  const iovec *iovs,    // Array of iovec structs
+                  wasm_size_t iovs_len, // Number of iovecs
+                  uint64_t offset,      // Offset to write to
+                  wasm_size_t *nwritten // Bytes written
+);
+
+// Directory creation
+int32_t path_create_directory(int32_t fd,          // Base directory FD
+                              const char *path,    // Path
+                              wasm_size_t path_len // Path length
+);
+
+// Socket operations (stubs)
+int32_t sock_accept(int32_t fd,     // Socket file descriptor
+                    int32_t flags,  // Flags
+                    int32_t *new_fd // New socket file descriptor
+);
+
+int32_t sock_shutdown(int32_t fd, // Socket file descriptor
+                      int32_t how // How to shutdown
+);
+
+int32_t sched_yield();
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
