@@ -1655,7 +1655,8 @@ consteval std::array<CompilationHandler<Target> *, 256> make_fc_funcs() {
 HANDLER(multibyte) {
     constexpr auto fc_funcs = make_fc_funcs<Target>();
 
-    auto byte = safe_read_leb128<uint8_t>(iter);
+    auto byte = safe_read_leb128<uint32_t>(iter);
+    ensure(byte < 256, "invalid opcode");
     [[clang::musttail]] return fc_funcs[byte](mod, iter, fn, stack,
                                               control_stack, code, jit);
 }
