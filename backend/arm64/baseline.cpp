@@ -1205,6 +1205,8 @@ void Arm64::reg_manager<registers>::untemporary(RegType reg) {
 template <auto registers>
 void Arm64::reg_manager<registers>::spill_all(
     std::byte *&code, std::span<value> local_locations) {
+    if (interest == 0) [[likely]]
+        return;
     for (auto reg : registers) {
         purge(code, local_locations, reg);
     }
@@ -1266,11 +1268,13 @@ bool Arm64::reg_info<RegType, N>::surrender(value *v) {
 }
 
 template <typename RegType, uint32_t N>
-void Arm64::reg_info<RegType, N>::purge(std::byte *&code, RegType reg) {
+int32_t Arm64::reg_info<RegType, N>::purge(std::byte *&code, RegType reg) {
     for (size_t i = 0; i < std::min(count, N); i++) {
         spill(code, reg, i);
     }
+    int32_t c = count;
     count = 0;
+    return -c;
 }
 
 template <typename RegType, uint32_t N>
@@ -1284,6 +1288,7 @@ void Arm64::reg_manager<registers>::use(std::byte *&code, RegType reg,
                                         metadata md) {
     assert(std::ranges::find(registers, reg) != registers.end());
     get_manager_of(reg).use(code, reg, md);
+    interest++;
     if constexpr (allocate)
         reg_positions.use(to_index(reg));
 }
@@ -1292,6 +1297,7 @@ template <auto registers>
 void Arm64::reg_manager<registers>::surrender(RegType reg, value *v) {
     assert(std::ranges::find(registers, reg) != registers.end());
     bool is_empty = get_manager_of(reg).surrender(v);
+    interest--;
     if (allocate && is_empty && !locals.is_active(reg))
         reg_positions.surrender(to_index(reg));
 }
@@ -1301,26 +1307,34 @@ void Arm64::reg_manager<registers>::purge(std::byte *&code,
                                           std::span<value> local_locations,
                                           RegType reg) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    get_manager_of(reg).purge(code, reg);
-    if (allocate && locals.is_active(reg))
+    interest += get_manager_of(reg).purge(code, reg);
+    if (allocate && locals.is_active(reg)) {
         locals.deactivate(local_locations, reg);
+        activity--;
+    }
 }
 
 template <auto registers>
 void Arm64::reg_manager<registers>::set_spills(std::byte *&code) {
+    if (interest == 0) [[likely]]
+        return;
     for (auto reg : registers) {
         get_manager_of(reg).set_spill(code);
     }
 }
 
 template <auto registers> void Arm64::reg_manager<registers>::commit_all() {
+    if (activity == 0) [[likely]]
+        return;
     locals.commit_all();
 }
 
 template <auto registers>
 void Arm64::reg_manager<registers>::deactivate_all(
     std::span<value> local_locations) {
-    locals.deactivate_all(local_locations);
+    if (activity == 0) [[likely]]
+        return;
+    activity += locals.deactivate_all(local_locations);
 }
 
 template <auto registers>
@@ -1328,7 +1342,7 @@ void Arm64::reg_manager<registers>::activate(std::byte *&code,
                                              std::span<value> local_locations,
                                              uint32_t local_idx, RegType reg,
                                              bool set) {
-    locals.activate(code, local_locations, local_idx, reg, set);
+    activity += locals.activate(code, local_locations, local_idx, reg, set);
 }
 
 template <auto registers>
@@ -1659,11 +1673,12 @@ void Arm64::amend_br_if(std::byte *br, std::byte *target) {
 }
 
 template <auto registers>
-void Arm64::reg_manager<registers>::local_manager::activate(
+int32_t Arm64::reg_manager<registers>::local_manager::activate(
     std::byte *&code, std::span<value> local_locations, uint32_t local_idx,
     RegType reg, bool set) {
 
     uint32_t stack_offset = local_idx * sizeof(runtime::WasmValue);
+    int32_t activity_diff = 0;
 
     // non-set activations should only happen
     // when the local is on the stack
@@ -1671,6 +1686,7 @@ void Arm64::reg_manager<registers>::local_manager::activate(
         for (auto &local : inflight_locals) {
             if (local.active && local.local_idx == local_idx) {
                 local.active = false;
+                activity_diff--;
                 break;
             }
         }
@@ -1678,6 +1694,7 @@ void Arm64::reg_manager<registers>::local_manager::activate(
     auto &local = inflight_locals[to_index(reg)];
     if (is_active(reg) && local.local_idx != local_idx) {
         deactivate(local_locations, reg);
+        activity_diff--;
     }
 
     if (set) {
@@ -1686,17 +1703,24 @@ void Arm64::reg_manager<registers>::local_manager::activate(
     } else {
         local = {nullptr, local_idx, true};
     }
+    activity_diff++;
 
     local_locations[local_idx] = value::multireg(reg);
+
+    return activity_diff;
 }
 
 template <auto registers>
-void Arm64::reg_manager<registers>::local_manager::deactivate_all(
+int32_t Arm64::reg_manager<registers>::local_manager::deactivate_all(
     std::span<value> local_locations) {
+    int32_t activity = 0;
     for (auto reg : registers) {
-        if (is_active(reg)) [[unlikely]]
+        if (is_active(reg)) [[unlikely]] {
             deactivate(local_locations, reg);
+            activity--;
+        }
     }
+    return activity;
 }
 
 template <auto registers>

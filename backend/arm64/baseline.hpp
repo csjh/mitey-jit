@@ -78,7 +78,7 @@ class Arm64 {
       public:
         void use(std::byte *&, RegType, metadata);
         bool surrender(value *);
-        void purge(std::byte *&, RegType);
+        [[nodiscard]] int32_t purge(std::byte *&, RegType);
         bool was_prior(RegType reg, std::byte *code);
         void set_spill(std::byte *&);
     };
@@ -105,18 +105,25 @@ class Arm64 {
 
             std::array<plane, allocate ? N : 0> inflight_locals;
 
-          public:
-            void activate(std::byte *&code, std::span<value> local_locations,
-                          uint32_t local_idx, RegType reg, bool set);
             void commit(RegType reg);
+
+          public:
+            [[nodiscard]] int32_t activate(std::byte *&code,
+                                           std::span<value> local_locations,
+                                           uint32_t local_idx, RegType reg,
+                                           bool set);
+            void deactivate(std::span<value> local_locations,
+                                             RegType reg);
+            [[nodiscard]] int32_t
+            deactivate_all(std::span<value> local_locations);
             void commit_all();
-            void deactivate(std::span<value> local_locations, RegType reg);
-            void deactivate_all(std::span<value> local_locations);
             bool is_active(RegType reg);
         };
 
         local_manager locals;
         sub_manager regs[N];
+        int32_t interest = 0;
+        int32_t activity = 0;
 
         sub_manager &get_manager_of(RegType reg) {
             return regs[static_cast<uint8_t>(reg) - First];
