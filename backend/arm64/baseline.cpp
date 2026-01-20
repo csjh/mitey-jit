@@ -1468,7 +1468,7 @@ template <typename _To> value Arm64::adapt_value(std::byte *&code, value *v) {
     }
     }
 
-    assert(false);
+    __builtin_unreachable();
 }
 
 template <typename To>

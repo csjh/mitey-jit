@@ -14,7 +14,7 @@ using inst = uint32_t;
 
 class value {
   public:
-    enum class location { reg, stack, imm, flags, multireg };
+    enum class location { reg, multireg, stack, imm, flags };
 
   private:
     location loc;
