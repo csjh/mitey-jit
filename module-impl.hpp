@@ -1,14 +1,15 @@
 #pragma once
 
 #include "module.hpp"
-#include "runtime.hpp"
 #include "spec.hpp"
-#include <numeric>
+#include <algorithm>
+#include <cassert>
+#include <fstream>
+#include <iostream>
+#include <tuple>
 #include <variant>
 
 #ifdef WASM_DEBUG
-#include <iostream>
-
 extern std::vector<std::string> names;
 #endif
 
@@ -641,6 +642,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 Pager::allocate(ludes + other, AllocationKind::Executable);
 
             auto code = executable.get();
+            // std::cout << "code starts at " << code << std::endl;
             Pager::write(executable, [&] {
                 auto funcs = functions.begin();
                 for (auto i = 0; i < n_fn_imports; i++, funcs++) {
@@ -699,6 +701,11 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     }
                     iter += (fn_iter - iter.unsafe_ptr());
                 }
+
+                // auto dump = std::ofstream("dump.bin", std::ios::binary);
+                // dump.write(reinterpret_cast<const char *>(executable.get()),
+                //            code - executable.get());
+                // dump.close();
 
                 return code - executable.get();
             });
