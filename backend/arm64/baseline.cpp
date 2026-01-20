@@ -1231,15 +1231,21 @@ void Arm64::reg_info<RegType, N>::spill(std::byte *&code, RegType reg,
 template <typename RegType, uint32_t N>
 void Arm64::reg_info<RegType, N>::use(std::byte *&code, RegType reg,
                                       metadata md) {
-    if (count == 0) {
+    if (count == 0) [[likely]] {
         spilladdr = nullptr;
-        stack_offset = md.stack_offset;
         source_location = code;
-    } else if (count >= N) {
-        spill(code, reg, count % N);
+        stack_offset = md.stack_offset;
+
+        values[0] = md.value_offset;
+        count++;
+    } else {
+        if (count >= N) [[unlikely]] {
+            spill(code, reg, count % N);
+        }
+
+        values[count % N] = md.value_offset;
+        count++;
     }
-    values[count % N] = md.value_offset;
-    count++;
 }
 
 template <typename RegType, uint32_t N>
