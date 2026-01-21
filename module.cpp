@@ -265,9 +265,17 @@ WasmStack::WasmStack() {
     buffer += 1024;
 }
 
-bool WasmStack::polymorphism() const { return polymorphized; }
+bool WasmStack::polymorphism() const {
+    return !!(polymorphized_and_stack_size & polymorphized_mask);
+}
 
-void WasmStack::set_polymorphism(bool p) { polymorphized = p; }
+void WasmStack::set_polymorphism(bool p) {
+    if (p) {
+        polymorphized_and_stack_size |= polymorphized_mask;
+    } else {
+        polymorphized_and_stack_size &= ~polymorphized_mask;
+    }
+}
 
 void WasmStack::unpolymorphize() { set_polymorphism(false); }
 
@@ -281,17 +289,17 @@ void WasmStack::push(valtype ty) { push(std::array{ty}); }
 void WasmStack::pop(valtype expected_ty) { pop(std::array{expected_ty}); }
 
 bool WasmStack::empty() const {
-    return !polymorphized && *rbegin() == valtype::null;
+    return !polymorphism() && *rbegin() == valtype::null;
 }
 
 bool WasmStack::can_be_anything() const {
-    return polymorphized && *rbegin() == valtype::null;
+    return polymorphism() && *rbegin() == valtype::null;
 }
 
 valtype WasmStack::back() const {
     if (auto b = *rbegin(); b != valtype::null)
         return b;
-    if (polymorphized) {
+    if (polymorphism()) {
         return valtype::any;
     } else {
         error<validation_error>("type mismatch");

@@ -1041,9 +1041,9 @@ void sub(std::byte *&code, Arm64 *that, bool sf, uint32_t imm, ireg src,
 
 void ldr(std::byte *&code, [[maybe_unused]] Arm64 *that, bool sf,
          uint32_t offset, ireg rn, ireg rt) {
-    if (offset < 1 << 12) {
+    if (offset < 1 << 12) [[likely]] {
         raw::ldr(code, sf, offset, rn, rt);
-    } else if (offset < 1 << 24) {
+    } else [[unlikely]] if (offset < 1 << 24) {
         raw::add(code, true, offset >> 12, rn, rt, true);
         raw::ldr(code, sf, offset & 0xfff, rt, rt);
     } else {
@@ -1055,9 +1055,9 @@ void ldr(std::byte *&code, [[maybe_unused]] Arm64 *that, bool sf,
 
 void ldr(std::byte *&code, Arm64 *that, bool sf, uint32_t offset, ireg rn,
          freg rt) {
-    if (offset < 1 << 12) {
+    if (offset < 1 << 12) [[likely]] {
         raw::ldr(code, sf, offset, rn, rt);
-    } else if (offset < 1 << 24) {
+    } else [[unlikely]] if (offset < 1 << 24) {
         raw::add(code, true, offset >> 12, rn, rn, true);
         raw::ldr(code, sf, offset & 0xfff, rn, rt);
         raw::sub(code, true, offset >> 12, rn, rn, true);
@@ -2751,9 +2751,10 @@ void Arm64::select(SHARED_PARAMS, valtype vtype) {
 void Arm64::select_t(SHARED_PARAMS, valtype type) { select(code, stack, type); }
 void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     auto ty = fn.locals[local_idx];
-    auto local = locals[local_idx];
 
     polymorph(ty, [&]<typename T>(T) {
+        auto local = locals[local_idx];
+
         if (local.is<value::location::stack>()) {
             auto reg = regs_of<T>().result(code, locals);
             regs_of<T>().activate(code, locals, local_idx, reg, false);
@@ -2761,7 +2762,8 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
             masm::ldr(code, this, true, local.as<uint32_t>(), stackreg, reg);
 
             use(code, reg);
-            push(locals[local_idx]);
+            assert(locals[local_idx] == value::multireg(reg));
+            push(value::multireg(reg));
         } else {
             use(code, local.as<T>());
             push(local);

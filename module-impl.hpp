@@ -808,11 +808,11 @@ bool WasmStack::check_polymorphic(const T &expected) const {
     if (static_cast<size_t>(std::distance(rbegin(), diverge)) ==
         expected.size())
         return true;
-    return polymorphized && *diverge == valtype::null;
+    return polymorphism() && *diverge == valtype::null;
 }
 
 template <typename T> bool WasmStack::check(const T &expected) const {
-    if (polymorphized) [[unlikely]]
+    if (polymorphism()) [[unlikely]]
         return check_polymorphic(expected);
     return std::equal(end() - expected.size(), end(), expected.begin());
 }
@@ -823,13 +823,13 @@ template <typename T> bool WasmStack::operator==(const T &rhs) const {
         return false;
     if (static_cast<size_t>(std::distance(rbegin(), diverge)) == rhs.size())
         return true;
-    return polymorphized;
+    return polymorphism();
 }
 
 template <typename T> void WasmStack::push(const T &values) {
     std::copy(values.begin(), values.end(), buffer);
     buffer += values.size();
-    stack_size += bytesize(values);
+    polymorphized_and_stack_size += bytesize(values);
 }
 
 template <typename T> void WasmStack::pop_polymorphic(const T &expected) {
@@ -837,17 +837,17 @@ template <typename T> void WasmStack::pop_polymorphic(const T &expected) {
 
     auto diverge = find_diverging(expected);
     buffer -= std::distance(rbegin(), diverge);
-    stack_size -= bytesize(expected);
+    polymorphized_and_stack_size -= bytesize(expected);
 }
 
 template <typename T> void WasmStack::pop(const T &expected) {
-    if (polymorphized) [[unlikely]]
+    if (polymorphism()) [[unlikely]]
         return pop_polymorphic(expected);
 
     ensure(check(expected), "type mismatch");
 
     buffer -= expected.size();
-    stack_size -= bytesize(expected);
+    polymorphized_and_stack_size -= bytesize(expected);
 }
 
 template <size_t pc, size_t rc>
@@ -897,7 +897,7 @@ void WasmStack::apply(std::array<valtype, pc> params,
     template <typename Target>                                                 \
     __attribute__((preserve_none)) std::pair<uint8_t *, std::byte *>           \
         validate_##name(Module &mod, safe_byte_iterator iter,                  \
-                        FunctionShell &fn, WasmStack &stack,                   \
+                        FunctionShell &fn, WasmStack stack,                    \
                         std::vector<ControlFlow> &control_stack,               \
                         std::byte *code, Target &jit)
 

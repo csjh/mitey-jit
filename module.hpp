@@ -128,9 +128,11 @@ struct ControlFlow {
 class WasmStack {
     static valtype buffer_start[65536];
 
-    bool polymorphized = false;
     valtype *__restrict__ buffer = buffer_start;
-    uint64_t stack_size = 0;
+    uint64_t polymorphized_and_stack_size = 0;
+
+    constexpr static uint64_t polymorphized_mask = 1ull << 63;
+    constexpr static uint64_t stack_size_mask = ~polymorphized_mask;
 
     template <typename T> auto find_diverging(const T &expected) const;
 
@@ -142,7 +144,7 @@ class WasmStack {
         return std::reverse_iterator(const_cast<valtype *>(buffer_start));
     }
 
-    int64_t sp() { return stack_size; }
+    int64_t sp() { return polymorphized_and_stack_size & stack_size_mask; }
 
     auto begin() const { return const_cast<valtype *>(buffer_start + 1024); }
     auto end() const { return buffer; }
@@ -174,7 +176,10 @@ class WasmStack {
 
     void apply(const WasmSignature &signature);
     void enter_flow(std::span<valtype> expected);
-    void set_sp(uint64_t sp) { stack_size = sp; }
+    void set_sp(uint64_t sp) {
+        polymorphized_and_stack_size =
+            (polymorphized_and_stack_size & polymorphized_mask) | sp;
+    }
     void check_br(std::vector<ControlFlow> &control_stack, uint32_t depth);
 };
 
@@ -183,7 +188,7 @@ class Module;
 template <typename Target>
 using CompilationHandler = __attribute__((preserve_none))
 std::pair<uint8_t *, std::byte *>(Module &, safe_byte_iterator, FunctionShell &,
-                                  WasmStack &, std::vector<ControlFlow> &,
+                                  WasmStack, std::vector<ControlFlow> &,
                                   std::byte *, Target &);
 
 class Module {
