@@ -48,6 +48,10 @@ class value {
     template <typename T> T as() const { return static_cast<T>(val); }
     location where() const { return loc; }
     template <location loc> bool is() const { return where() == loc; }
+
+    bool operator==(const value &other) const {
+        return loc == other.loc && val == other.val;
+    }
 };
 
 template <typename Src, typename Dest = Src> struct edge {
@@ -112,8 +116,7 @@ class Arm64 {
                                            std::span<value> local_locations,
                                            uint32_t local_idx, RegType reg,
                                            bool set);
-            void deactivate(std::span<value> local_locations,
-                                             RegType reg);
+            void deactivate(std::span<value> local_locations, RegType reg);
             [[nodiscard]] int32_t
             deactivate_all(std::span<value> local_locations);
             void commit_all();
