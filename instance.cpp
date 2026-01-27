@@ -260,7 +260,7 @@ void Instance::initialize(const runtime::Imports &imports) {
         if (segment.initializer) {
             auto offset = interpret_const_inplace(segment.initializer).u32;
 
-            memory->copy_into(offset, 0, segment, segment.data.size());
+            memory->copy_into(offset, 0, segment, segment.size);
 
             misc_segments[i] = &runtime::Segment::empty;
         } else {
