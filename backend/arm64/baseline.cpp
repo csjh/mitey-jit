@@ -1172,7 +1172,7 @@ bool is_volatile(freg reg) { return reg <= fcaller_saved.back(); }
 
 }; // namespace
 
-value Arm64::values_start[65536];
+value Arm64::_values_start[65536];
 
 template <auto registers>
 void Arm64::reg_manager<registers>::reset_temporaries() {
@@ -1182,7 +1182,7 @@ void Arm64::reg_manager<registers>::reset_temporaries() {
 template <auto registers>
 decltype(registers)::value_type
 Arm64::reg_manager<registers>::result(std::byte *&code,
-                                      std::span<value> local_locations) {
+                                      value *local_locations) {
     auto idx = reg_positions.back();
     purge(code, local_locations, from_index(idx));
     return from_index(idx);
@@ -1191,7 +1191,7 @@ Arm64::reg_manager<registers>::result(std::byte *&code,
 template <auto registers>
 decltype(registers)::value_type
 Arm64::reg_manager<registers>::temporary(std::byte *&code,
-                                         std::span<value> local_locations) {
+                                         value *local_locations) {
     auto idx = reg_positions.temporary();
     purge(code, local_locations, from_index(idx));
     return from_index(idx);
@@ -1203,8 +1203,8 @@ void Arm64::reg_manager<registers>::untemporary(RegType reg) {
 }
 
 template <auto registers>
-void Arm64::reg_manager<registers>::spill_all(
-    std::byte *&code, std::span<value> local_locations) {
+void Arm64::reg_manager<registers>::spill_all(std::byte *&code,
+                                              value *local_locations) {
     if (interest == 0) [[likely]]
         return;
     for (auto reg : registers) {
@@ -1304,8 +1304,7 @@ void Arm64::reg_manager<registers>::surrender(RegType reg, value *v) {
 
 template <auto registers>
 void Arm64::reg_manager<registers>::purge(std::byte *&code,
-                                          std::span<value> local_locations,
-                                          RegType reg) {
+                                          value *local_locations, RegType reg) {
     assert(std::ranges::find(registers, reg) != registers.end());
     interest += get_manager_of(reg).purge(code, reg);
     if (allocate && locals.is_active(reg)) {
@@ -1330,8 +1329,7 @@ template <auto registers> void Arm64::reg_manager<registers>::commit_all() {
 }
 
 template <auto registers>
-void Arm64::reg_manager<registers>::deactivate_all(
-    std::span<value> local_locations) {
+void Arm64::reg_manager<registers>::deactivate_all(value *local_locations) {
     if (activity == 0) [[likely]]
         return;
     activity += locals.deactivate_all(local_locations);
@@ -1339,7 +1337,7 @@ void Arm64::reg_manager<registers>::deactivate_all(
 
 template <auto registers>
 void Arm64::reg_manager<registers>::activate(std::byte *&code,
-                                             std::span<value> local_locations,
+                                             value *local_locations,
                                              uint32_t local_idx, RegType reg,
                                              bool set) {
     activity += locals.activate(code, local_locations, local_idx, reg, set);
@@ -1370,9 +1368,9 @@ template <typename RegType> void Arm64::surrender(RegType reg, value *v) {
 
 template <typename RegType> void Arm64::purge(std::byte *&code, RegType reg) {
     if (is_volatile(reg)) {
-        regs_of<RegType>().purge(code, locals, reg);
+        regs_of<RegType>().purge(code, locals(), reg);
     } else {
-        locals_of<RegType>().purge(code, locals, reg);
+        locals_of<RegType>().purge(code, locals(), reg);
     }
 }
 
@@ -1403,7 +1401,7 @@ void Arm64::spill_flags_to_register(std::byte *&code) {
 
     intregs.reset_temporaries();
 
-    auto reg = intregs.result(code, locals);
+    auto reg = intregs.result(code, locals());
     raw::cset(code, false, flag.val->as<cond>(), reg);
     intregs.use(code, reg, metadata(flag.val, flag.stack_offset));
 
@@ -1412,8 +1410,8 @@ void Arm64::spill_flags_to_register(std::byte *&code) {
 }
 
 void Arm64::spill_registers(std::byte *&code) {
-    intregs.spill_all(code, locals);
-    floatregs.spill_all(code, locals);
+    intregs.spill_all(code, locals());
+    floatregs.spill_all(code, locals());
 }
 
 void Arm64::push(value v) {
@@ -1441,9 +1439,9 @@ template <typename _To> value Arm64::adapt_value(std::byte *&code, value *v) {
         auto offset = v->as<uint32_t>();
         RegType reg;
         if constexpr (std::is_same_v<To, iwant::freg>)
-            reg = floatregs.temporary(code, locals);
+            reg = floatregs.temporary(code, locals());
         else
-            reg = intregs.temporary(code, locals);
+            reg = intregs.temporary(code, locals());
         masm::ldr(code, this, true, offset, stackreg, reg);
         return value::reg(reg);
     }
@@ -1460,7 +1458,7 @@ template <typename _To> value Arm64::adapt_value(std::byte *&code, value *v) {
                 if (auto mask = tryLogicalImm((typename To::type)imm))
                     return value::imm(std::bit_cast<uint32_t>(*mask));
 
-            auto reg = intregs.temporary(code, locals);
+            auto reg = intregs.temporary(code, locals());
             masm::mov(code, imm, reg);
             return value::reg(reg);
         }
@@ -1474,7 +1472,7 @@ template <typename _To> value Arm64::adapt_value(std::byte *&code, value *v) {
             if constexpr (std::is_same_v<To, iwant::flags>) {
                 return *v;
             } else {
-                auto reg = intregs.temporary(code, locals);
+                auto reg = intregs.temporary(code, locals());
                 raw::cset(code, false, v->as<cond>(), reg);
                 return value::reg(reg);
             }
@@ -1674,8 +1672,8 @@ void Arm64::amend_br_if(std::byte *br, std::byte *target) {
 
 template <auto registers>
 int32_t Arm64::reg_manager<registers>::local_manager::activate(
-    std::byte *&code, std::span<value> local_locations, uint32_t local_idx,
-    RegType reg, bool set) {
+    std::byte *&code, value *local_locations, uint32_t local_idx, RegType reg,
+    bool set) {
 
     uint32_t stack_offset = local_idx * sizeof(runtime::WasmValue);
     int32_t activity_diff = 0;
@@ -1712,7 +1710,7 @@ int32_t Arm64::reg_manager<registers>::local_manager::activate(
 
 template <auto registers>
 int32_t Arm64::reg_manager<registers>::local_manager::deactivate_all(
-    std::span<value> local_locations) {
+    value *local_locations) {
     int32_t activity = 0;
     for (auto reg : registers) {
         if (is_active(reg)) [[unlikely]] {
@@ -1725,7 +1723,7 @@ int32_t Arm64::reg_manager<registers>::local_manager::deactivate_all(
 
 template <auto registers>
 void Arm64::reg_manager<registers>::local_manager::deactivate(
-    std::span<value> local_locations, RegType reg) {
+    value *local_locations, RegType reg) {
     assert(is_active(reg));
 
     auto &local = inflight_locals[to_index(reg)];
@@ -1786,10 +1784,10 @@ Arm64::allocate_registers(std::byte *&code) {
 
     if constexpr (std::is_same_v<Result, iwant::ireg> ||
                   std::is_same_v<Result, ireg>) {
-        ret.back() = value::reg(intregs.result(code, locals));
+        ret.back() = value::reg(intregs.result(code, locals()));
     } else if constexpr (std::is_same_v<Result, iwant::freg> ||
                          std::is_same_v<Result, freg>) {
-        ret.back() = value::reg(floatregs.result(code, locals));
+        ret.back() = value::reg(floatregs.result(code, locals()));
     } else {
         static_assert(std::is_same_v<Result, iwant::none>);
     }
@@ -2096,8 +2094,6 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
     masm::trap(code, runtime::TrapKind::call_stack_exhausted);
     amend_br_if(exhaustion, code);
 
-    locals = std::span(new value[fn.locals.size()], fn.locals.size());
-
     auto iparams = iargs.begin();
     auto fparams = fargs.begin();
     auto ireg_alloc = icallee_saved.begin();
@@ -2111,6 +2107,9 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
         std::byte *code;
     };
     std::optional<save> prev;
+
+    values += fn.locals.size();
+    stack_size = bytesize(fn.locals);
 
     for (size_t i = 0; i < fn.locals.size(); i++) {
         auto local = fn.locals[i];
@@ -2162,7 +2161,7 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                 }
             }
 
-            locals[i] = value::multireg(reg);
+            locals()[i] = value::multireg(reg);
         } else if (!is_param && is_float(local) &&
                    freg_alloc != fcallee_saved.end()) {
             auto reg = *freg_alloc++;
@@ -2210,23 +2209,21 @@ void Arm64::start_function(SHARED_PARAMS, FunctionShell &fn) {
                 }
             }
 
-            locals[i] = value::multireg(reg);
+            locals()[i] = value::multireg(reg);
         } else if (is_param && is_float(local) && fparams != fargs.end()) {
             auto reg = *fparams++;
-            floatregs.activate(code, locals, i, reg, true);
+            floatregs.activate(code, locals(), i, reg, true);
         } else if (is_param && !is_float(local) && iparams != iargs.end()) {
             auto reg = *iparams++;
-            intregs.activate(code, locals, i, reg, true);
+            intregs.activate(code, locals(), i, reg, true);
         } else {
             if (!is_param) {
                 masm::str(code, this, true, offset, stackreg, ireg::xzr);
             }
 
-            locals[i] = value::stack(offset);
+            locals()[i] = value::stack(offset);
         }
     }
-
-    stack_size = bytesize(fn.locals);
 }
 void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
     auto &fn = std::get<Function>(flow.construct).fn;
@@ -2240,11 +2237,11 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
 
     // restore saved values
     for (size_t i = 0; i < fn.locals.size(); i++) {
-        if (!locals[i].is<value::location::multireg>())
+        if (!locals()[i].is<value::location::multireg>())
             continue;
-        if (is_volatile(locals[i].as<ireg>()) && !is_float(fn.locals[i]))
+        if (is_volatile(locals()[i].as<ireg>()) && !is_float(fn.locals[i]))
             continue;
-        if (is_volatile(locals[i].as<freg>()) && is_float(fn.locals[i]))
+        if (is_volatile(locals()[i].as<freg>()) && is_float(fn.locals[i]))
             continue;
 
         auto offset = i * sizeof(runtime::WasmValue);
@@ -2255,15 +2252,15 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
                 offset = prev->offset;
 
                 raw::ldp(code, ftype::double_, enctype::offset, offset,
-                         locals[i].as<freg>(), stackreg, (freg)prev->reg);
+                         locals()[i].as<freg>(), stackreg, (freg)prev->reg);
 
                 prev = std::nullopt;
             } else {
-                prev = restore{fn.locals[i], (int)locals[i].as<freg>(),
+                prev = restore{fn.locals[i], (int)locals()[i].as<freg>(),
                                (int)offset, code};
 
                 masm::ldr(code, this, true, offset, stackreg,
-                          locals[i].as<freg>());
+                          locals()[i].as<freg>());
             }
         } else {
             if (prev && prev->ty == fn.locals[i] && offset < 512) {
@@ -2271,15 +2268,15 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
                 offset = prev->offset;
 
                 raw::ldp(code, true, enctype::offset, offset,
-                         locals[i].as<ireg>(), stackreg, (ireg)prev->reg);
+                         locals()[i].as<ireg>(), stackreg, (ireg)prev->reg);
 
                 prev = std::nullopt;
             } else {
-                prev = restore{fn.locals[i], (int)locals[i].as<ireg>(),
+                prev = restore{fn.locals[i], (int)locals()[i].as<ireg>(),
                                (int)offset, code};
 
                 masm::ldr(code, this, true, offset, stackreg,
-                          locals[i].as<ireg>());
+                          locals()[i].as<ireg>());
             }
         }
     }
@@ -2305,8 +2302,6 @@ void Arm64::exit_function(SHARED_PARAMS, ControlFlow &flow) {
 
     raw::ldp(code, true, enctype::pstidx, 0x20, ireg::x30, ireg::sp, ireg::x29);
     raw::ret(code);
-
-    delete[] locals.data();
 }
 
 void Arm64::unreachable(SHARED_PARAMS) {
@@ -2326,8 +2321,8 @@ void Arm64::block(SHARED_PARAMS, WasmSignature &) {
     floatlocals.set_spills(code);
 }
 void Arm64::loop(SHARED_PARAMS, WasmSignature &sig) {
-    intregs.deactivate_all(locals);
-    floatregs.deactivate_all(locals);
+    intregs.deactivate_all(locals());
+    floatregs.deactivate_all(locals());
 
     move_block_results(code, sig.params, stack_size - bytesize(sig.params),
                        true);
@@ -2369,8 +2364,8 @@ std::byte *Arm64::if_(SHARED_PARAMS, WasmSignature &sig) {
 }
 void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     // do force landing here, because we don't save the state at the start of if
-    intregs.deactivate_all(locals);
-    floatregs.deactivate_all(locals);
+    intregs.deactivate_all(locals());
+    floatregs.deactivate_all(locals());
 
     // todo: this is a tiny bit efficient, because at this point we have the
     // additional knowledge that there is no need to move the results
@@ -2387,8 +2382,8 @@ void Arm64::else_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
 void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
     if (!std::holds_alternative<Loop>(flow.construct)) {
         if (!std::holds_alternative<Function>(flow.construct)) {
-            intregs.deactivate_all(locals);
-            floatregs.deactivate_all(locals);
+            intregs.deactivate_all(locals());
+            floatregs.deactivate_all(locals());
         }
 
         intregs.reset_temporaries();
@@ -2422,8 +2417,8 @@ void Arm64::end(SHARED_PARAMS, ControlFlow &flow) {
 }
 void Arm64::br(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                uint32_t depth) {
-    intregs.deactivate_all(locals);
-    floatregs.deactivate_all(locals);
+    intregs.deactivate_all(locals());
+    floatregs.deactivate_all(locals());
 
     // for now, only support non-special case distances (+/- 128MB)
 
@@ -2491,8 +2486,8 @@ void Arm64::br_table(SHARED_PARAMS, std::span<ControlFlow> control_stack,
                      std::span<uint32_t> targets) {
     spill_flags_to_register(code);
 
-    intregs.deactivate_all(locals);
-    floatregs.deactivate_all(locals);
+    intregs.deactivate_all(locals());
+    floatregs.deactivate_all(locals());
 
     auto [input] = allocate_registers<std::tuple<iwant::ireg>>(code);
 
@@ -2574,8 +2569,8 @@ void Arm64::return_(SHARED_PARAMS, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
 }
 void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
-    intregs.deactivate_all(locals);
-    floatregs.deactivate_all(locals);
+    intregs.deactivate_all(locals());
+    floatregs.deactivate_all(locals());
 
     allocate_registers<std::tuple<>>(code);
 
@@ -2616,8 +2611,8 @@ void Arm64::call(SHARED_PARAMS, FunctionShell &fn, uint32_t func_offset) {
 }
 void Arm64::call_indirect(SHARED_PARAMS, uint32_t table_offset,
                           WasmSignature &type) {
-    intregs.deactivate_all(locals);
-    floatregs.deactivate_all(locals);
+    intregs.deactivate_all(locals());
+    floatregs.deactivate_all(locals());
 
     auto [v] = allocate_registers<std::tuple<iwant::ireg>>(code);
     // temporarily shove the index into the top half of d31
@@ -2753,16 +2748,16 @@ void Arm64::localget(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     auto ty = fn.locals[local_idx];
 
     polymorph(ty, [&]<typename T>(T) {
-        auto local = locals[local_idx];
+        auto local = locals()[local_idx];
 
         if (local.is<value::location::stack>()) {
-            auto reg = regs_of<T>().result(code, locals);
-            regs_of<T>().activate(code, locals, local_idx, reg, false);
+            auto reg = regs_of<T>().result(code, locals());
+            regs_of<T>().activate(code, locals(), local_idx, reg, false);
 
             masm::ldr(code, this, true, local.as<uint32_t>(), stackreg, reg);
 
             use(code, reg);
-            assert(locals[local_idx] == value::multireg(reg));
+            assert(locals()[local_idx] == value::multireg(reg));
             push(value::multireg(reg));
         } else {
             use(code, local.as<T>());
@@ -2778,7 +2773,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
     // i don't like that this specializes allocate_registers
     // but tbf it's the only place i need to do it
     auto ty = fn.locals[local_idx];
-    auto local = locals[local_idx];
+    auto local = locals()[local_idx];
 
     auto v = *--values;
     stack_size -= sizeof(runtime::WasmValue);
@@ -2803,7 +2798,7 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
                    is_volatile(v.as<T>())) {
             locreg = v.as<T>();
         } else {
-            locreg = regs_of<T>().result(code, locals);
+            locreg = regs_of<T>().result(code, locals());
         }
 
         switch (v.where()) {
@@ -2874,13 +2869,13 @@ void Arm64::localtee(SHARED_PARAMS, FunctionShell &fn, uint32_t local_idx) {
         }
 
         if (is_volatile(locreg)) {
-            regs_of<T>().activate(code, locals, local_idx, locreg, true);
+            regs_of<T>().activate(code, locals(), local_idx, locreg, true);
         }
         if (v.is<value::location::flags>()) {
             push(v);
         } else {
             use(code, locreg);
-            push(locals[local_idx]);
+            push(locals()[local_idx]);
         }
     });
 }
@@ -3019,7 +3014,7 @@ void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
     if (offset) {
         if (!is_volatile(addr) ||
             base.template is<value::location::multireg>()) {
-            addr = intregs.temporary(code, locals);
+            addr = intregs.temporary(code, locals());
         }
         masm::add(code, this, true, offset, base.template as<ireg>(), addr);
     }
@@ -4223,8 +4218,8 @@ void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,
                          std::array<valtype, NR> results,
                          std::optional<uint64_t> temp1,
                          std::optional<uint64_t> temp2) {
-    intregs.deactivate_all(locals);
-    floatregs.deactivate_all(locals);
+    intregs.deactivate_all(locals());
+    floatregs.deactivate_all(locals());
 
     allocate_registers<std::tuple<>>(code);
 
