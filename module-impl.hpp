@@ -844,8 +844,9 @@ template <typename T> void WasmStack::pop_polymorphic(const T &expected) {
     ensure(check(expected), "type mismatch");
 
     auto diverge = find_diverging(expected);
-    buffer -= std::distance(rbegin(), diverge);
-    polymorphized_and_stack_size -= bytesize(expected);
+    auto divergent_values = std::span(diverge.base(), end());
+    buffer -= divergent_values.size();
+    polymorphized_and_stack_size -= bytesize(divergent_values);
 }
 
 template <typename T> void WasmStack::pop(const T &expected) {
@@ -1039,10 +1040,8 @@ HANDLER(else_) {
     }
 
     stack.pop(sig.results);
+    assert(stack.sp() == stack_offset);
     stack.push(sig.params);
-
-    // necessary in case of polymorphic stack
-    stack.set_sp(stack_offset + bytesize(sig.params));
 
     control_stack.back().construct = IfElse();
     stack.unpolymorphize();
@@ -1068,17 +1067,10 @@ HANDLER(end) {
         return {iter.unsafe_ptr(), code};
     }
 
-    stack.pop(sig.results);
-    stack.pop(valtype::null);
-    // valtype::null doesn't take space on the stack
-    stack.set_sp(stack.sp() + sizeof(runtime::WasmValue));
+    stack.leave_flow(sig.results);
+    assert(stack.sp() == sp + bytesize(sig.results));
 
     stack.set_polymorphism(polymorphism);
-
-    // necessary in case of polymorphic stack
-    stack.set_sp(sp);
-
-    stack.push(sig.results);
 
     control_stack.pop_back();
     nextop();
@@ -1673,8 +1665,7 @@ template <typename Pager, typename Target>
 std::pair<uint8_t *, std::byte *>
 Module::validate_and_compile(safe_byte_iterator iter, std::byte *code,
                              FunctionShell &fn) {
-    auto stack = WasmStack();
-    stack.set_sp(bytesize(fn.locals));
+    auto stack = WasmStack(bytesize(fn.locals));
 
     auto jit = Target();
     auto control_stack =

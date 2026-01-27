@@ -260,7 +260,8 @@ Module::Module() : executable(nullptr, [](auto) {}), memory{} {}
 
 valtype WasmStack::buffer_start[65536] = {};
 
-WasmStack::WasmStack() {
+WasmStack::WasmStack(uint64_t initial_size)
+    : polymorphized_and_stack_size(initial_size & stack_size_mask) {
     std::fill_n(buffer, 1024, valtype::null);
     buffer += 1024;
 }
@@ -281,7 +282,10 @@ void WasmStack::unpolymorphize() { set_polymorphism(false); }
 
 void WasmStack::polymorphize() {
     set_polymorphism(true);
-    buffer = std::find(rbegin(), rend(), valtype::null).base();
+    auto scope_end = std::find(rbegin(), rend(), valtype::null);
+    auto scope = std::span(scope_end.base(), end());
+    buffer -= scope.size();
+    polymorphized_and_stack_size -= bytesize(scope);
 }
 
 void WasmStack::push(valtype ty) { push(std::array{ty}); }
@@ -314,9 +318,16 @@ void WasmStack::apply(const WasmSignature &signature) {
 void WasmStack::enter_flow(std::span<valtype> expected) {
     pop(expected);
     push(valtype::null);
-    // valtype::null doesn't take space on the stack
-    set_sp(sp() - sizeof(runtime::WasmValue));
+    polymorphized_and_stack_size -= sizeof(runtime::WasmValue);
     push(expected);
+}
+
+void WasmStack::leave_flow(std::span<valtype> results) {
+    pop(results);
+    ensure(*rbegin() == valtype::null, "type mismatch");
+    pop(valtype::null);
+    polymorphized_and_stack_size += sizeof(runtime::WasmValue);
+    push(results);
 }
 
 void WasmStack::check_br(std::vector<ControlFlow> &control_stack,

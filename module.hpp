@@ -129,7 +129,7 @@ class WasmStack {
     static valtype buffer_start[65536];
 
     valtype *__restrict__ buffer = buffer_start;
-    uint64_t polymorphized_and_stack_size = 0;
+    uint64_t polymorphized_and_stack_size;
 
     constexpr static uint64_t polymorphized_mask = 1ull << 63;
     constexpr static uint64_t stack_size_mask = ~polymorphized_mask;
@@ -137,7 +137,7 @@ class WasmStack {
     template <typename T> auto find_diverging(const T &expected) const;
 
   public:
-    WasmStack();
+    WasmStack(uint64_t initial_sp);
 
     auto rbegin() const { return std::reverse_iterator(buffer); }
     auto rend() const {
@@ -175,11 +175,9 @@ class WasmStack {
     void apply(std::array<valtype, pc> params, std::array<valtype, rc> results);
 
     void apply(const WasmSignature &signature);
+
     void enter_flow(std::span<valtype> expected);
-    void set_sp(uint64_t sp) {
-        polymorphized_and_stack_size =
-            (polymorphized_and_stack_size & polymorphized_mask) | sp;
-    }
+    void leave_flow(std::span<valtype> results);
     void check_br(std::vector<ControlFlow> &control_stack, uint32_t depth);
 };
 
