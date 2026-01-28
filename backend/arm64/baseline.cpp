@@ -1140,6 +1140,35 @@ void pad_spill(std::byte *&code, uint32_t stack_size) {
     }
 }
 
+template <void (*func)(std::byte *&code, bool sf, shifttype shift, ireg rm,
+                       uint8_t shift_imm, ireg rn, ireg rd)>
+constexpr auto wrap =
+    +[](std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+        return func(code, sf, shifttype::lsl, rm, 0, rn, rd);
+    };
+template <void (*func)(std::byte *&code, ireg rn, ireg rd)>
+constexpr auto wrap_nosf = +[](std::byte *&code, bool sf, ireg rn, ireg rd) {
+    return func(code, rn, rd);
+};
+
+void rol(std::byte *&code, bool sf, ireg rm, ireg rn, ireg rd) {
+    auto temp = ireg::x30;
+    raw::neg(code, sf, rm, temp);
+    raw::ror(code, sf, temp, rn, rd);
+}
+
+void rol(std::byte *&code, bool sf, uint32_t imm, ireg rn, ireg rd) {
+    auto len = sf ? 64 : 32;
+    imm = len - (imm & (len - 1));
+
+    raw::ror(code, sf, imm, rn, rd);
+}
+
+void ctz(std::byte *&code, bool is_64, ireg src, ireg dest) {
+    raw::rbit(code, is_64, src, dest);
+    raw::clz(code, is_64, dest, dest);
+}
+
 }; // namespace masm
 
 template <size_t Bits, size_t Offset>
@@ -2996,6 +3025,109 @@ HANDLER(f64const, double cons) {
     finalize(code, res.as<freg>());
 }
 
+template <auto t, typename Ty>
+void Arm64::unop(SHARED_PARAMS, void (*op)(std::byte *&, decltype(t), Ty, Ty)) {
+    auto [p1, res] = allocate_registers<std::tuple<Ty>, Ty>(code);
+
+    op(code, t, p1.template as<Ty>(), res.template as<Ty>());
+
+    finalize(code, res.template as<Ty>());
+}
+
+#define UNOP(name, op, type)                                                   \
+    HANDLER(name) { unop<type>(code, stack, op); }
+
+template <auto t, typename Ty>
+void Arm64::binop(SHARED_PARAMS,
+                  void (*op)(std::byte *&, decltype(t), Ty, Ty, Ty)) {
+    auto [p1, p2, res] = allocate_registers<std::tuple<Ty, Ty>, Ty>(code);
+
+    op(code, t, p2.template as<Ty>(), p1.template as<Ty>(),
+       res.template as<Ty>());
+
+    finalize(code, res.template as<Ty>());
+}
+
+#define BINOP(name, op, type)                                                  \
+    HANDLER(name) { binop<type>(code, stack, op); }
+
+template <bool is_64, typename ImmTy, typename Ty>
+void Arm64::binop_imm(SHARED_PARAMS, void (*op)(std::byte *&, bool, Ty, Ty, Ty),
+                      void (*imm_op)(std::byte *&, bool, ImmTy, Ty, Ty)) {
+    using IWantTy =
+        std::conditional_t<std::is_same_v<ImmTy, uint32_t>, iwant::literal<>,
+                           std::conditional_t<is_64, iwant::bitmask<uint64_t>,
+                                              iwant::bitmask<uint32_t>>>;
+
+    auto [p1, p2, res] = allocate_registers<std::tuple<Ty, IWantTy>, Ty>(code);
+
+    if (p2.template is<value::location::imm>()) {
+        imm_op(code, is_64, p2.template as<ImmTy>(), p1.template as<Ty>(),
+               res.template as<Ty>());
+    } else {
+        op(code, is_64, p2.template as<Ty>(), p1.template as<Ty>(),
+           res.template as<Ty>());
+    }
+
+    finalize(code, res.template as<Ty>());
+}
+
+#define BINOP_IMM(name, op, immop, type, immty)                                \
+    HANDLER(name) { binop_imm<type, immty>(code, stack, op, immop); }
+
+template <auto t1, auto t2, auto lower, auto upper, typename InType,
+          typename OutType>
+void Arm64::conversion(SHARED_PARAMS,
+                       void (*op)(std::byte *&, decltype(t1), decltype(t2),
+                                  InType, OutType)) {
+    auto [p1, res] = allocate_registers<std::tuple<InType>, OutType>(code);
+
+    if constexpr (upper != 0 && lower != 0)
+        validate_trunc(code, p1.template as<freg>(), lower, upper);
+    op(code, t1, t2, p1.template as<InType>(), res.template as<OutType>());
+
+    finalize(code, res.template as<OutType>());
+}
+
+#define TRUNC(name, op, t1, t2, lower, upper)                                  \
+    HANDLER(name) { conversion<t1, t2, lower, upper>(code, stack, op); }
+#define CONVERSION(name, op, t1, t2)                                           \
+    HANDLER(name) { conversion<t1, t2>(code, stack, op); }
+#define REINTERPRET(name, op, t1, t2, in, out)                                 \
+    HANDLER(name) { conversion<t1, t2, 0, 0, in, out>(code, stack, op); }
+
+template <cond c, bool is_64, bool is_float, bool is_eqz>
+void Arm64::comparison(SHARED_PARAMS) {
+    spill_flags_to_register(code);
+
+    if constexpr (is_float) {
+        auto [p1, p2] =
+            allocate_registers<std::tuple<iwant::freg, iwant::freg>>(code);
+        raw::fcmp(code, is_64, p1.as<freg>(), p2.as<freg>());
+    } else if constexpr (is_eqz) {
+        static_assert(c == cond::eq);
+
+        auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
+        raw::cmp(code, is_64, ireg::xzr, p.as<ireg>());
+    } else {
+        auto [p1, p2] = allocate_registers<
+            std::tuple<iwant::ireg, iwant::literal<1 << 12>>>(code);
+        if (p2.is<value::location::imm>()) {
+            raw::cmp(code, is_64, p2.as<uint32_t>(), p1.as<ireg>());
+        } else {
+            raw::cmp(code, is_64, p2.as<ireg>(), p1.as<ireg>());
+        }
+    }
+
+    push(value::flag(c));
+    finalize(code);
+}
+
+#define COMPARISON(name, c, is_64, is_float)                                   \
+    HANDLER(name) { comparison<c, is_64, is_float, false>(code, stack); }
+#define COMPARISON_EQZ(name, is_64)                                            \
+    HANDLER(name) { comparison<cond::eq, is_64, false, true>(code, stack); }
+
 template <memtype mtype, resexttype etype, bool is_float = false>
 void Arm64::abstract_memop(SHARED_PARAMS, uint64_t offset) {
     constexpr bool is_store = etype == resexttype::str;
@@ -3055,121 +3187,46 @@ MEMOP(i64store8, b, str, false)
 MEMOP(i64store16, h, str, false)
 MEMOP(i64store32, w, str, false)
 
-HANDLER(i32eqz) {
-    spill_flags_to_register(code);
+COMPARISON_EQZ(i32eqz, false)
+COMPARISON_EQZ(i64eqz, true)
+COMPARISON(i32eq, cond::eq, false, false)
+COMPARISON(i64eq, cond::eq, true, false)
+COMPARISON(i32ne, cond::ne, false, false)
+COMPARISON(i64ne, cond::ne, true, false)
+COMPARISON(i32lt_s, cond::lt, false, false)
+COMPARISON(i64lt_s, cond::lt, true, false)
+COMPARISON(i32lt_u, cond::cc, false, false)
+COMPARISON(i64lt_u, cond::cc, true, false)
+COMPARISON(i32gt_s, cond::gt, false, false)
+COMPARISON(i64gt_s, cond::gt, true, false)
+COMPARISON(i32gt_u, cond::hi, false, false)
+COMPARISON(i64gt_u, cond::hi, true, false)
+COMPARISON(i32le_s, cond::le, false, false)
+COMPARISON(i64le_s, cond::le, true, false)
+COMPARISON(i32le_u, cond::ls, false, false)
+COMPARISON(i64le_u, cond::ls, true, false)
+COMPARISON(i32ge_s, cond::ge, false, false)
+COMPARISON(i64ge_s, cond::ge, true, false)
+COMPARISON(i32ge_u, cond::cs, false, false)
+COMPARISON(i64ge_u, cond::cs, true, false)
 
-    auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
+COMPARISON(f32eq, cond::eq, false, true)
+COMPARISON(f64eq, cond::eq, true, true)
+COMPARISON(f32ne, cond::ne, false, true)
+COMPARISON(f64ne, cond::ne, true, true)
+COMPARISON(f32lt, cond::mi, false, true)
+COMPARISON(f64lt, cond::mi, true, true)
+COMPARISON(f32gt, cond::gt, false, true)
+COMPARISON(f64gt, cond::gt, true, true)
+COMPARISON(f32le, cond::ls, false, true)
+COMPARISON(f64le, cond::ls, true, true)
+COMPARISON(f32ge, cond::ge, false, true)
+COMPARISON(f64ge, cond::ge, true, true)
 
-    raw::cmp(code, false, ireg::xzr, p.as<ireg>());
-    push(value::flag(cond::eq));
-
-    finalize(code);
-}
-HANDLER(i64eqz) {
-    spill_flags_to_register(code);
-
-    auto [p] = allocate_registers<std::tuple<iwant::ireg>>(code);
-
-    raw::cmp(code, true, ireg::xzr, p.as<ireg>());
-    push(value::flag(cond::eq));
-
-    finalize(code);
-}
-
-#define COMPARISON(name, is_64, op)                                            \
-    HANDLER(name) {                                                            \
-        spill_flags_to_register(code);                                         \
-        auto [p1, p2] = allocate_registers<                                    \
-            std::tuple<iwant::ireg, iwant::literal<1 << 12>>>(code);           \
-        if (p2.is<value::location::imm>()) {                                   \
-            raw::cmp(code, is_64, p2.as<uint32_t>(), p1.as<ireg>());           \
-        } else {                                                               \
-            raw::cmp(code, is_64, p2.as<ireg>(), p1.as<ireg>());               \
-        }                                                                      \
-        push(value::flag(cond::op));                                           \
-        finalize(code);                                                        \
-    }
-
-COMPARISON(i32eq, false, eq)
-COMPARISON(i64eq, true, eq)
-COMPARISON(i32ne, false, ne)
-COMPARISON(i64ne, true, ne)
-COMPARISON(i32lt_s, false, lt)
-COMPARISON(i64lt_s, true, lt)
-COMPARISON(i32lt_u, false, cc)
-COMPARISON(i64lt_u, true, cc)
-COMPARISON(i32gt_s, false, gt)
-COMPARISON(i64gt_s, true, gt)
-COMPARISON(i32gt_u, false, hi)
-COMPARISON(i64gt_u, true, hi)
-COMPARISON(i32le_s, false, le)
-COMPARISON(i64le_s, true, le)
-COMPARISON(i32le_u, false, ls)
-COMPARISON(i64le_u, true, ls)
-COMPARISON(i32ge_s, false, ge)
-COMPARISON(i64ge_s, true, ge)
-COMPARISON(i32ge_u, false, cs)
-COMPARISON(i64ge_u, true, cs)
-#undef COMPARISON
-#define COMPARISON(name, is_64, op)                                            \
-    HANDLER(name) {                                                            \
-        spill_flags_to_register(code);                                         \
-        auto [p1, p2] =                                                        \
-            allocate_registers<std::tuple<iwant::freg, iwant::freg>>(code);    \
-        raw::fcmp(code, is_64, p1.as<freg>(), p2.as<freg>());                  \
-        push(value::flag(cond::op));                                           \
-        finalize(code);                                                        \
-    }
-
-COMPARISON(f32eq, false, eq)
-COMPARISON(f64eq, true, eq)
-COMPARISON(f32ne, false, ne)
-COMPARISON(f64ne, true, ne)
-// todo: test if this can just be lt instead of mi
-COMPARISON(f32lt, false, mi)
-COMPARISON(f64lt, true, mi)
-COMPARISON(f32gt, false, gt)
-COMPARISON(f64gt, true, gt)
-COMPARISON(f32le, false, ls)
-COMPARISON(f64le, true, ls)
-COMPARISON(f32ge, false, ge)
-COMPARISON(f64ge, true, ge)
-#undef COMPARISON
-
-HANDLER(i32clz) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::clz(code, false, p1.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64clz) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::clz(code, true, p1.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32ctz) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::rbit(code, false, p1.as<ireg>(), res.as<ireg>());
-    raw::clz(code, false, res.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64ctz) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::rbit(code, true, p1.as<ireg>(), res.as<ireg>());
-    raw::clz(code, true, res.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
+UNOP(i32clz, raw::clz, false)
+UNOP(i64clz, raw::clz, true)
+UNOP(i32ctz, masm::ctz, false)
+UNOP(i64ctz, masm::ctz, true)
 HANDLER(i32popcnt) {
     auto [p1, res] =
         allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
@@ -3226,11 +3283,12 @@ HANDLER(i64add) {
 }
 HANDLER(i32sub) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        raw::sub(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+        masm::sub(code, this, false, p2.as<uint32_t>(), p1.as<ireg>(),
+                  res.as<ireg>());
     } else {
         raw::sub(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
@@ -3239,31 +3297,20 @@ HANDLER(i32sub) {
 }
 HANDLER(i64sub) {
     auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<1 << 12>>,
+        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        raw::sub(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
+        masm::sub(code, this, false, p2.as<uint32_t>(), p1.as<ireg>(),
+                  res.as<ireg>());
     } else {
         raw::sub(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
     }
 
     finalize(code, res.as<ireg>());
 }
-HANDLER(i32mul) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
-            code);
-    raw::mul(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64mul) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::ireg>, iwant::ireg>(
-            code);
-    raw::mul(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
+BINOP(i32mul, raw::mul, false)
+BINOP(i64mul, raw::mul, true)
 HANDLER(i32div_s) {
     spill_flags_to_register(code);
 
@@ -3402,412 +3449,48 @@ HANDLER(i64rem_u) {
     raw::msub(code, true, p2.as<ireg>(), p1.as<ireg>(), v, res.as<ireg>());
     finalize(code, res.as<ireg>());
 }
-HANDLER(i32and) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint32_t>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::and_(code, false, p2.as<LogicalImm>(), p1.as<ireg>(),
-                  res.as<ireg>());
-    } else {
-        raw::and_(code, false, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
-                  res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64and) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint64_t>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::and_(code, true, p2.as<LogicalImm>(), p1.as<ireg>(),
-                  res.as<ireg>());
-    } else {
-        raw::and_(code, true, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
-                  res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32or) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint32_t>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::orr(code, false, p2.as<LogicalImm>(), p1.as<ireg>(),
-                 res.as<ireg>());
-    } else {
-        raw::orr(code, false, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
-                 res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64or) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint64_t>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::orr(code, true, p2.as<LogicalImm>(), p1.as<ireg>(),
-                 res.as<ireg>());
-    } else {
-        raw::orr(code, true, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
-                 res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32xor) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint32_t>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::eor(code, false, p2.as<LogicalImm>(), p1.as<ireg>(),
-                 res.as<ireg>());
-    } else {
-        raw::eor(code, false, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
-                 res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64xor) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::bitmask<uint64_t>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::eor(code, true, p2.as<LogicalImm>(), p1.as<ireg>(),
-                 res.as<ireg>());
-    } else {
-        raw::eor(code, true, shifttype::lsl, p2.as<ireg>(), 0, p1.as<ireg>(),
-                 res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32shl) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::lsl(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
-    } else {
-        raw::lsl(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64shl) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::lsl(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
-    } else {
-        raw::lsl(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32shr_s) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::asr(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
-    } else {
-        raw::asr(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64shr_s) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::asr(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
-    } else {
-        raw::asr(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32shr_u) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::lsr(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
-    } else {
-        raw::lsr(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64shr_u) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::lsr(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
-    } else {
-        raw::lsr(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32rotl) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::ror(code, false, 32 - (p2.as<uint32_t>() & 31), p1.as<ireg>(),
-                 res.as<ireg>());
-    } else {
-        auto temp = ireg::x30;
-        raw::neg(code, false, p2.as<ireg>(), temp);
-        raw::ror(code, false, temp, p1.as<ireg>(), res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64rotl) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::ror(code, true, 64 - (p2.as<uint32_t>() & 63), p1.as<ireg>(),
-                 res.as<ireg>());
-    } else {
-        auto temp = ireg::x30;
-        raw::neg(code, true, p2.as<ireg>(), temp);
-        raw::ror(code, true, temp, p1.as<ireg>(), res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32rotr) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::ror(code, false, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
-    } else {
-        raw::ror(code, false, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64rotr) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::ireg, iwant::literal<>>,
-                           iwant::ireg>(code);
-
-    if (p2.is<value::location::imm>()) {
-        raw::ror(code, true, p2.as<uint32_t>(), p1.as<ireg>(), res.as<ireg>());
-    } else {
-        raw::ror(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
-    }
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(f32abs) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::fabs(code, ftype::single, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64abs) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::fabs(code, ftype::double_, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32neg) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::fneg(code, ftype::single, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64neg) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::fneg(code, ftype::double_, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32ceil) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::frintp(code, ftype::single, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64ceil) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::frintp(code, ftype::double_, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32floor) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::frintm(code, ftype::single, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64floor) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::frintm(code, ftype::double_, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32trunc) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::frintz(code, ftype::single, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64trunc) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::frintz(code, ftype::double_, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32nearest) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::frinti(code, ftype::single, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64nearest) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::frinti(code, ftype::double_, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32sqrt) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::fsqrt(code, ftype::single, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64sqrt) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::fsqrt(code, ftype::double_, p1.as<freg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32add) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fadd(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64add) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fadd(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32sub) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fsub(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64sub) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fsub(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32mul) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fmul(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64mul) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fmul(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32div) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fdiv(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64div) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fdiv(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32min) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fmin(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64min) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fmin(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32max) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fmax(code, ftype::single, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64max) {
-    auto [p1, p2, res] =
-        allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
-            code);
-    raw::fmax(code, ftype::double_, p2.as<freg>(), p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
+BINOP_IMM(i32and, masm::wrap<raw::and_>, raw::and_, false, LogicalImm)
+BINOP_IMM(i64and, masm::wrap<raw::and_>, raw::and_, true, LogicalImm)
+BINOP_IMM(i32or, masm::wrap<raw::orr>, raw::orr, false, LogicalImm)
+BINOP_IMM(i64or, masm::wrap<raw::orr>, raw::orr, true, LogicalImm)
+BINOP_IMM(i32xor, masm::wrap<raw::eor>, raw::eor, false, LogicalImm)
+BINOP_IMM(i64xor, masm::wrap<raw::eor>, raw::eor, true, LogicalImm)
+BINOP_IMM(i32shl, raw::lsl, raw::lsl, false, uint32_t)
+BINOP_IMM(i64shl, raw::lsl, raw::lsl, true, uint32_t)
+BINOP_IMM(i32shr_s, raw::asr, raw::asr, false, uint32_t)
+BINOP_IMM(i64shr_s, raw::asr, raw::asr, true, uint32_t)
+BINOP_IMM(i32shr_u, raw::lsr, raw::lsr, false, uint32_t)
+BINOP_IMM(i64shr_u, raw::lsr, raw::lsr, true, uint32_t)
+BINOP_IMM(i32rotl, masm::rol, masm::rol, false, uint32_t)
+BINOP_IMM(i64rotl, masm::rol, masm::rol, true, uint32_t)
+BINOP_IMM(i32rotr, raw::ror, raw::ror, false, uint32_t)
+BINOP_IMM(i64rotr, raw::ror, raw::ror, true, uint32_t)
+UNOP(f32abs, raw::fabs, ftype::single)
+UNOP(f64abs, raw::fabs, ftype::double_)
+UNOP(f32neg, raw::fneg, ftype::single)
+UNOP(f64neg, raw::fneg, ftype::double_)
+UNOP(f32ceil, raw::frintp, ftype::single)
+UNOP(f64ceil, raw::frintp, ftype::double_)
+UNOP(f32floor, raw::frintm, ftype::single)
+UNOP(f64floor, raw::frintm, ftype::double_)
+UNOP(f32trunc, raw::frintz, ftype::single)
+UNOP(f64trunc, raw::frintz, ftype::double_)
+UNOP(f32nearest, raw::frinti, ftype::single)
+UNOP(f64nearest, raw::frinti, ftype::double_)
+UNOP(f32sqrt, raw::fsqrt, ftype::single)
+UNOP(f64sqrt, raw::fsqrt, ftype::double_)
+BINOP(f32add, raw::fadd, ftype::single)
+BINOP(f64add, raw::fadd, ftype::double_)
+BINOP(f32sub, raw::fsub, ftype::single)
+BINOP(f64sub, raw::fsub, ftype::double_)
+BINOP(f32mul, raw::fmul, ftype::single)
+BINOP(f64mul, raw::fmul, ftype::double_)
+BINOP(f32div, raw::fdiv, ftype::single)
+BINOP(f64div, raw::fdiv, ftype::double_)
+BINOP(f32min, raw::fmin, ftype::single)
+BINOP(f64min, raw::fmin, ftype::double_)
+BINOP(f32max, raw::fmax, ftype::single)
+BINOP(f64max, raw::fmax, ftype::double_)
 HANDLER(f32copysign) {
     auto [p1, p2, res] =
         allocate_registers<std::tuple<iwant::freg, iwant::freg>, iwant::freg>(
@@ -3838,30 +3521,9 @@ HANDLER(f64copysign) {
 }
 // todo: this should probably be a noop?
 // the fact it isn't implies there's issues elsewhere
-HANDLER(i32wrap_i64) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::mov(code, false, p1.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64extend_i32_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::sxtw(code, p1.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64extend_i32_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::mov(code, false, p1.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
+HANDLER(i32wrap_i64) { unop<false, ireg>(code, stack, raw::mov); }
+UNOP(i64extend_i32_s, masm::wrap_nosf<raw::sxtw>, false)
+HANDLER(i64extend_i32_u) { unop<false, ireg>(code, stack, raw::mov); }
 
 template <typename FloatType>
 void Arm64::validate_trunc(std::byte *&code, freg v, FloatType lower,
@@ -3912,206 +3574,39 @@ void Arm64::validate_trunc(std::byte *&code, freg v, FloatType lower,
     raw::bcond(code, overflow_trap - code, cond::ge);
 }
 
-HANDLER(i32trunc_f32_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-
-    validate_trunc(code, p1.as<freg>(), -2147483904.f, 2147483647.f);
-    raw::fcvtzs(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64trunc_f32_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-
-    validate_trunc(code, p1.as<freg>(), -9223373136366404000.f,
-                   9223372036854776000.f);
-    raw::fcvtzs(code, true, ftype::single, p1.as<freg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32trunc_f32_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-
-    validate_trunc(code, p1.as<freg>(), -1.f, 4294967296.f);
-    raw::fcvtzu(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64trunc_f32_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-
-    validate_trunc(code, p1.as<freg>(), -1.f, 18446744073709552000.f);
-    raw::fcvtzu(code, true, ftype::single, p1.as<freg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32trunc_f64_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-
-    validate_trunc(code, p1.as<freg>(), -2147483649., 2147483648.);
-    raw::fcvtzs(code, false, ftype::double_, p1.as<freg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64trunc_f64_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-
-    validate_trunc(code, p1.as<freg>(), -9223372036854777856.,
-                   9223372036854776000.);
-    raw::fcvtzs(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32trunc_f64_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-
-    validate_trunc(code, p1.as<freg>(), -1., 4294967296.);
-    raw::fcvtzu(code, false, ftype::double_, p1.as<freg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64trunc_f64_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-
-    validate_trunc(code, p1.as<freg>(), -1., 18446744073709552000.);
-    raw::fcvtzu(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(f32convert_i32_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
-    raw::scvtf(code, false, ftype::single, p1.as<ireg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64convert_i32_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
-    raw::scvtf(code, false, ftype::double_, p1.as<ireg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32convert_i32_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
-    raw::ucvtf(code, false, ftype::single, p1.as<ireg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64convert_i32_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
-    raw::ucvtf(code, false, ftype::double_, p1.as<ireg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32convert_i64_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
-    raw::scvtf(code, true, ftype::single, p1.as<ireg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64convert_i64_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
-    raw::scvtf(code, true, ftype::double_, p1.as<ireg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32convert_i64_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
-    raw::ucvtf(code, true, ftype::single, p1.as<ireg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64convert_i64_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
-    raw::ucvtf(code, true, ftype::double_, p1.as<ireg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f32demote_f64) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::fcvt(code, ftype::double_, ftype::single, p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(f64promote_f32) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::freg>(code);
-    raw::fcvt(code, ftype::single, ftype::double_, p1.as<freg>(),
-              res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(i32reinterpret_f32) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-    raw::mov(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
-HANDLER(f32reinterpret_i32) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
-    raw::mov(code, false, ftype::single, p1.as<ireg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(i64reinterpret_f64) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-    raw::mov(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
-HANDLER(f64reinterpret_i64) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::freg>(code);
-    raw::mov(code, true, ftype::double_, p1.as<ireg>(), res.as<freg>());
-    finalize(code, res.as<freg>());
-}
-HANDLER(i32extend8_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::sxtb(code, false, p1.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32extend16_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::sxth(code, false, p1.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64extend8_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::sxtb(code, true, p1.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64extend16_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::sxth(code, true, p1.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64extend32_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::ireg>, iwant::ireg>(code);
-
-    raw::sxtw(code, p1.as<ireg>(), res.as<ireg>());
-
-    finalize(code, res.as<ireg>());
-}
+TRUNC(i32trunc_f32_s, raw::fcvtzs, false, ftype::single, -2147483904.f,
+      2147483647.f)
+TRUNC(i64trunc_f32_s, raw::fcvtzs, true, ftype::single, -9223373136366404000.f,
+      9223372036854776000.f)
+TRUNC(i32trunc_f32_u, raw::fcvtzu, false, ftype::single, -1.f, 4294967296.f)
+TRUNC(i64trunc_f32_u, raw::fcvtzu, true, ftype::single, -1.f,
+      18446744073709552000.f)
+TRUNC(i32trunc_f64_s, raw::fcvtzs, false, ftype::double_, -2147483649.,
+      2147483648.)
+TRUNC(i64trunc_f64_s, raw::fcvtzs, true, ftype::double_, -9223372036854777856.,
+      9223372036854776000.)
+TRUNC(i32trunc_f64_u, raw::fcvtzu, false, ftype::double_, -1., 4294967296.)
+TRUNC(i64trunc_f64_u, raw::fcvtzu, true, ftype::double_, -1.,
+      18446744073709552000.)
+CONVERSION(f32convert_i32_s, raw::scvtf, false, ftype::single)
+CONVERSION(f64convert_i32_s, raw::scvtf, false, ftype::double_)
+CONVERSION(f32convert_i32_u, raw::ucvtf, false, ftype::single)
+CONVERSION(f64convert_i32_u, raw::ucvtf, false, ftype::double_)
+CONVERSION(f32convert_i64_s, raw::scvtf, true, ftype::single)
+CONVERSION(f64convert_i64_s, raw::scvtf, true, ftype::double_)
+CONVERSION(f32convert_i64_u, raw::ucvtf, true, ftype::single)
+CONVERSION(f64convert_i64_u, raw::ucvtf, true, ftype::double_)
+CONVERSION(f32demote_f64, raw::fcvt, ftype::double_, ftype::single)
+CONVERSION(f64promote_f32, raw::fcvt, ftype::single, ftype::double_)
+REINTERPRET(i32reinterpret_f32, raw::mov, false, ftype::single, freg, ireg)
+REINTERPRET(f32reinterpret_i32, raw::mov, false, ftype::single, ireg, freg)
+REINTERPRET(i64reinterpret_f64, raw::mov, true, ftype::double_, freg, ireg)
+REINTERPRET(f64reinterpret_i64, raw::mov, true, ftype::double_, ireg, freg)
+UNOP(i32extend8_s, raw::sxtb, false)
+UNOP(i32extend16_s, raw::sxth, false)
+UNOP(i64extend8_s, raw::sxtb, true)
+UNOP(i64extend16_s, raw::sxth, true)
+UNOP(i64extend32_s, masm::wrap_nosf<raw::sxtw>, true)
 HANDLER(ref_null) {
     auto [res] = allocate_registers<std::tuple<>, iwant::ireg>(code);
     raw::mov(code, true, ireg::xzr, res.as<ireg>());
@@ -4125,54 +3620,14 @@ HANDLER(ref_func, uint64_t misc_offset) {
     finalize(code, res.as<ireg>());
 }
 HANDLER(ref_eq) { i64eq(code, stack); }
-HANDLER(i32_trunc_sat_f32_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-    raw::fcvtzs(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32_trunc_sat_f32_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-    raw::fcvtzu(code, false, ftype::single, p1.as<freg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32_trunc_sat_f64_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-    raw::fcvtzs(code, false, ftype::double_, p1.as<freg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i32_trunc_sat_f64_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-    raw::fcvtzu(code, false, ftype::double_, p1.as<freg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64_trunc_sat_f32_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-    raw::fcvtzs(code, true, ftype::single, p1.as<freg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64_trunc_sat_f32_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-    raw::fcvtzu(code, true, ftype::single, p1.as<freg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64_trunc_sat_f64_s) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-    raw::fcvtzs(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
-HANDLER(i64_trunc_sat_f64_u) {
-    auto [p1, res] =
-        allocate_registers<std::tuple<iwant::freg>, iwant::ireg>(code);
-    raw::fcvtzu(code, true, ftype::double_, p1.as<freg>(), res.as<ireg>());
-    finalize(code, res.as<ireg>());
-}
+CONVERSION(i32_trunc_sat_f32_s, raw::fcvtzs, false, ftype::single)
+CONVERSION(i32_trunc_sat_f32_u, raw::fcvtzu, false, ftype::single)
+CONVERSION(i32_trunc_sat_f64_s, raw::fcvtzs, false, ftype::double_)
+CONVERSION(i32_trunc_sat_f64_u, raw::fcvtzu, false, ftype::double_)
+CONVERSION(i64_trunc_sat_f32_s, raw::fcvtzs, true, ftype::single)
+CONVERSION(i64_trunc_sat_f32_u, raw::fcvtzu, true, ftype::single)
+CONVERSION(i64_trunc_sat_f64_s, raw::fcvtzs, true, ftype::double_)
+CONVERSION(i64_trunc_sat_f64_u, raw::fcvtzu, true, ftype::double_)
 
 template <runtime::Signature func, size_t NP, size_t NR>
 void Arm64::runtime_call(std::byte *&code, std::array<valtype, NP> params,

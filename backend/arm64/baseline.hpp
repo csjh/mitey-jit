@@ -304,9 +304,28 @@ class Arm64 {
     void discard(std::byte *&code, WasmStack &stack, uint32_t skip,
                  uint32_t discard_to);
 
+    template <auto t, typename Ty>
+    void unop(SHARED_PARAMS, void (*op)(std::byte *&, decltype(t), Ty, Ty));
+
+    template <auto t, typename Ty>
+    void binop(SHARED_PARAMS,
+               void (*op)(std::byte *&, decltype(t), Ty, Ty, Ty));
+
+    template <bool is_64, typename ImmTy, typename Ty>
+    void binop_imm(SHARED_PARAMS, void (*op)(std::byte *&, bool, Ty, Ty, Ty),
+                   void (*imm_op)(std::byte *&, bool, ImmTy, Ty, Ty));
+
     template <typename FloatType>
     void validate_trunc(std::byte *&code, freg v, FloatType lower,
                         FloatType upper);
+
+    template <auto t1, auto t2, auto lower = 0, auto upper = 0, typename InType,
+              typename OutType>
+    void conversion(SHARED_PARAMS, void (*op)(std::byte *&, decltype(t1),
+                                              decltype(t2), InType, OutType));
+
+    template <cond c, bool is_64, bool is_float, bool is_eqz>
+    void comparison(SHARED_PARAMS);
 
     // eventually i'll have to support multivalue here
     // honestly i don't think it'll even be that difficult (single digit lines)
