@@ -2810,7 +2810,7 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
     polymorph(ty, [&]<typename T>(T) {
         constexpr bool is_float = std::is_same_v<T, freg>;
 
-        auto in_caller_saved = local.is<value::location::multireg>() &&
+        auto in_callee_saved = local.is<value::location::multireg>() &&
                                !is_volatile(local.as<T>());
 
         intregs.reset_temporaries();
@@ -2819,7 +2819,7 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
         }
 
         T locreg;
-        if (in_caller_saved) {
+        if (in_callee_saved) {
             locreg = local.as<T>();
         } else if (v.is<value::location::reg>()) {
             locreg = v.as<T>();
@@ -2855,7 +2855,7 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
         case value::location::reg: {
             auto reg = v.as<T>();
 
-            if (in_caller_saved) {
+            if (in_callee_saved) {
                 if (is_volatile(reg) && was_prior(reg, code)) {
                     // overwrite instruction
                     code -= sizeof(inst);
@@ -2885,7 +2885,7 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
             surrender(reg, values);
 
             // can't reuse non-volatile multiregs
-            if (in_caller_saved || !is_volatile(reg)) {
+            if (in_callee_saved || !is_volatile(reg)) {
                 purge(code, locreg);
                 raw::mov(code, true, reg, locreg);
             } else {
