@@ -83,7 +83,7 @@ class Arm64 {
         void use(std::byte *&, RegType, metadata);
         bool surrender(value *);
         [[nodiscard]] int32_t purge(std::byte *&, RegType);
-        bool was_prior(RegType reg, std::byte *code);
+        bool can_overwrite(RegType reg, std::byte *code);
         void set_spill(std::byte *&);
     };
 
@@ -156,7 +156,7 @@ class Arm64 {
         void spill_all(std::byte *&, value *locals);
         void set_spills(std::byte *&);
 
-        bool was_prior(RegType reg, std::byte *code);
+        bool can_overwrite(RegType reg, std::byte *code);
     };
 
     using temp_int_manager = reg_manager<icaller_saved>;
@@ -206,7 +206,8 @@ class Arm64 {
     template <typename RegType> void use(std::byte *&, RegType);
     template <typename RegType> void surrender(RegType, value *);
     template <typename RegType> void purge(std::byte *&, RegType);
-    template <typename RegType> bool was_prior(RegType reg, std::byte *code);
+    template <typename RegType>
+    bool can_overwrite(RegType reg, std::byte *code);
 
     void polymorph(valtype ty, auto &&func) {
         if (is_float(ty)) [[unlikely]] {

@@ -1307,9 +1307,8 @@ int32_t Arm64::reg_info<RegType, N>::purge(std::byte *&code, RegType reg) {
 }
 
 template <typename RegType, uint32_t N>
-bool Arm64::reg_info<RegType, N>::was_prior(RegType reg, std::byte *code) {
-    assert(count > 0);
-    return count == 1 && source_location == code;
+bool Arm64::reg_info<RegType, N>::can_overwrite(RegType reg, std::byte *code) {
+    return count == 0 && source_location == code;
 }
 
 template <auto registers>
@@ -1373,9 +1372,10 @@ void Arm64::reg_manager<registers>::activate(std::byte *&code,
 }
 
 template <auto registers>
-bool Arm64::reg_manager<registers>::was_prior(RegType reg, std::byte *code) {
+bool Arm64::reg_manager<registers>::can_overwrite(RegType reg,
+                                                  std::byte *code) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    return get_manager_of(reg).was_prior(reg, code);
+    return get_manager_of(reg).can_overwrite(reg, code);
 }
 
 template <typename RegType> void Arm64::use(std::byte *&code, RegType reg) {
@@ -1404,11 +1404,11 @@ template <typename RegType> void Arm64::purge(std::byte *&code, RegType reg) {
 }
 
 template <typename RegType>
-bool Arm64::was_prior(RegType reg, std::byte *code) {
+bool Arm64::can_overwrite(RegType reg, std::byte *code) {
     if (is_volatile(reg)) {
-        return regs_of<RegType>().was_prior(reg, code);
+        return regs_of<RegType>().can_overwrite(reg, code);
     } else {
-        return locals_of<RegType>().was_prior(reg, code);
+        return locals_of<RegType>().can_overwrite(reg, code);
     }
 }
 
@@ -2854,9 +2854,10 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
             break;
         case value::location::reg: {
             auto reg = v.as<T>();
+            surrender(reg, values);
 
             if (in_callee_saved) {
-                if (is_volatile(reg) && was_prior(reg, code)) {
+                if (is_volatile(reg) && can_overwrite(reg, code)) {
                     // overwrite instruction
                     code -= sizeof(inst);
 
@@ -2866,16 +2867,13 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
                     instruction &= ~0b11111u;
                     instruction |= (unsigned)locreg;
 
-                    surrender(reg, values);
                     purge(code, locreg);
                     put(code, instruction);
                 } else {
-                    surrender(reg, values);
                     purge(code, locreg);
                     raw::mov(code, true, reg, locreg);
                 }
             } else {
-                surrender(reg, values);
                 assert(locreg == reg);
             }
             break;
