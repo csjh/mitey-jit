@@ -57,13 +57,50 @@ template <typename Src, typename Dest = Src> struct edge {
     [[maybe_unused]] std::byte *&code, [[maybe_unused]] WasmStack &stack
 
 class Arm64 {
+  public:
+    template <typename RegType> struct temporary {
+        static_assert(std::is_same_v<RegType, ireg> ||
+                          std::is_same_v<RegType, freg>,
+                      "temporary can only be used with ireg or freg");
+
+        temporary(Arm64 *that, std::byte *&code)
+            : that(that), reg(that->regs_of<RegType>().temporary(
+                              code, that->values_start)) {}
+
+        temporary(RegType existing) {
+            that = nullptr;
+            reg = existing;
+        }
+
+        temporary(temporary<RegType> &existing) = delete;
+        temporary(temporary<RegType> &&existing) {
+            that = existing.that;
+            reg = existing.reg;
+            existing.that = nullptr;
+        }
+
+        ~temporary() {
+            if (that)
+                that->regs_of<RegType>().untemporary(reg);
+        }
+
+        void operator=(temporary<RegType> &existing) = delete;
+        void operator=(temporary<RegType> &&existing) = delete;
+        operator RegType() { return reg; }
+        RegType get() { return reg; }
+
+      private:
+        Arm64 *that = nullptr;
+        RegType reg;
+    };
+
+  private:
     struct metadata {
         std::byte *source_location = nullptr;
         value *value_offset = nullptr;
         uint32_t stack_offset = 0;
     };
 
-  public:
     template <typename RegType, uint32_t N> class reg_info {
         std::byte *spilladdr = nullptr;
         std::byte *source_location = nullptr;
@@ -156,50 +193,6 @@ class Arm64 {
         bool is_free(RegType reg);
     };
 
-    using temp_int_manager = reg_manager<icaller_saved>;
-    using temp_float_manager = reg_manager<fcaller_saved>;
-
-    template <typename RegType> struct temporary {
-        static_assert(std::is_same_v<RegType, ireg> ||
-                          std::is_same_v<RegType, freg>,
-                      "temporary can only be used with ireg or freg");
-
-        using manager_type = std::conditional_t<std::is_same_v<RegType, ireg>,
-                                                Arm64::temp_int_manager,
-                                                Arm64::temp_float_manager>;
-
-        temporary(Arm64 *that, std::byte *&code)
-            : that(that), reg(that->regs_of<RegType>().temporary(
-                              code, that->values_start)) {}
-
-        temporary(RegType existing) {
-            that = nullptr;
-            reg = existing;
-        }
-
-        temporary(temporary<RegType> &existing) = delete;
-        temporary(temporary<RegType> &&existing) {
-            that = existing.that;
-            reg = existing.reg;
-            existing.that = nullptr;
-        }
-
-        ~temporary() {
-            if (that)
-                that->regs_of<RegType>().untemporary(reg);
-        }
-
-        void operator=(temporary<RegType> &existing) = delete;
-        void operator=(temporary<RegType> &&existing) = delete;
-        operator RegType() { return reg; }
-        RegType get() { return reg; }
-
-      private:
-        Arm64 *that = nullptr;
-        RegType reg;
-    };
-
-  private:
     template <typename RegType> bool is_free(RegType);
     template <typename RegType> void use_no_overwrite(std::byte *&, RegType);
     template <typename RegType> void use(std::byte *&, RegType);
@@ -223,8 +216,8 @@ class Arm64 {
     uint32_t stack_size = 0;
 
     // caller saved registers
-    temp_int_manager intregs;
-    temp_float_manager floatregs;
+    reg_manager<icaller_saved> intregs;
+    reg_manager<fcaller_saved> floatregs;
 
     template <typename RegType> auto &regs_of() {
         if constexpr (std::is_same_v<RegType, ireg>) {
