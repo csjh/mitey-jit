@@ -2158,7 +2158,6 @@ HANDLER(start_function, FunctionShell &fn) {
         bool is_float;
         int reg;
         int offset;
-        bool is_param;
         std::byte *code;
     };
     std::optional<save> prev;
@@ -2180,40 +2179,17 @@ HANDLER(start_function, FunctionShell &fn) {
                 offset = prev->offset;
                 auto preg = (ireg)prev->reg;
 
-                if (is_param && prev->is_param)
-                    raw::ldp(code, true, enctype::offset, offset, ireg::x17,
-                             stackreg, ireg::x16);
-                else if (is_param)
-                    raw::ldr(code, true, offset + sizeof(runtime::WasmValue),
-                             stackreg, ireg::x17);
-                else if (prev->is_param)
-                    raw::ldr(code, true, offset, stackreg, ireg::x16);
-
                 raw::stp(code, true, enctype::offset, offset, reg, stackreg,
                          preg);
-
-                if (!prev->is_param)
-                    raw::mov(code, true, ireg::xzr, preg);
-                else
-                    raw::mov(code, true, ireg::x16, preg);
-
-                if (!is_param)
-                    raw::mov(code, true, ireg::xzr, reg);
-                else
-                    raw::mov(code, true, ireg::x17, reg);
+                raw::mov(code, true, ireg::xzr, preg);
+                raw::mov(code, true, ireg::xzr, reg);
 
                 prev = std::nullopt;
             } else {
-                prev = save{false, (int)reg, (int)offset, is_param, code};
+                prev = save{false, (int)reg, (int)offset, code};
 
-                if (is_param) {
-                    masm::ldr(code, this, true, offset, stackreg, ireg::x16);
-                    masm::str(code, this, true, offset, stackreg, reg);
-                    raw::mov(code, true, ireg::x16, reg);
-                } else {
-                    masm::str(code, this, true, offset, stackreg, reg);
-                    raw::mov(code, true, ireg::xzr, reg);
-                }
+                masm::str(code, this, true, offset, stackreg, reg);
+                raw::mov(code, true, ireg::xzr, reg);
             }
 
             locals()[i] = value::reg(reg);
@@ -2226,42 +2202,17 @@ HANDLER(start_function, FunctionShell &fn) {
                 offset = prev->offset;
                 auto preg = (freg)prev->reg;
 
-                raw::ldp(code, ftype::double_, enctype::offset, offset,
-                         freg::d7, stackreg, freg::d6);
-                if (is_param && prev->is_param)
-                    raw::ldp(code, ftype::double_, enctype::offset, offset,
-                             freg::d7, stackreg, freg::d6);
-                else if (is_param)
-                    raw::ldr(code, true, offset - sizeof(runtime::WasmValue),
-                             stackreg, freg::d7);
-                else if (prev->is_param)
-                    raw::ldr(code, true, offset, stackreg, freg::d6);
-
                 raw::stp(code, ftype::double_, enctype::offset, offset, reg,
                          stackreg, preg);
-
-                if (!prev->is_param)
-                    raw::mov(code, true, ftype::double_, ireg::xzr, preg);
-                else
-                    raw::mov(code, ftype::double_, freg::d6, preg);
-
-                if (!is_param)
-                    raw::mov(code, true, ftype::double_, ireg::xzr, reg);
-                else
-                    raw::mov(code, ftype::double_, freg::d7, reg);
+                raw::mov(code, true, ftype::double_, ireg::xzr, preg);
+                raw::mov(code, true, ftype::double_, ireg::xzr, reg);
 
                 prev = std::nullopt;
             } else {
-                prev = save{true, (int)reg, (int)offset, is_param, code};
+                prev = save{true, (int)reg, (int)offset, code};
 
-                if (is_param) {
-                    masm::ldr(code, this, true, offset, stackreg, freg::d0);
-                    masm::str(code, this, true, offset, stackreg, reg);
-                    raw::mov(code, ftype::double_, freg::d0, reg);
-                } else {
-                    masm::str(code, this, true, offset, stackreg, reg);
-                    raw::mov(code, true, ftype::double_, ireg::xzr, reg);
-                }
+                masm::str(code, this, true, offset, stackreg, reg);
+                raw::mov(code, true, ftype::double_, ireg::xzr, reg);
             }
 
             locals()[i] = value::reg(reg);
