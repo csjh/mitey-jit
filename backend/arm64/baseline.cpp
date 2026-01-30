@@ -3299,7 +3299,7 @@ HANDLER(i64sub) {
                            iwant::ireg>(code);
 
     if (p2.is<value::location::imm>()) {
-        masm::sub(code, this, false, p2.as<uint32_t>(), p1.as<ireg>(),
+        masm::sub(code, this, true, p2.as<uint32_t>(), p1.as<ireg>(),
                   res.as<ireg>());
     } else {
         raw::sub(code, true, p2.as<ireg>(), p1.as<ireg>(), res.as<ireg>());
