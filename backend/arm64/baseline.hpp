@@ -107,7 +107,6 @@ class Arm64 {
         uint32_t stack_offset = 0;
         uint32_t count = 0;
         value *values[N];
-        uint8_t _padding[8];
 
         void spill(std::byte *&, RegType, uint32_t i);
 
