@@ -14,7 +14,7 @@ using inst = uint32_t;
 
 class value {
   public:
-    enum class location { reg, multireg, stack, imm, flags };
+    enum class location { reg, stack, imm, flags };
 
   private:
     location loc;
@@ -30,12 +30,6 @@ class value {
     }
     static value reg(freg reg) {
         return value(location::reg, static_cast<uint32_t>(reg));
-    }
-    static value multireg(ireg reg) {
-        return value(location::multireg, static_cast<uint32_t>(reg));
-    }
-    static value multireg(freg reg) {
-        return value(location::multireg, static_cast<uint32_t>(reg));
     }
     static value stack(uint32_t offset) {
         return value(location::stack, offset);
@@ -64,6 +58,7 @@ template <typename Src, typename Dest = Src> struct edge {
 
 class Arm64 {
     struct metadata {
+        std::byte *source_location = nullptr;
         value *value_offset = nullptr;
         uint32_t stack_offset = 0;
     };
@@ -83,7 +78,8 @@ class Arm64 {
         void use(std::byte *&, RegType, metadata);
         bool surrender(value *);
         [[nodiscard]] int32_t purge(std::byte *&, RegType);
-        bool can_overwrite(RegType reg, std::byte *code);
+        bool can_overwrite(std::byte *code);
+        bool is_free();
         void set_spill(std::byte *&);
     };
 
@@ -157,6 +153,7 @@ class Arm64 {
         void set_spills(std::byte *&);
 
         bool can_overwrite(RegType reg, std::byte *code);
+        bool is_free(RegType reg);
     };
 
     using temp_int_manager = reg_manager<icaller_saved>;
@@ -203,6 +200,8 @@ class Arm64 {
     };
 
   private:
+    template <typename RegType> bool is_free(RegType);
+    template <typename RegType> void use_no_overwrite(std::byte *&, RegType);
     template <typename RegType> void use(std::byte *&, RegType);
     template <typename RegType> void surrender(RegType, value *);
     template <typename RegType> void purge(std::byte *&, RegType);
