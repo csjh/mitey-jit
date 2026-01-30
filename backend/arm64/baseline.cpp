@@ -1732,28 +1732,26 @@ int32_t Arm64::reg_manager<registers>::local_manager::activate(
     uint32_t stack_offset = local_idx * sizeof(runtime::WasmValue);
     int32_t activity_diff = 0;
 
-    // non-set activations should only happen
-    // when the local is on the stack
-    if (set) {
-        for (auto &local : inflight_locals) {
-            if (local.active && local.local_idx == local_idx) {
-                local.active = false;
-                activity_diff--;
-                break;
-            }
-        }
+    // if the local is already in a register, mark it as unused
+    if (local_locations[local_idx].is<value::location::reg>()) [[unlikely]] {
+        auto existing_reg = local_locations[local_idx].as<RegType>();
+        inflight_locals[to_index(existing_reg)].active = false;
+        activity_diff--;
     }
-    auto &local = inflight_locals[to_index(reg)];
-    if (is_active(reg) && local.local_idx != local_idx) {
+    // deactivate the register if it's already active
+    if (is_active(reg)) [[unlikely]] {
         deactivate(local_locations, reg);
         activity_diff--;
     }
 
     if (set) {
-        local = {code, local_idx, true};
+        inflight_locals[to_index(reg)] = {code, local_idx, true};
         masm::pad_spill(code, stack_offset);
     } else {
-        local = {nullptr, local_idx, true};
+        inflight_locals[to_index(reg)] = {nullptr, local_idx, true};
+        // non-set activations must already be on the stack,
+        // otherwise they could be lost
+        assert(local_locations[local_idx].is<value::location::stack>());
     }
     activity_diff++;
 
@@ -2169,6 +2167,11 @@ HANDLER(start_function, FunctionShell &fn) {
         auto local = fn.locals[i];
         auto offset = i * sizeof(runtime::WasmValue);
         auto is_param = i < fn.type.params.size();
+
+        // mainly just here for .activate to know there isn't a register in the
+        // local. could also make do with an invalid type but that's excessive
+        // for this one place that it happens
+        locals()[i] = value::stack(offset);
 
         if (!is_param && !is_float(local) &&
             ireg_alloc != icallee_saved.end()) {
