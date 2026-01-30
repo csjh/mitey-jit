@@ -1365,7 +1365,8 @@ template <auto registers>
 void Arm64::reg_manager<registers>::deactivate_all(value *local_locations) {
     if (activity == 0) [[likely]]
         return;
-    activity += locals.deactivate_all(local_locations);
+    locals.deactivate_all(local_locations);
+    activity = 0;
 }
 
 template <auto registers>
@@ -1761,16 +1762,13 @@ int32_t Arm64::reg_manager<registers>::local_manager::activate(
 }
 
 template <auto registers>
-int32_t Arm64::reg_manager<registers>::local_manager::deactivate_all(
+void Arm64::reg_manager<registers>::local_manager::deactivate_all(
     value *local_locations) {
-    int32_t activity = 0;
     for (auto reg : registers) {
         if (is_active(reg)) [[unlikely]] {
             deactivate(local_locations, reg);
-            activity--;
         }
     }
-    return activity;
 }
 
 template <auto registers>

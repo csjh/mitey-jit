@@ -148,7 +148,7 @@ class Arm64 {
                                            uint32_t local_idx, RegType reg,
                                            bool set);
             void deactivate(value *locals, RegType reg);
-            [[nodiscard]] int32_t deactivate_all(value *locals);
+            void deactivate_all(value *locals);
             void commit_all();
             bool is_active(RegType reg);
         };
