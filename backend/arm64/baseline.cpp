@@ -1382,7 +1382,7 @@ template <auto registers>
 bool Arm64::reg_manager<registers>::can_overwrite(RegType reg,
                                                   std::byte *code) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    return is_free(reg) && values.can_overwrite(code);
+    return is_free(reg) && values.can_overwrite(reg, code);
 }
 
 template <auto registers>

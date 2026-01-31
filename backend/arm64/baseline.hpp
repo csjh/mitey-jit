@@ -168,7 +168,7 @@ class Arm64 {
                 return get_manager_of(reg).surrender(v);
             }
             [[nodiscard]] int32_t purge(RegType reg, std::byte *&code) {
-                return get_manager_of(reg).purge(code);
+                return get_manager_of(reg).purge(code, reg);
             }
             bool can_overwrite(RegType reg, std::byte *code) {
                 return get_manager_of(reg).can_overwrite(code);
