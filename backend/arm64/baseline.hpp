@@ -153,14 +153,36 @@ class Arm64 {
             bool is_active(RegType reg);
         };
 
-        local_manager locals;
-        sub_manager regs[N];
-        int32_t interest = 0;
-        int32_t activity = 0;
+        class value_manager {
+            sub_manager regs[N];
 
-        sub_manager &get_manager_of(RegType reg) {
-            return regs[static_cast<uint8_t>(reg) - First];
-        }
+            sub_manager &get_manager_of(RegType reg) {
+                return regs[static_cast<uint8_t>(reg) - First];
+            }
+
+          public:
+            void use(RegType reg, std::byte *&code, metadata md) {
+                return get_manager_of(reg).use(code, reg, md);
+            }
+            bool surrender(RegType reg, value *v) {
+                return get_manager_of(reg).surrender(v);
+            }
+            [[nodiscard]] int32_t purge(RegType reg, std::byte *&code) {
+                return get_manager_of(reg).purge(code);
+            }
+            bool can_overwrite(RegType reg, std::byte *code) {
+                return get_manager_of(reg).can_overwrite(code);
+            }
+            bool is_free(RegType reg) { return get_manager_of(reg).is_free(); }
+            void set_spill(RegType reg, std::byte *&code) {
+                return get_manager_of(reg).set_spill(code);
+            }
+        };
+
+        [[no_unique_address]] local_manager locals;
+        value_manager values;
+        int32_t active_values = 0;
+        int32_t active_locals = 0;
 
         reg_lru<allocate ? N : 0> reg_positions;
 
@@ -172,24 +194,26 @@ class Arm64 {
         }
 
       public:
+        // general stuff
         RegType result(std::byte *&, value *locals);
         RegType temporary(std::byte *&, value *locals);
         void untemporary(RegType reg);
         void reset_temporaries();
+        bool can_overwrite(RegType reg, std::byte *code);
+        bool is_free(RegType reg);
 
+        // local stuff
         void activate(std::byte *&code, value *locals, uint32_t local_idx,
                       RegType reg, bool set);
         void deactivate_all(value *locals);
         void commit_all();
 
+        // value stuff
         void use(std::byte *&, RegType, metadata);
         void surrender(RegType, value *);
         void purge(std::byte *&, value *locals, RegType);
         void spill_all(std::byte *&, value *locals);
         void set_spills(std::byte *&);
-
-        bool can_overwrite(RegType reg, std::byte *code);
-        bool is_free(RegType reg);
     };
 
     template <typename RegType> bool is_free(RegType);

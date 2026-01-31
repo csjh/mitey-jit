@@ -1234,7 +1234,7 @@ void Arm64::reg_manager<registers>::untemporary(RegType reg) {
 template <auto registers>
 void Arm64::reg_manager<registers>::spill_all(std::byte *&code,
                                               value *local_locations) {
-    if (interest == 0) [[likely]]
+    if (active_values == 0) [[likely]]
         return;
     for (auto reg : registers) {
         purge(code, local_locations, reg);
@@ -1320,8 +1320,8 @@ template <auto registers>
 void Arm64::reg_manager<registers>::use(std::byte *&code, RegType reg,
                                         metadata md) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    get_manager_of(reg).use(code, reg, md);
-    interest++;
+    values.use(reg, code, md);
+    active_values++;
     if constexpr (allocate)
         reg_positions.use(to_index(reg));
 }
@@ -1329,8 +1329,8 @@ void Arm64::reg_manager<registers>::use(std::byte *&code, RegType reg,
 template <auto registers>
 void Arm64::reg_manager<registers>::surrender(RegType reg, value *v) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    bool is_empty = get_manager_of(reg).surrender(v);
-    interest--;
+    bool is_empty = values.surrender(reg, v);
+    active_values--;
     if (allocate && is_empty && !locals.is_active(reg))
         reg_positions.surrender(to_index(reg));
 }
@@ -1339,34 +1339,34 @@ template <auto registers>
 void Arm64::reg_manager<registers>::purge(std::byte *&code,
                                           value *local_locations, RegType reg) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    interest += get_manager_of(reg).purge(code, reg);
+    active_values += values.purge(reg, code);
     if (allocate && locals.is_active(reg)) {
         locals.deactivate(local_locations, reg);
-        activity--;
+        active_locals--;
     }
 }
 
 template <auto registers>
 void Arm64::reg_manager<registers>::set_spills(std::byte *&code) {
-    if (interest == 0) [[likely]]
+    if (active_values == 0) [[likely]]
         return;
     for (auto reg : registers) {
-        get_manager_of(reg).set_spill(code);
+        values.set_spill(reg, code);
     }
 }
 
 template <auto registers> void Arm64::reg_manager<registers>::commit_all() {
-    if (activity == 0) [[likely]]
+    if (active_locals == 0) [[likely]]
         return;
     locals.commit_all();
 }
 
 template <auto registers>
 void Arm64::reg_manager<registers>::deactivate_all(value *local_locations) {
-    if (activity == 0) [[likely]]
+    if (active_locals == 0) [[likely]]
         return;
     locals.deactivate_all(local_locations);
-    activity = 0;
+    active_locals = 0;
 }
 
 template <auto registers>
@@ -1374,20 +1374,21 @@ void Arm64::reg_manager<registers>::activate(std::byte *&code,
                                              value *local_locations,
                                              uint32_t local_idx, RegType reg,
                                              bool set) {
-    activity += locals.activate(code, local_locations, local_idx, reg, set);
+    active_locals +=
+        locals.activate(code, local_locations, local_idx, reg, set);
 }
 
 template <auto registers>
 bool Arm64::reg_manager<registers>::can_overwrite(RegType reg,
                                                   std::byte *code) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    return is_free(reg) && get_manager_of(reg).can_overwrite(code);
+    return is_free(reg) && values.can_overwrite(code);
 }
 
 template <auto registers>
 bool Arm64::reg_manager<registers>::is_free(RegType reg) {
     assert(std::ranges::find(registers, reg) != registers.end());
-    return allocate && !locals.is_active(reg) && get_manager_of(reg).is_free();
+    return allocate && !locals.is_active(reg) && values.is_free(reg);
 }
 
 template <typename RegType> void Arm64::use(std::byte *&code, RegType reg) {
