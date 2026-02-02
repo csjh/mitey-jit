@@ -1376,6 +1376,8 @@ void Arm64::reg_manager<registers>::activate(std::byte *&code,
                                              bool set) {
     active_locals +=
         locals.activate(code, local_locations, local_idx, reg, set);
+    if constexpr (allocate)
+        reg_positions.use(to_index(reg));
 }
 
 template <auto registers>
