@@ -2007,8 +2007,6 @@ void Arm64::negotiate_registers_slowpath(std::byte *&code,
     for (auto pair : param_edges) {
         if (pair.src == invalid)
             continue;
-        if (pair.src == pair.dest)
-            continue;
         if (has_incoming[(uint8_t)pair.src])
             continue;
 
@@ -2017,8 +2015,6 @@ void Arm64::negotiate_registers_slowpath(std::byte *&code,
 
     for (auto pair : param_edges) {
         if (pair.src == invalid)
-            continue;
-        if (pair.src == pair.dest)
             continue;
         if (!has_incoming[(uint8_t)pair.src])
             continue;
@@ -2036,6 +2032,7 @@ void Arm64::negotiate_registers(std::byte *&code,
 
     std::bitset<max_regs> has_incoming, has_outgoing;
     for (auto pair : param_edges) {
+        assert(pair.src != pair.dest);
         has_incoming.set((uint8_t)pair.dest);
         has_outgoing.set((uint8_t)pair.src);
     }
