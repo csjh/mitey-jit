@@ -1678,7 +1678,6 @@ bool Arm64::move_block_results(std::byte *&code,
                                uint32_t stack_offset, bool discard_copied) {
     if (is_fast_compatible(copied_values)) {
         auto start = code;
-        purge(code, ireg::x17);
         force_value_into(code, &values[-1], ireg::x17, !discard_copied);
         if (discard_copied) {
             values--;
@@ -2456,6 +2455,12 @@ HANDLER(br_if, std::span<ControlFlow> control_stack, uint32_t depth) {
 
     auto &flow = control_stack[control_stack.size() - depth - 1];
     auto [condition] = allocate_registers<std::tuple<iwant::flags>>(code);
+
+    // purge x17 in advance, because it may be needed for moving results
+    // and the purging can't happen conditionally
+    if (is_fast_compatible(flow.expected)) {
+        purge(code, ireg::x17);
+    }
 
     std::byte *condjump = code;
     code += sizeof(inst);
