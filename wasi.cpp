@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,9 +73,11 @@ int32_t fd_write(__WASM_MEMORY, int32_t fd, const iovec *iovs,
     assert_alignment(iovs);
     assert_alignment(nwritten);
 
+    pollfd fds[1] = {{fd, POLLOUT, 0}};
     wasm_size_t total_written = 0;
 
     for (wasm_size_t i = 0; i < iovs_len; i++) {
+        poll(fds, 1, -1);
         ssize_t written = write(fd, memory + iovs[i].buf.v, iovs[i].buf_len);
         if (written < 0) {
             return 28;
@@ -297,9 +300,11 @@ int32_t fd_read(__WASM_MEMORY, int32_t fd, const iovec *iovs,
     assert_alignment(iovs);
     assert_alignment(nread);
 
+    pollfd fds[1] = {{fd, POLLIN, 0}};
     wasm_size_t total_read = 0;
 
     for (wasm_size_t i = 0; i < iovs_len; i++) {
+        poll(fds, 1, -1);
         ssize_t bytes_read = read(fd, memory + iovs[i].buf.v, iovs[i].buf_len);
         if (bytes_read < 0) {
             return 28;
