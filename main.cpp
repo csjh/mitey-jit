@@ -88,7 +88,7 @@ int main(int argc, const char **argv) {
 
     auto path = ".";
     auto fd = open(path, O_RDONLY | O_DIRECTORY, 0666);
-    register_preopen(fd, "/");
+    register_preopen(fd, ".");
 
     auto &exports = instance->get_exports();
     if (exports.find("_start") == exports.end()) {
