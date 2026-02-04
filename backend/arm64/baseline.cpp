@@ -1678,10 +1678,14 @@ bool Arm64::move_block_results(std::byte *&code,
                                uint32_t stack_offset, bool discard_copied) {
     if (is_fast_compatible(copied_values)) {
         auto start = code;
-        force_value_into(code, &values[-1], ireg::x17, !discard_copied);
         if (discard_copied) {
+            purge(code, ireg::x17);
+            force_value_into(code, &values[-1], ireg::x17, false);
             values--;
             stack_size -= sizeof(runtime::WasmValue);
+        } else {
+            assert(intregs.is_free(ireg::x17));
+            force_value_into(code, &values[-1], ireg::x17, true);
         }
         return code != start;
     } else {
@@ -2459,6 +2463,11 @@ HANDLER(br_if, std::span<ControlFlow> control_stack, uint32_t depth) {
     // purge x17 in advance, because it may be needed for moving results
     // and the purging can't happen conditionally
     if (is_fast_compatible(flow.expected)) {
+        if (condition.is<value::location::reg>() &&
+            condition.as<ireg>() == ireg::x17) {
+            raw::mov(code, true, ireg::x17, ireg::x30);
+            condition = value::reg(ireg::x30);
+        }
         purge(code, ireg::x17);
     }
 
