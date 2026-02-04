@@ -215,8 +215,11 @@ int32_t fd_fdstat_get(int32_t fd, void *stat) {
     }
 
     // Convert native stat to WASI fdstat
-    fdstat->fs_filetype = S_ISREG(native_stat.st_mode)   ? 1
-                          : S_ISDIR(native_stat.st_mode) ? 2
+    fdstat->fs_filetype = S_ISBLK(native_stat.st_mode)   ? 1
+                          : S_ISCHR(native_stat.st_mode) ? 2
+                          : S_ISDIR(native_stat.st_mode) ? 3
+                          : S_ISREG(native_stat.st_mode) ? 4
+                          : S_ISLNK(native_stat.st_mode) ? 7
                                                          : 0;
 
     int flags = fcntl(fd, F_GETFL);
@@ -224,10 +227,19 @@ int32_t fd_fdstat_get(int32_t fd, void *stat) {
         return 28;
     }
 
-    fdstat->fs_flags = flags;
-    // Rights would be determined based on file type and permissions
-    fdstat->fs_rights_base = 0xFFFFFFFFFFFFFFFFULL; // All rights for example
-    fdstat->fs_rights_inheriting = 0xFFFFFFFFFFFFFFFFULL;
+    if (fd == STDIN_FILENO) {
+        fdstat->fs_flags = 0x0;
+        fdstat->fs_rights_base = 1u << 1;
+        fdstat->fs_rights_inheriting = fdstat->fs_rights_base;
+    } else if (fd == STDOUT_FILENO) {
+        fdstat->fs_flags = 0x0;
+        fdstat->fs_rights_base = 1u << 6;
+        fdstat->fs_rights_inheriting = fdstat->fs_rights_base;
+    } else {
+        fdstat->fs_flags = 0xFFFFFFFFu;
+        fdstat->fs_rights_base = 0xFFFFFFFFFFFFFFFFull;
+        fdstat->fs_rights_inheriting = fdstat->fs_rights_base;
+    }
 
     return 0;
 }
@@ -520,7 +532,6 @@ int32_t random_get(void *buf, wasm_size_t buf_len) {
 int32_t poll_oneoff(__WASM_MEMORY, const char *in, char *out,
                     wasm_size_t nsubscriptions, wasm_size_t *nevents) {
     assert_alignment(nevents);
-    printf("poll_oneoff");
     return 0;
 }
 

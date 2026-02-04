@@ -78,7 +78,8 @@ int main(int argc, const char **argv) {
         {"sock_accept", internalize<sock_accept>()},
         {"sock_shutdown", internalize<sock_shutdown>()},
     };
-    auto imports = runtime::Imports{{"wasi_snapshot_preview1", wasi}};
+    auto imports = runtime::Imports{{"wasi_snapshot_preview1", wasi},
+                                    {"wasi_unstable", wasi}};
 
     auto instance = mod->instantiate(imports);
 
