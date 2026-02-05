@@ -1016,7 +1016,7 @@ void add(std::byte *&code, Arm64 *that, bool sf, uint32_t imm, ireg src,
             raw::add(code, sf, imm, dst, dst, true);
         }
     } else {
-        Arm64::temporary<ireg> tmp(that, code);
+        auto tmp = ireg::x30;
         mov(code, imm, tmp);
         raw::add(code, sf, tmp, src, dst);
     }
@@ -1033,7 +1033,7 @@ void sub(std::byte *&code, Arm64 *that, bool sf, uint32_t imm, ireg src,
             raw::sub(code, sf, imm, dst, dst, true);
         }
     } else {
-        Arm64::temporary<ireg> tmp(that, code);
+        auto tmp = ireg::x30;
         mov(code, imm, tmp);
         raw::sub(code, sf, tmp, src, dst);
     }
@@ -2530,6 +2530,12 @@ HANDLER(br_table, std::span<ControlFlow> control_stack,
     // [$result_offset, $jump_offset] = ldpsw($addr)
     raw::ldpsw(code, 0, result_offset, addr, jump_offset);
 
+    auto relative_point = code;
+    // $jump = PC + $jump_offset
+    auto jump = ireg::x30;
+    raw::adr(code, 0, jump);
+    raw::add(code, true, jump_offset, jump, jump);
+
     if (is_fast_compatible(wanted)) {
         purge(code, ireg::x17);
         force_value_into(code, &values[-1], ireg::x17, false);
@@ -2551,11 +2557,6 @@ HANDLER(br_table, std::span<ControlFlow> control_stack,
 
     discard(code, stack, wanted.size(), control_stack.back().stack_offset);
 
-    auto relative_point = code;
-    // $jump = PC + $jump_offset
-    auto &jump = result_offset;
-    raw::adr(code, 0, jump);
-    raw::add(code, true, jump_offset, jump, jump);
     raw::br(code, jump);
 
     raw::adr(adr_location, code - adr_location, addr);
