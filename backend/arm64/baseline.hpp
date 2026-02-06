@@ -285,22 +285,17 @@ class Arm64 {
 
     void push(value v);
 
-    class iwant {
-        struct thresholdless {
-            static constexpr uint64_t threshold = 0;
-        };
-
-      public:
-        struct none : thresholdless {};
-        struct ireg : thresholdless {};
-        struct freg : thresholdless {};
+    struct iwant {
+        struct none {};
+        using ireg = ireg;
+        using freg = freg;
         template <uint64_t t = 1ull << 32> struct literal {
             static constexpr uint64_t threshold = t;
         };
-        template <typename T> struct bitmask : thresholdless {
+        template <typename T> struct bitmask {
             using type = T;
         };
-        struct flags : thresholdless {};
+        struct flags {};
     };
 
     template <typename To> value adapt_value(std::byte *&code, value *v);

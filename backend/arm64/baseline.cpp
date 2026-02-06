@@ -1483,13 +1483,8 @@ void Arm64::push(value v) {
     stack_size += sizeof(runtime::WasmValue);
 }
 
-template <typename _To> value Arm64::adapt_value(std::byte *&code, value *v) {
-    using To = std::conditional_t<
-        std::is_same_v<_To, freg>, iwant::freg,
-        std::conditional_t<std::is_same_v<_To, ireg>, iwant::ireg, _To>>;
-
-    using RegType =
-        std::conditional_t<std::is_same_v<To, iwant::freg>, freg, ireg>;
+template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
+    using RegType = std::conditional_t<std::is_same_v<To, freg>, freg, ireg>;
 
     switch (v->where()) {
     case value::location::reg: {
@@ -1498,11 +1493,7 @@ template <typename _To> value Arm64::adapt_value(std::byte *&code, value *v) {
     }
     case value::location::stack: {
         auto offset = v->as<uint32_t>();
-        RegType reg;
-        if constexpr (std::is_same_v<To, iwant::freg>)
-            reg = floatregs.temporary(code, locals());
-        else
-            reg = intregs.temporary(code, locals());
+        auto reg = regs_of<RegType>().temporary(code, locals());
         masm::ldr(code, this, true, offset, stackreg, reg);
         return value::reg(reg);
     }
@@ -1601,22 +1592,19 @@ void Arm64::move_single(std::byte *&code, valtype ty, value *expected,
     }
 
     polymorph(ty, [&]<typename T>(T) {
-        std::optional<ireg> container;
-
         switch (expected->where()) {
         case value::location::reg: {
             if (discard_copied) {
                 surrender(expected->as<T>(), expected);
             }
             masm::str(code, this, true, dest, stackreg, expected->as<T>());
-            container = std::nullopt;
             break;
         }
         case value::location::stack: {
             auto reg = ireg::x30;
             auto offset = expected->as<uint32_t>();
             masm::ldr(code, this, true, offset, stackreg, reg);
-            container = reg;
+            masm::str(code, this, true, dest, stackreg, reg);
             break;
         }
         case value::location::imm: {
@@ -1626,7 +1614,7 @@ void Arm64::move_single(std::byte *&code, valtype ty, value *expected,
                 auto reg = ireg::x30;
                 auto imm = expected->as<uint32_t>();
                 masm::mov(code, imm, reg);
-                container = reg;
+                masm::str(code, this, true, dest, stackreg, reg);
                 break;
             }
         }
@@ -1638,14 +1626,10 @@ void Arm64::move_single(std::byte *&code, valtype ty, value *expected,
                     flag = flags();
                 auto reg = ireg::x30;
                 raw::cset(code, false, expected->as<cond>(), reg);
-                container = reg;
+                masm::str(code, this, true, dest, stackreg, reg);
                 break;
             }
         }
-        }
-
-        if (container) {
-            masm::str(code, this, true, dest, stackreg, *container);
         }
     });
 }
@@ -1662,15 +1646,12 @@ bool Arm64::move_results(std::byte *&code, std::span<valtype> copied_values,
                     false);
     }
 
-    auto has_move = start != code;
+    if (discard_copied) {
+        values -= copied_values.size();
+        stack_size -= bytesize(copied_values);
+    }
 
-    if (!discard_copied)
-        return has_move;
-
-    values -= copied_values.size();
-    stack_size -= bytesize(copied_values);
-
-    return has_move;
+    return start != code;
 }
 
 bool Arm64::move_block_results(std::byte *&code,
@@ -1822,8 +1803,7 @@ std::array<value, std::tuple_size_v<Params> +
                       !std::is_same_v<Result, Arm64::iwant::none>>
 Arm64::allocate_registers(std::byte *&code) {
     constexpr auto nparams = std::tuple_size_v<Params>;
-    std::array<value, nparams + !std::is_same_v<Result, Arm64::iwant::none>>
-        ret;
+    std::array<value, nparams + !std::is_same_v<Result, iwant::none>> ret;
 
     intregs.reset_temporaries();
     floatregs.reset_temporaries();
@@ -1838,14 +1818,8 @@ Arm64::allocate_registers(std::byte *&code) {
          ...);
     }(std::make_index_sequence<nparams>{});
 
-    if constexpr (std::is_same_v<Result, iwant::ireg> ||
-                  std::is_same_v<Result, ireg>) {
-        ret.back() = value::reg(intregs.result(code, locals()));
-    } else if constexpr (std::is_same_v<Result, iwant::freg> ||
-                         std::is_same_v<Result, freg>) {
-        ret.back() = value::reg(floatregs.result(code, locals()));
-    } else {
-        static_assert(std::is_same_v<Result, iwant::none>);
+    if constexpr (!std::is_same_v<Result, iwant::none>) {
+        ret.back() = value::reg(regs_of<Result>().result(code, locals()));
     }
 
     return ret;
@@ -2817,13 +2791,11 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
     stack_size -= sizeof(runtime::WasmValue);
 
     polymorph(ty, [&]<typename T>(T) {
-        constexpr bool is_float = std::is_same_v<T, freg>;
-
         auto in_callee_saved =
             local.is<value::location::reg>() && !is_volatile(local.as<T>());
 
         intregs.reset_temporaries();
-        if constexpr (is_float) {
+        if constexpr (std::is_same_v<T, freg>) {
             floatregs.reset_temporaries();
         }
 
@@ -2838,7 +2810,7 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
 
         switch (v.where()) {
         case value::location::imm:
-            if constexpr (is_float) {
+            if constexpr (std::is_same_v<T, freg>) {
                 assert(false);
             } else {
                 purge(code, locreg);
@@ -2846,7 +2818,7 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
                 break;
             }
         case value::location::flags:
-            if constexpr (is_float) {
+            if constexpr (std::is_same_v<T, freg>) {
                 assert(false);
             } else {
                 purge(code, locreg);
@@ -3516,17 +3488,13 @@ HANDLER(i64extend_i32_u) { unop<false, ireg>(code, stack, raw::mov); }
 template <typename FloatType>
 void Arm64::validate_trunc(std::byte *&code, freg v, FloatType lower,
                            FloatType upper) {
-    using IntType = std::conditional_t<std::is_same_v<FloatType, float>,
-                                       uint32_t, uint64_t>;
-    constexpr auto ft =
-        std::is_same_v<FloatType, float> ? ftype::single : ftype::double_;
-    constexpr auto sf = ft == ftype::double_;
-    constexpr auto nonfinite_value = ft == ftype::single
-                                         ? (IntType)0x7F80'0000
-                                         : (IntType)0x7FF0'0000'0000'0000;
-    constexpr auto signless_bits = ft == ftype::single
-                                       ? (IntType)0x7FFF'FFFF
-                                       : (IntType)0x7FFF'FFFF'FFFF'FFFF;
+    constexpr auto sf = std::is_same_v<FloatType, double>;
+    constexpr auto ft = sf ? ftype::double_ : ftype::single;
+    using IntType = std::conditional_t<sf, uint64_t, uint32_t>;
+    constexpr auto nonfinite_value =
+        sf ? (IntType)0x7FF0'0000'0000'0000 : (IntType)0x7F80'0000;
+    constexpr auto signless_bits =
+        sf ? (IntType)0x7FFF'FFFF'FFFF'FFFF : (IntType)0x7FFF'FFFF;
     static_assert(tryLogicalImm(signless_bits) != std::nullopt);
 
     spill_flags_to_stack(code);
