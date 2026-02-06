@@ -268,6 +268,9 @@ class Arm64 {
         }
     }
 
+    std::span<inst> nonleaf_cruft;
+    bool is_leaf = true;
+
     struct flags {
         // offset to spill into
         uint32_t stack_offset = 0;

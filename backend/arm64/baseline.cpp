@@ -2130,6 +2130,9 @@ void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
 HANDLER(start_function, FunctionShell &fn) {
     raw::stp(code, true, enctype::preidx, -0x20, ireg::x30, ireg::sp,
              ireg::x29);
+
+    auto nonleaf_start = code;
+
     raw::add(code, true, 0, ireg::sp, ireg::x29);
 
     constexpr auto exhaust_ptr = ireg::x17, exhaust = ireg::x16;
@@ -2147,6 +2150,8 @@ HANDLER(start_function, FunctionShell &fn) {
     raw::bcond(code, 0, cond::ne);
     masm::trap(code, runtime::TrapKind::call_stack_exhausted);
     amend_br_if(exhaustion, code);
+
+    nonleaf_cruft = std::span((inst *)nonleaf_start, (inst *)code);
 
     auto iparams = iargs.begin();
     auto fparams = fargs.begin();
@@ -2306,9 +2311,14 @@ HANDLER(exit_function, ControlFlow &flow) {
         }
     }
 
-    constexpr auto exhaust_ptr = ireg::x30, exhaust = ireg::x16;
-    raw::ldp(code, true, enctype::offset, 0x10, exhaust, ireg::sp, exhaust_ptr);
-    raw::str(code, false, exhaust_ptr, exhaust);
+    if (is_leaf) {
+        std::ranges::fill(nonleaf_cruft, noop);
+    } else {
+        constexpr auto exhaust_ptr = ireg::x30, exhaust = ireg::x16;
+        raw::ldp(code, true, enctype::offset, 0x10, exhaust, ireg::sp,
+                 exhaust_ptr);
+        raw::str(code, false, exhaust_ptr, exhaust);
+    }
 
     raw::ldp(code, true, enctype::pstidx, 0x20, ireg::x30, ireg::sp, ireg::x29);
     raw::ret(code);
@@ -2589,6 +2599,8 @@ HANDLER(return_, std::span<ControlFlow> control_stack) {
     br(code, stack, control_stack, control_stack.size() - 1);
 }
 HANDLER(call, FunctionShell &fn, uint32_t func_offset) {
+    is_leaf = false;
+
     intregs.deactivate_all(locals());
     floatregs.deactivate_all(locals());
 
@@ -2636,6 +2648,8 @@ HANDLER(call, FunctionShell &fn, uint32_t func_offset) {
     finalize(code);
 }
 HANDLER(call_indirect, uint32_t table_offset, WasmSignature &type) {
+    is_leaf = false;
+
     intregs.deactivate_all(locals());
     floatregs.deactivate_all(locals());
 
