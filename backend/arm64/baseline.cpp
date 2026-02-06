@@ -2596,33 +2596,39 @@ HANDLER(call, FunctionShell &fn, uint32_t func_offset) {
 
     conventionalize(code, stack, fn.type.params);
 
-    constexpr auto function_ptr = ireg::x30, signature = ireg::x17;
+    if (!fn.import && fn.start) {
+        masm::add(code, this, true, stack_size, stackreg, stackreg);
+        raw::bl(code, fn.start - code);
+        masm::sub(code, this, true, stack_size, stackreg, stackreg);
+    } else {
+        constexpr auto function_ptr = ireg::x30, signature = ireg::x17;
 
-    // load the FunctionInfo pointer
-    masm::ldr(code, this, true, func_offset * sizeof(void *), miscreg,
-              function_ptr);
-    if (fn.import) {
-        static_assert(offsetof(runtime::FunctionInfo, memory) +
-                          sizeof(void *) ==
-                      offsetof(runtime::FunctionInfo, misc));
+        // load the FunctionInfo pointer
+        masm::ldr(code, this, true, func_offset * sizeof(void *), miscreg,
+                  function_ptr);
+        if (fn.import) {
+            static_assert(offsetof(runtime::FunctionInfo, memory) +
+                              sizeof(void *) ==
+                          offsetof(runtime::FunctionInfo, misc));
 
-        raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t),
-                 miscreg, ireg::sp, memreg);
-        raw::ldp(code, true, enctype::offset,
-                 offsetof(runtime::FunctionInfo, memory), miscreg, function_ptr,
-                 memreg);
-    }
+            raw::stp(code, true, enctype::preidx, -2 * (int)sizeof(uint64_t),
+                     miscreg, ireg::sp, memreg);
+            raw::ldp(code, true, enctype::offset,
+                     offsetof(runtime::FunctionInfo, memory), miscreg,
+                     function_ptr, memreg);
+        }
 
-    raw::ldr(code, true, offsetof(runtime::FunctionInfo, custom_signature),
-             function_ptr, signature);
+        raw::ldr(code, true, offsetof(runtime::FunctionInfo, custom_signature),
+                 function_ptr, signature);
 
-    masm::add(code, this, true, stack_size, stackreg, stackreg);
-    raw::blr(code, signature);
-    masm::sub(code, this, true, stack_size, stackreg, stackreg);
+        masm::add(code, this, true, stack_size, stackreg, stackreg);
+        raw::blr(code, signature);
+        masm::sub(code, this, true, stack_size, stackreg, stackreg);
 
-    if (fn.import) {
-        raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), miscreg,
-                 ireg::sp, memreg);
+        if (fn.import) {
+            raw::ldp(code, true, enctype::pstidx, 2 * sizeof(uint64_t), miscreg,
+                     ireg::sp, memreg);
+        }
     }
 
     push_block_results(code, fn.type.results);
