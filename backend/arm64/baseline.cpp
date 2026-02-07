@@ -2148,10 +2148,23 @@ HANDLER(start_function, FunctionShell &fn) {
     auto ireg_alloc = icallee_saved.begin();
     auto freg_alloc = fcallee_saved.begin();
 
+    ssize_t n_callee_float_params = fcallee_saved.size(),
+            n_callee_int_params = icallee_saved.size();
+    for (auto local : std::span(fn.locals).subspan(fn.type.params.size())) {
+        if (is_float(local))
+            n_callee_float_params--;
+        else
+            n_callee_int_params--;
+    }
+
+    // allow for at least half the registers to go towards parameters
+    n_callee_float_params = std::max(12l, n_callee_float_params);
+    n_callee_int_params = std::max(5l, n_callee_int_params);
+
     struct save {
         bool is_float;
         int reg;
-        int offset;
+        uint64_t offset;
         std::byte *code;
     };
     std::optional<save> prev;
@@ -2164,6 +2177,11 @@ HANDLER(start_function, FunctionShell &fn) {
         auto offset = i * sizeof(runtime::WasmValue);
         auto is_param = i < fn.type.params.size();
 
+        // force reset the prev handling
+        // because parameters are handled differently
+        if (i == fn.type.params.size())
+            prev = std::nullopt;
+
         // mainly just here for .activate to know there isn't a register in the
         // local. could also make do with an invalid type but that's excessive
         // for this one place that it happens
@@ -2173,7 +2191,8 @@ HANDLER(start_function, FunctionShell &fn) {
             ireg_alloc != icallee_saved.end()) {
             auto reg = *ireg_alloc++;
             // save current value
-            if (prev && !prev->is_float && offset < 512) {
+            if (prev && !prev->is_float && prev->offset < 512 &&
+                prev->offset + sizeof(runtime::WasmValue) == offset) {
                 code = prev->code;
                 offset = prev->offset;
                 auto preg = (ireg)prev->reg;
@@ -2185,7 +2204,7 @@ HANDLER(start_function, FunctionShell &fn) {
 
                 prev = std::nullopt;
             } else {
-                prev = save{false, (int)reg, (int)offset, code};
+                prev = save{false, (int)reg, offset, code};
 
                 masm::str(code, this, true, offset, stackreg, reg);
                 raw::mov(code, true, ireg::xzr, reg);
@@ -2196,7 +2215,8 @@ HANDLER(start_function, FunctionShell &fn) {
                    freg_alloc != fcallee_saved.end()) {
             auto reg = *freg_alloc++;
             // save current value
-            if (prev && prev->is_float && offset < 512) {
+            if (prev && prev->is_float && prev->offset < 512 &&
+                prev->offset + sizeof(runtime::WasmValue) == offset) {
                 code = prev->code;
                 offset = prev->offset;
                 auto preg = (freg)prev->reg;
@@ -2208,7 +2228,7 @@ HANDLER(start_function, FunctionShell &fn) {
 
                 prev = std::nullopt;
             } else {
-                prev = save{true, (int)reg, (int)offset, code};
+                prev = save{true, (int)reg, offset, code};
 
                 masm::str(code, this, true, offset, stackreg, reg);
                 raw::mov(code, true, ftype::double_, ireg::xzr, reg);
@@ -2216,11 +2236,33 @@ HANDLER(start_function, FunctionShell &fn) {
 
             locals()[i] = value::reg(reg);
         } else if (is_param && is_float(local) && fparams != fargs.end()) {
-            auto reg = *fparams++;
-            floatregs.activate(code, locals(), i, reg, true);
+            auto param = *fparams++;
+
+            if (n_callee_float_params) {
+                n_callee_float_params--;
+                auto reg = *freg_alloc++;
+
+                masm::str(code, this, true, offset, stackreg, reg);
+                raw::mov(code, ftype::double_, param, reg);
+
+                locals()[i] = value::reg(reg);
+            } else {
+                floatregs.activate(code, locals(), i, param, true);
+            }
         } else if (is_param && !is_float(local) && iparams != iargs.end()) {
-            auto reg = *iparams++;
-            intregs.activate(code, locals(), i, reg, true);
+            auto param = *iparams++;
+
+            if (n_callee_int_params) {
+                n_callee_int_params--;
+                auto reg = *ireg_alloc++;
+
+                masm::str(code, this, true, offset, stackreg, reg);
+                raw::mov(code, true, param, reg);
+
+                locals()[i] = value::reg(reg);
+            } else {
+                intregs.activate(code, locals(), i, param, true);
+            }
         } else {
             if (!is_param) {
                 masm::str(code, this, true, offset, stackreg, ireg::xzr);
@@ -2235,7 +2277,7 @@ HANDLER(exit_function, ControlFlow &flow) {
     struct restore {
         valtype ty;
         int reg;
-        int offset;
+        uint64_t offset;
         std::byte *code;
     };
     std::optional<restore> prev;
@@ -2252,7 +2294,8 @@ HANDLER(exit_function, ControlFlow &flow) {
         auto offset = i * sizeof(runtime::WasmValue);
 
         if (is_float(fn.locals[i])) {
-            if (prev && prev->ty == fn.locals[i] && offset < 512) {
+            if (prev && prev->ty == fn.locals[i] && prev->offset < 512 &&
+                prev->offset + sizeof(runtime::WasmValue) == offset) {
                 code = prev->code;
                 offset = prev->offset;
 
@@ -2262,13 +2305,14 @@ HANDLER(exit_function, ControlFlow &flow) {
                 prev = std::nullopt;
             } else {
                 prev = restore{fn.locals[i], (int)locals()[i].as<freg>(),
-                               (int)offset, code};
+                               offset, code};
 
                 masm::ldr(code, this, true, offset, stackreg,
                           locals()[i].as<freg>());
             }
         } else {
-            if (prev && prev->ty == fn.locals[i] && offset < 512) {
+            if (prev && prev->ty == fn.locals[i] && prev->offset < 512 &&
+                prev->offset + sizeof(runtime::WasmValue) == offset) {
                 code = prev->code;
                 offset = prev->offset;
 
@@ -2278,7 +2322,7 @@ HANDLER(exit_function, ControlFlow &flow) {
                 prev = std::nullopt;
             } else {
                 prev = restore{fn.locals[i], (int)locals()[i].as<ireg>(),
-                               (int)offset, code};
+                               offset, code};
 
                 masm::ldr(code, this, true, offset, stackreg,
                           locals()[i].as<ireg>());
