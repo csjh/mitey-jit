@@ -317,6 +317,7 @@ class Arm64 {
     void push_block_results(std::byte *&code, std::span<valtype> values);
     void discard(std::byte *&code, WasmStack &stack, uint32_t skip,
                  uint32_t discard_to);
+    void drop(std::byte *&code, valtype type);
 
     template <auto t, typename Ty>
     void unop(SHARED_PARAMS, void (*op)(std::byte *&, decltype(t), Ty, Ty));
@@ -372,7 +373,7 @@ class Arm64 {
     void __attribute__((noinline, preserve_most))
     negotiate_registers_slowpath(std::byte *&, std::span<edge<T>>);
 
-    void conventionalize(std::byte *&, WasmStack &, std::span<valtype>);
+    void conventionalize(std::byte *&, std::span<valtype>);
 
   public:
     // todo: figure out what values for these

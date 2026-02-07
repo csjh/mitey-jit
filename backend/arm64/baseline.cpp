@@ -1660,10 +1660,9 @@ bool Arm64::move_block_results(std::byte *&code,
     if (is_fast_compatible(copied_values)) {
         auto start = code;
         if (discard_copied) {
+            drop(code, valtype::i32);
             purge(code, ireg::x17);
-            force_value_into(code, &values[-1], ireg::x17, false);
-            values--;
-            stack_size -= sizeof(runtime::WasmValue);
+            force_value_into(code, &values[0], ireg::x17, true);
         } else {
             assert(intregs.is_free(ireg::x17));
             force_value_into(code, &values[-1], ireg::x17, true);
@@ -1685,14 +1684,32 @@ void Arm64::push_block_results(std::byte *&code, std::span<valtype> values) {
     }
 }
 
+void Arm64::drop(std::byte *&code, valtype type) {
+    values--;
+    stack_size -= sizeof(runtime::WasmValue);
+
+    switch (values->where()) {
+    case value::location::reg:
+        polymorph(type,
+                  [&]<typename T>(T) { surrender(values->as<T>(), values); });
+        break;
+    case value::location::stack:
+        break;
+    case value::location::imm:
+        break;
+    case value::location::flags:
+        flag = flags();
+        break;
+    }
+}
+
 void Arm64::discard(std::byte *&code, WasmStack &stack, uint32_t skip,
                     uint32_t to) {
     auto discarded = (stack_size - to) / sizeof(runtime::WasmValue);
 
     auto excess = stack.rbegin() + skip;
     for (size_t i = 0; i < discarded; i++) {
-        drop(code, stack, *excess);
-        excess++;
+        drop(code, *excess++);
     }
 }
 
@@ -2024,10 +2041,9 @@ void Arm64::negotiate_registers(std::byte *&code,
     return negotiate_registers_slowpath(code, param_edges);
 }
 
-void Arm64::conventionalize(std::byte *&code, WasmStack &stack,
-                            std::span<valtype> type) {
+void Arm64::conventionalize(std::byte *&code, std::span<valtype> type) {
     for (size_t i = type.size(); i > 0; i--) {
-        drop(code, stack, type[i - 1]);
+        drop(code, type[i - 1]);
     }
 
     spill_flags_to_stack(code);
@@ -2301,8 +2317,7 @@ HANDLER(exit_function, ControlFlow &flow) {
 HANDLER(unreachable) {
     auto v = stack.rbegin();
     while (*v != valtype::null) {
-        drop(code, stack, *v);
-        v++;
+        drop(code, *v++);
     }
 
     masm::trap(code, runtime::TrapKind::unreachable);
@@ -2580,7 +2595,7 @@ HANDLER(call, FunctionShell &fn, uint32_t func_offset) {
 
     allocate_registers<std::tuple<>>(code);
 
-    conventionalize(code, stack, fn.type.params);
+    conventionalize(code, fn.type.params);
 
     if (!fn.import && fn.start) {
         masm::add(code, this, true, stack_size, stackreg, stackreg);
@@ -2635,7 +2650,7 @@ HANDLER(call_indirect, uint32_t table_offset, WasmSignature &type) {
     constexpr auto tmp_index = freg::d31;
     raw::mov(code, true, ftype::big, rmode::top_half, v.as<ireg>(), tmp_index);
 
-    conventionalize(code, stack, type.params);
+    conventionalize(code, type.params);
 
     // recover the index from d0
     constexpr auto idx = ireg::x30;
@@ -2717,24 +2732,7 @@ HANDLER(call_indirect, uint32_t table_offset, WasmSignature &type) {
 
     finalize(code);
 }
-HANDLER(drop, valtype type) {
-    values--;
-    stack_size -= sizeof(runtime::WasmValue);
-
-    switch (values->where()) {
-    case value::location::reg:
-        polymorph(type,
-                  [&]<typename T>(T) { surrender(values->as<T>(), values); });
-        break;
-    case value::location::stack:
-        break;
-    case value::location::imm:
-        break;
-    case value::location::flags:
-        flag = flags();
-        break;
-    }
-}
+HANDLER(drop, valtype type) { drop(code, type); }
 HANDLER(select, valtype vtype) {
     polymorph(vtype, [&]<typename T>(T) {
         auto [v1, v2, condition, res] =
@@ -2779,7 +2777,7 @@ HANDLER(localget, FunctionShell &fn, uint32_t local_idx) {
 }
 HANDLER(localset, FunctionShell &fn, uint32_t local_idx) {
     localtee(code, stack, fn, local_idx);
-    drop(code, stack, fn.locals[local_idx]);
+    drop(code, fn.locals[local_idx]);
 }
 HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
     // i don't like that this specializes allocate_registers
