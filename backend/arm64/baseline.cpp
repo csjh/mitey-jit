@@ -1536,12 +1536,9 @@ template <typename To> value Arm64::adapt_value(std::byte *&code, value *v) {
 }
 
 template <typename To>
-void Arm64::force_value_into(std::byte *&code, value *v, To reg, bool soft) {
+void Arm64::force_value_into(std::byte *&code, value *v, To reg) {
     switch (v->where()) {
     case value::location::reg: {
-        if (!soft) {
-            surrender(v->as<To>(), v);
-        }
         if (v->template as<To>() != reg) {
             raw::mov(code, true, v->as<To>(), reg);
         }
@@ -1565,8 +1562,6 @@ void Arm64::force_value_into(std::byte *&code, value *v, To reg, bool soft) {
         if constexpr (std::is_same_v<To, freg>) {
             assert(false);
         } else {
-            if (!soft)
-                flag = flags();
             raw::cset(code, false, v->as<cond>(), reg);
             return;
         }
@@ -1576,16 +1571,8 @@ void Arm64::force_value_into(std::byte *&code, value *v, To reg, bool soft) {
     assert(false);
 }
 
-template <typename To>
-Arm64::temporary<To> Arm64::adapt_value_into(std::byte *&code, value *v,
-                                             bool soft) {
-    temporary<To> reg(this, code);
-    force_value_into(code, v, reg.get(), soft);
-    return reg;
-}
-
 void Arm64::move_single(std::byte *&code, valtype ty, value *expected,
-                        uint32_t dest, bool discard_copied, bool constrained) {
+                        uint32_t dest) {
     if (expected->is<value::location::stack>() &&
         expected->as<uint32_t>() == dest) {
         return;
@@ -1594,9 +1581,6 @@ void Arm64::move_single(std::byte *&code, valtype ty, value *expected,
     polymorph(ty, [&]<typename T>(T) {
         switch (expected->where()) {
         case value::location::reg: {
-            if (discard_copied) {
-                surrender(expected->as<T>(), expected);
-            }
             masm::str(code, this, true, dest, stackreg, expected->as<T>());
             break;
         }
@@ -1622,8 +1606,6 @@ void Arm64::move_single(std::byte *&code, valtype ty, value *expected,
             if constexpr (std::is_same_v<T, freg>) {
                 assert(false);
             } else {
-                if (discard_copied)
-                    flag = flags();
                 auto reg = ireg::x30;
                 raw::cset(code, false, expected->as<cond>(), reg);
                 masm::str(code, this, true, dest, stackreg, reg);
@@ -1638,17 +1620,13 @@ bool Arm64::move_results(std::byte *&code, std::span<valtype> copied_values,
                          uint32_t stack_offset, bool discard_copied) {
     auto start = code;
 
-    auto expected = values - copied_values.size();
     for (auto i = ssize_t(copied_values.size()) - 1; i >= 0; i--) {
         auto dest = stack_offset + i * sizeof(runtime::WasmValue);
 
-        move_single(code, copied_values[i], &expected[i], dest, discard_copied,
-                    false);
-    }
+        move_single(code, copied_values[i], &values[-1], dest);
 
-    if (discard_copied) {
-        values -= copied_values.size();
-        stack_size -= bytesize(copied_values);
+        if (discard_copied)
+            drop(code, copied_values[i]);
     }
 
     return start != code;
@@ -1662,10 +1640,10 @@ bool Arm64::move_block_results(std::byte *&code,
         if (discard_copied) {
             drop(code, valtype::i32);
             purge(code, ireg::x17);
-            force_value_into(code, &values[0], ireg::x17, true);
+            force_value_into(code, &values[0], ireg::x17);
         } else {
             assert(intregs.is_free(ireg::x17));
-            force_value_into(code, &values[-1], ireg::x17, true);
+            force_value_into(code, &values[-1], ireg::x17);
         }
         return code != start;
     } else {
@@ -2083,7 +2061,7 @@ void Arm64::conventionalize(std::byte *&code, std::span<valtype> type) {
                     nonreg_fparams[n_nonreg_float++] = {&v, fargs[n_float]};
                 }
             } else {
-                move_single(code, ty, &v, stack_offset, false, true);
+                move_single(code, ty, &v, stack_offset);
             }
         } else {
             n_int--;
@@ -2096,7 +2074,7 @@ void Arm64::conventionalize(std::byte *&code, std::span<valtype> type) {
                     nonreg_iparams[n_nonreg_int++] = {&v, iargs[n_int]};
                 }
             } else {
-                move_single(code, ty, &v, stack_offset, false, true);
+                move_single(code, ty, &v, stack_offset);
             }
         }
     }
@@ -2106,11 +2084,11 @@ void Arm64::conventionalize(std::byte *&code, std::span<valtype> type) {
 
     while (n_nonreg_int) {
         auto pair = nonreg_iparams[--n_nonreg_int];
-        force_value_into(code, pair.src, pair.dest, true);
+        force_value_into(code, pair.src, pair.dest);
     }
     while (n_nonreg_float) {
         auto pair = nonreg_fparams[--n_nonreg_float];
-        force_value_into(code, pair.src, pair.dest, true);
+        force_value_into(code, pair.src, pair.dest);
     }
 }
 
@@ -2580,23 +2558,22 @@ HANDLER(br_table, std::span<ControlFlow> control_stack,
     raw::add(code, true, jump_offset, jump, jump);
 
     if (is_fast_compatible(wanted)) {
+        drop(code, valtype::i32);
         purge(code, ireg::x17);
-        force_value_into(code, &values[-1], ireg::x17, false);
+        force_value_into(code, &values[0], ireg::x17);
     } else {
-        auto expected = values - wanted.size();
+        auto &reg = jump_offset;
         for (auto i = ssize_t(wanted.size()) - 1; i >= 0; i--) {
             polymorph(wanted[i], [&]<typename T>(T) {
-                auto reg = adapt_value_into<T>(code, &expected[i]);
+                force_value_into(code, &values[-1], reg.get());
                 raw::load(code, memtype::x, resexttype::str, indexttype::lsl,
                           false, result_offset, stackreg, reg);
                 raw::sub(code, true, sizeof(runtime::WasmValue), result_offset,
                          result_offset);
             });
+            drop(code, wanted[i]);
         }
     }
-
-    values -= wanted.size();
-    stack_size -= bytesize(wanted);
 
     discard(code, stack, wanted.size(), control_stack.back().stack_offset);
 
@@ -2828,9 +2805,9 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
     // but tbf it's the only place i need to do it
     auto ty = fn.locals[local_idx];
     auto local = locals()[local_idx];
+    auto v = values[-1];
 
-    auto v = *--values;
-    stack_size -= sizeof(runtime::WasmValue);
+    drop(code, ty);
 
     polymorph(ty, [&]<typename T>(T) {
         auto in_callee_saved =
@@ -2865,7 +2842,6 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
             } else {
                 purge(code, locreg);
                 raw::cset(code, true, v.as<cond>(), locreg);
-                flag = flags();
                 break;
             }
         case value::location::stack:
@@ -2874,7 +2850,6 @@ HANDLER(localtee, FunctionShell &fn, uint32_t local_idx) {
             break;
         case value::location::reg: {
             auto reg = v.as<T>();
-            surrender(reg, values);
 
             if (in_callee_saved && can_overwrite(reg, code)) {
                 // overwrite instruction

@@ -301,15 +301,10 @@ class Arm64 {
     template <typename To> value adapt_value(std::byte *&code, value *v);
 
     template <typename To>
-    void force_value_into(std::byte *&code, value *v, To reg,
-                          bool soft = false);
-
-    template <typename To>
-    temporary<To> adapt_value_into(std::byte *&code, value *v,
-                                   bool soft = false);
+    void force_value_into(std::byte *&code, value *v, To reg);
 
     void move_single(std::byte *&code, valtype ty, value *expected,
-                     uint32_t dest, bool discard_copied, bool constrained);
+                     uint32_t dest);
     bool move_results(std::byte *&code, std::span<valtype> copied_values,
                       uint32_t copy_to, bool discard_copied);
     bool move_block_results(std::byte *&code, std::span<valtype> copied_values,
