@@ -2135,9 +2135,9 @@ HANDLER(start_function, FunctionShell &fn) {
             n_callee_int_params--;
     }
 
-    // allow for at least half the registers to go towards parameters
+    // values taken from averaging over a bunch of binaries' optimal #s
     n_callee_float_params = std::max(12l, n_callee_float_params);
-    n_callee_int_params = std::max(5l, n_callee_int_params);
+    n_callee_int_params = std::max(4l, n_callee_int_params);
 
     struct save {
         bool is_float;
