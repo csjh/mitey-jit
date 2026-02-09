@@ -1620,10 +1620,11 @@ bool Arm64::move_results(std::byte *&code, std::span<valtype> copied_values,
                          uint32_t stack_offset, bool discard_copied) {
     auto start = code;
 
+    auto expected = values - copied_values.size();
     for (auto i = ssize_t(copied_values.size()) - 1; i >= 0; i--) {
         auto dest = stack_offset + i * sizeof(runtime::WasmValue);
 
-        move_single(code, copied_values[i], &values[-1], dest);
+        move_single(code, copied_values[i], &expected[i], dest);
 
         if (discard_copied)
             drop(code, copied_values[i]);
@@ -1635,7 +1636,9 @@ bool Arm64::move_results(std::byte *&code, std::span<valtype> copied_values,
 bool Arm64::move_block_results(std::byte *&code,
                                std::span<valtype> copied_values,
                                uint32_t stack_offset, bool discard_copied) {
-    if (is_fast_compatible(copied_values)) {
+    if (copied_values.empty()) {
+        return false;
+    } else if (is_fast_compatible(copied_values)) {
         auto start = code;
         if (discard_copied) {
             drop(code, valtype::i32);
@@ -1646,16 +1649,18 @@ bool Arm64::move_block_results(std::byte *&code,
             force_value_into(code, &values[-1], ireg::x17);
         }
         return code != start;
-    } else {
+    } else [[unlikely]] {
         return move_results(code, copied_values, stack_offset, discard_copied);
     }
 }
 
 void Arm64::push_block_results(std::byte *&code, std::span<valtype> values) {
-    if (is_fast_compatible(values)) {
+    if (values.empty()) {
+        return;
+    } else if (is_fast_compatible(values)) {
         use_no_overwrite(code, ireg::x17);
         push(value::reg(ireg::x17));
-    } else {
+    } else [[unlikely]] {
         for ([[maybe_unused]] auto param : values) {
             push(value::stack(stack_size));
         }
@@ -2027,14 +2032,6 @@ void Arm64::conventionalize(std::byte *&code, std::span<valtype> type) {
     spill_flags_to_stack(code);
     spill_registers(code);
 
-    size_t n_float = 0;
-    for (size_t i = 0; i < type.size(); i++) {
-        if (is_float(type[i])) {
-            n_float++;
-        }
-    }
-    size_t n_int = type.size() - n_float;
-
     // todo: make an inplace_vector implementation somewhere
     std::array<edge<value *, ireg>, iargs.size()> nonreg_iparams;
     std::array<edge<value *, freg>, fargs.size()> nonreg_fparams;
@@ -2044,34 +2041,36 @@ void Arm64::conventionalize(std::byte *&code, std::span<valtype> type) {
     std::array<edge<freg>, fargs.size()> reg_fparams;
     size_t n_reg_int = 0, n_reg_float = 0;
 
-    for (size_t i = type.size(); i > 0; i--) {
-        auto &v = values[i - 1];
-        auto ty = type[i - 1];
-        auto stack_offset = stack_size + (i - 1) * sizeof(runtime::WasmValue);
+    auto iarg_alloc = iargs.begin();
+    auto farg_alloc = fargs.begin();
+
+    for (size_t i = 0; i < type.size(); i++) {
+        auto &v = values[i];
+        auto ty = type[i];
+        auto stack_offset = stack_size + i * sizeof(runtime::WasmValue);
 
         if (is_float(ty)) [[unlikely]] {
-            n_float--;
-            if (n_float < fargs.size()) [[likely]] {
+            if (farg_alloc < fargs.end()) [[likely]] {
+                auto reg = *farg_alloc++;
                 if (v.is<value::location::reg>()) [[likely]] {
-                    if (v.as<freg>() != fargs[n_float]) [[likely]] {
-                        reg_fparams[n_reg_float++] = {v.as<freg>(),
-                                                      fargs[n_float]};
+                    if (v.as<freg>() != reg) [[likely]] {
+                        reg_fparams[n_reg_float++] = {v.as<freg>(), reg};
                     }
                 } else {
-                    nonreg_fparams[n_nonreg_float++] = {&v, fargs[n_float]};
+                    nonreg_fparams[n_nonreg_float++] = {&v, reg};
                 }
             } else {
                 move_single(code, ty, &v, stack_offset);
             }
         } else {
-            n_int--;
-            if (n_int < iargs.size()) [[likely]] {
+            if (iarg_alloc < iargs.end()) [[likely]] {
+                auto reg = *iarg_alloc++;
                 if (v.is<value::location::reg>()) [[likely]] {
-                    if (v.as<ireg>() != iargs[n_int]) [[likely]] {
-                        reg_iparams[n_reg_int++] = {v.as<ireg>(), iargs[n_int]};
+                    if (v.as<ireg>() != reg) [[likely]] {
+                        reg_iparams[n_reg_int++] = {v.as<ireg>(), reg};
                     }
                 } else {
-                    nonreg_iparams[n_nonreg_int++] = {&v, iargs[n_int]};
+                    nonreg_iparams[n_nonreg_int++] = {&v, reg};
                 }
             } else {
                 move_single(code, ty, &v, stack_offset);
@@ -2082,13 +2081,11 @@ void Arm64::conventionalize(std::byte *&code, std::span<valtype> type) {
     negotiate_registers(code, std::span(reg_iparams.data(), n_reg_int));
     negotiate_registers(code, std::span(reg_fparams.data(), n_reg_float));
 
-    while (n_nonreg_int) {
-        auto pair = nonreg_iparams[--n_nonreg_int];
-        force_value_into(code, pair.src, pair.dest);
+    for (auto [src, dest] : std::span(nonreg_iparams.data(), n_nonreg_int)) {
+        force_value_into(code, src, dest);
     }
-    while (n_nonreg_float) {
-        auto pair = nonreg_fparams[--n_nonreg_float];
-        force_value_into(code, pair.src, pair.dest);
+    for (auto [src, dest] : std::span(nonreg_fparams.data(), n_nonreg_float)) {
+        force_value_into(code, src, dest);
     }
 }
 
@@ -2308,8 +2305,9 @@ HANDLER(exit_function, ControlFlow &flow) {
         }
     }
 
-    if (is_fast_compatible(fn.type.results)) {
-        // result is already in x17
+    if (fn.type.results.empty() || is_fast_compatible(fn.type.results)) {
+        [[likely]];
+        // no result, or result is already in x17
     } else if (auto local_bytes = bytesize(fn.locals)) {
         // return values should be in [local_bytes, ...), so copy them backwards
         // into the local area
@@ -2557,11 +2555,13 @@ HANDLER(br_table, std::span<ControlFlow> control_stack,
     raw::adr(code, 0, jump);
     raw::add(code, true, jump_offset, jump, jump);
 
-    if (is_fast_compatible(wanted)) {
+    if (wanted.empty()) {
+        // nothing to move, just jump
+    } else if (is_fast_compatible(wanted)) {
         drop(code, valtype::i32);
         purge(code, ireg::x17);
         force_value_into(code, &values[0], ireg::x17);
-    } else {
+    } else [[unlikely]] {
         auto &reg = jump_offset;
         for (auto i = ssize_t(wanted.size()) - 1; i >= 0; i--) {
             polymorph(wanted[i], [&]<typename T>(T) {
