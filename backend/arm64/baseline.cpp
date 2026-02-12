@@ -1,5 +1,6 @@
 #include "./baseline.hpp"
 #include "../../type-templates.hpp"
+#include <bit>
 #include <csignal>
 #include <cstring>
 #include <limits>

@@ -230,9 +230,6 @@ class Module {
     void initialize(std::span<uint8_t> bytes);
 
   public:
-    static constexpr uint32_t MAX_PAGES = 65536;
-    static constexpr uint32_t MAX_LOCALS = 50000;
-
     template <typename Pager, typename Target>
     static std::shared_ptr<Module> compile(std::span<uint8_t> bytes) {
         auto mod = std::shared_ptr<Module>(new Module());

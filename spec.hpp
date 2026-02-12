@@ -507,4 +507,28 @@ static inline bool is_instruction(uint8_t byte) {
 #undef DEFINE_EQ
     return false;
 }
+
+namespace limits {
+// limits copied from v8
+
+constexpr size_t MaxMemoryPages = 65'536;
+
+constexpr size_t MaxWasmTypes = 1'000'000;
+constexpr size_t MaxWasmDefinedFunctions = 1'000'000;
+constexpr size_t MaxWasmImports = 1'000'000;
+constexpr size_t MaxWasmExports = 1'000'000;
+constexpr size_t MaxWasmGlobals = 1'000'000;
+constexpr size_t MaxWasmTags = 1'000'000;
+constexpr size_t MaxWasmDataSegments = 100'000;
+constexpr size_t MaxWasmFunctionSize = 7'654'321;
+constexpr size_t MaxWasmFunctionLocals = 50'000;
+constexpr size_t MaxWasmFunctionParams = 1'000;
+constexpr size_t MaxWasmFunctionReturns = 1'000;
+constexpr size_t MaxWasmFunctionBrTableSize = 65'520;
+constexpr size_t MaxWasmTableSize = 10'000'000;
+constexpr size_t MaxWasmTableInitEntries = 10'000'000;
+constexpr size_t MaxWasmTables = 100'000;
+constexpr size_t MaxWasmMemories = 100'000;
+} // namespace limits
+
 } // namespace mitey

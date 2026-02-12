@@ -174,6 +174,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
     // type section
     section(1, [&] {
         auto n_types = safe_read_leb128<uint32_t>(iter);
+        ensure(n_types <= limits::MaxWasmTypes, "too many types");
 
         types.reserve(n_types);
 
@@ -191,21 +192,23 @@ void Module::initialize(std::span<uint8_t> bytes) {
             auto fn = WasmSignature({}, {});
 
             auto n_params = safe_read_leb128<uint32_t>(iter);
+            ensure(n_params <= limits::MaxWasmFunctionParams,
+                   "too many parameters");
+
             fn.params.reserve(n_params);
             for (uint32_t j = 0; j < n_params; ++j) {
-                if (!is_valtype(iter[j])) {
-                    error<validation_error>("invalid parameter type");
-                }
+                ensure(is_valtype(iter[j]), "invalid parameter type");
                 fn.params.push_back(static_cast<valtype>(iter[j]));
             }
             iter += n_params;
 
             auto n_results = safe_read_leb128<uint32_t>(iter);
+            ensure(n_results <= limits::MaxWasmFunctionReturns,
+                   "too many results");
+
             fn.results.reserve(n_results);
             for (uint32_t j = 0; j < n_results; ++j) {
-                if (!is_valtype(iter[j])) {
-                    error<validation_error>("invalid result type");
-                }
+                ensure(is_valtype(iter[j]), "invalid result type");
                 fn.results.push_back(static_cast<valtype>(iter[j]));
             }
             iter += n_results;
@@ -221,6 +224,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
     // import section
     section(2, [&] {
         auto n_imports = safe_read_leb128<uint32_t>(iter);
+        ensure(n_imports <= limits::MaxWasmImports, "too many imports");
 
         for (uint32_t i = 0; i < n_imports; i++) {
             if (iter.empty()) {
@@ -258,9 +262,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
             if (desc == ImExDesc::func) {
                 // func
                 auto typeidx = safe_read_leb128<uint32_t>(iter);
-                if (typeidx >= types.size()) {
-                    error<validation_error>("unknown type");
-                }
+                ensure(typeidx < types.size(), "unknown type");
                 functions.emplace_back(nullptr, nullptr, specifier,
                                        types[typeidx], std::vector<valtype>{},
                                        false);
@@ -277,9 +279,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                                     specifier);
             } else if (desc == ImExDesc::mem) {
                 // mem
-                if (memory.exists) {
-                    error<validation_error>("multiple memories");
-                }
+                ensure(!memory.exists, "multiple memories");
 
                 auto [initial, max] = get_memory_limits(iter);
                 this->memory = {initial, max, true, specifier};
@@ -306,7 +306,10 @@ void Module::initialize(std::span<uint8_t> bytes) {
     // function type section
     section(3, [&] {
         auto n_functions = safe_read_leb128<uint32_t>(iter);
+        auto total_functions = functions.size() + n_functions;
 
+        ensure(total_functions <= limits::MaxWasmDefinedFunctions,
+               "too many functions");
         functions.reserve(functions.size() + n_functions);
 
         for (uint32_t i = 0; i < n_functions; ++i) {
@@ -315,9 +318,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
             }
 
             auto type_idx = safe_read_leb128<uint32_t>(iter);
-            if (type_idx >= types.size()) {
-                error<validation_error>("unknown type");
-            }
+            ensure(type_idx < types.size(), "unknown type");
 
             functions.emplace_back(nullptr, nullptr, std::nullopt,
                                    types[type_idx], std::vector<valtype>{},
@@ -330,6 +331,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
     // table section
     section(4, [&] {
         auto n_tables = safe_read_leb128<uint32_t>(iter);
+        ensure(n_tables <= limits::MaxWasmTables, "too many tables");
         tables.reserve(n_tables);
 
         for (uint32_t i = 0; i < n_tables; ++i) {
@@ -338,9 +340,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
             }
 
             auto elem_type = *iter++;
-            if (!is_reftype(elem_type)) {
-                error<validation_error>("invalid table element type");
-            }
+            ensure(is_reftype(elem_type), "invalid table element type");
 
             auto [initial, max] = get_table_limits(iter);
             tables.emplace_back(initial, max, static_cast<valtype>(elem_type),
@@ -353,15 +353,12 @@ void Module::initialize(std::span<uint8_t> bytes) {
     // memory section
     section(5, [&] {
         auto n_memories = safe_read_leb128<uint32_t>(iter);
-        if (n_memories > 1) {
-            error<validation_error>("multiple memories");
-        } else if (n_memories == 1) {
+        ensure(n_memories <= 1, "multiple memories");
+        if (n_memories == 1) {
             if (iter.empty()) {
                 error<malformed_error>("unexpected end of section or function");
             }
-            if (memory.exists) {
-                error<validation_error>("multiple memories");
-            }
+            ensure(!memory.exists, "multiple memories");
 
             auto [initial, max] = get_memory_limits(iter);
             memory = {initial, max, true, std::nullopt};
@@ -373,7 +370,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
     // global section
     section(6, [&] {
         auto n_globals = safe_read_leb128<uint32_t>(iter);
-
+        ensure(n_globals <= limits::MaxWasmGlobals, "too many globals");
         globals.reserve(n_globals);
 
         for (uint32_t i = 0; i < n_globals; ++i) {
@@ -405,6 +402,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
     // export section
     section(7, [&] {
         auto n_exports = safe_read_leb128<uint32_t>(iter);
+        ensure(n_exports <= limits::MaxWasmExports, "too many exports");
 
         for (uint32_t i = 0; i < n_exports; ++i) {
             if (iter.empty()) {
@@ -418,35 +416,23 @@ void Module::initialize(std::span<uint8_t> bytes) {
             iter += name_len;
 
             auto desc = *iter++;
-            if (!is_imexdesc(desc)) {
-                error<validation_error>("invalid export description");
-            }
+            ensure(is_imexdesc(desc), "invalid export description");
             auto export_desc = static_cast<ImExDesc>(desc);
 
             auto idx = safe_read_leb128<uint32_t>(iter);
 
-            if (exports.contains(name)) {
-                error<validation_error>("duplicate export name");
-            }
+            ensure(!exports.contains(name), "duplicate export name");
 
             if (export_desc == ImExDesc::func) {
-                if (idx >= functions.size()) {
-                    error<validation_error>("unknown function");
-                }
+                ensure(idx < functions.size(), "unknown function");
                 // implicit declaration
                 functions[idx].is_declared = true;
             } else if (export_desc == ImExDesc::table) {
-                if (idx >= tables.size()) {
-                    error<validation_error>("unknown table");
-                }
+                ensure(idx < tables.size(), "unknown table");
             } else if (export_desc == ImExDesc::mem) {
-                if (idx != 0 || !memory.exists) {
-                    error<validation_error>("unknown memory");
-                }
+                ensure(idx == 0 && memory.exists, "unknown memory");
             } else if (export_desc == ImExDesc::global) {
-                if (idx >= globals.size()) {
-                    error<validation_error>("unknown global");
-                }
+                ensure(idx < globals.size(), "unknown global");
             }
             exports[name] = {export_desc, idx};
         }
@@ -458,9 +444,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
         8,
         [&] {
             start = safe_read_leb128<uint32_t>(iter);
-            if (start >= functions.size()) {
-                error<validation_error>("unknown function");
-            }
+            ensure(start < functions.size(), "unknown function");
         },
         [&] { start = std::numeric_limits<uint32_t>::max(); });
 
@@ -469,6 +453,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
     // element section
     section(9, [&] {
         auto n_elements = safe_read_leb128<uint32_t>(iter);
+        ensure(n_elements <= limits::MaxWasmTableSize,
+               "too many element segments");
 
         elements.reserve(n_elements);
 
@@ -479,9 +465,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
             }
 
             auto flags = safe_read_leb128<uint32_t>(iter);
-            if (flags & ~0b111) {
-                error<validation_error>("invalid element flags");
-            }
+            ensure(flags <= 0b111, "invalid element flags");
 
             if (flags & 1) {
                 if (flags & 0b10) {
@@ -503,15 +487,13 @@ void Module::initialize(std::span<uint8_t> bytes) {
                         // flags = 3
                         // characteristics: declarative, elem kind + indices
                         auto elemkind = *iter++;
-                        if (elemkind != 0) {
-                            error<validation_error>("invalid elemkind");
-                        }
+                        ensure(elemkind == 0, "invalid elemkind");
+
                         auto n_elements = safe_read_leb128<uint32_t>(iter);
                         for (uint32_t j = 0; j < n_elements; j++) {
                             auto elem_idx = safe_read_leb128<uint32_t>(iter);
-                            if (elem_idx >= functions.size()) {
-                                error<validation_error>("unknown function");
-                            }
+                            ensure(elem_idx < functions.size(),
+                                   "unknown function");
                             functions[elem_idx].is_declared = true;
                         }
                         elements.push_back(ElementShell(valtype::funcref));
@@ -534,15 +516,13 @@ void Module::initialize(std::span<uint8_t> bytes) {
                         // flags = 1
                         // characteristics: passive, elem kind + indices
                         auto elemkind = *iter++;
-                        if (elemkind != 0) {
-                            error<validation_error>("invalid elemkind");
-                        }
+                        ensure(elemkind == 0, "invalid elemkind");
+
                         auto n_elements = safe_read_leb128<uint32_t>(iter);
                         for (uint32_t j = 0; j < n_elements; j++) {
                             auto elem_idx = safe_read_leb128<uint32_t>(iter);
-                            if (elem_idx >= functions.size()) {
-                                error<validation_error>("unknown function");
-                            }
+                            ensure(elem_idx < functions.size(),
+                                   "unknown function");
                             // implicit declaration
                             functions[elem_idx].is_declared = true;
                         }
@@ -552,9 +532,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
             } else {
                 auto table_idx =
                     flags & 0b10 ? safe_read_leb128<uint32_t>(iter) : 0;
-                if (table_idx >= tables.size()) {
-                    error<validation_error>("unknown table");
-                }
+                ensure(table_idx < tables.size(), "unknown table");
 
                 auto reftype = valtype::null;
 
@@ -572,29 +550,22 @@ void Module::initialize(std::span<uint8_t> bytes) {
                         error<malformed_error>("malformed reference type");
                     }
                     reftype = static_cast<valtype>(reftype_or_elemkind);
-                    if (tables[table_idx].type != reftype) {
-                        error<validation_error>("type mismatch");
-                    }
+                    ensure(tables[table_idx].type == reftype,
+                           "table type and element type mismatch");
                     for (uint32_t j = 0; j < n_elements; j++) {
                         validate_const(iter, reftype);
                     }
                 } else {
                     if (reftype_or_elemkind == 256)
                         reftype_or_elemkind = 0;
-                    if (reftype_or_elemkind != 0) {
-                        error<validation_error>("invalid elemkind");
-                    }
+                    ensure(reftype_or_elemkind == 0, "invalid elemkind");
                     reftype = valtype::funcref;
-                    if (tables[table_idx].type != reftype) {
-                        error<validation_error>("type mismatch");
-                    }
+                    ensure(tables[table_idx].type == reftype, "type mismatch");
                     // flags = 0 or 2
                     // characteristics: active, elem kind + indices
                     for (uint32_t j = 0; j < n_elements; j++) {
                         auto elem_idx = safe_read_leb128<uint32_t>(iter);
-                        if (elem_idx >= functions.size()) {
-                            error<validation_error>("unknown function");
-                        }
+                        ensure(elem_idx < functions.size(), "unknown function");
                         // implicit declaration
                         functions[elem_idx].is_declared = true;
                     }
@@ -611,6 +582,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
     auto has_data_count = false;
     section(12, [&] {
         n_data = safe_read_leb128<uint32_t>(iter);
+        ensure(n_data <= limits::MaxWasmDataSegments, "too many data segments");
         has_data_count = true;
     });
 
@@ -656,6 +628,8 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     fn.locals = fn.type.params;
 
                     auto function_length = safe_read_leb128<uint32_t>(iter);
+                    ensure(function_length <= limits::MaxWasmFunctionSize,
+                           "function too large");
 
                     auto start = safe_byte_iterator(
                         iter.get_with_at_least(function_length),
@@ -665,12 +639,11 @@ void Module::initialize(std::span<uint8_t> bytes) {
                     while (n_local_decls--) {
                         auto n_locals = safe_read_leb128<uint32_t>(iter);
                         auto type = *iter++;
-                        if (!is_valtype(type)) {
-                            error<validation_error>("invalid local type");
-                        }
+                        ensure(is_valtype(type), "invalid local type");
                         while (n_locals--) {
                             fn.locals.push_back(static_cast<valtype>(type));
-                            if (fn.locals.size() > MAX_LOCALS) {
+                            if (fn.locals.size() >
+                                limits::MaxWasmFunctionLocals) {
                                 error<malformed_error>("too many locals");
                             }
                         }
@@ -730,16 +703,11 @@ void Module::initialize(std::span<uint8_t> bytes) {
                 }
 
                 auto segment_flag = safe_read_leb128<uint32_t>(iter);
-                if (segment_flag & ~0b11) {
-                    error<validation_error>("invalid data segment flag");
-                }
+                ensure(segment_flag <= 0b11, "invalid data segment flag");
 
                 auto memidx =
                     segment_flag & 0b10 ? safe_read_leb128<uint32_t>(iter) : 0;
-
-                if (memidx != 0) {
-                    error<validation_error>("unknown memory");
-                }
+                ensure(memidx == 0, "unknown memory");
 
                 if (segment_flag & 1) {
                     // passive segment
@@ -761,9 +729,7 @@ void Module::initialize(std::span<uint8_t> bytes) {
                                                std::move(segment), nullptr);
                 } else {
                     // active segment
-                    if (!memory.exists) {
-                        error<validation_error>("unknown memory 0");
-                    }
+                    ensure(memory.exists, "unknown memory 0");
 
                     auto initializer = iter.unsafe_ptr();
                     validate_const(iter, valtype::i32);
@@ -892,6 +858,7 @@ void WasmStack::apply(std::array<valtype, pc> params,
         } else {                                                               \
             ensure(mod.memory.exists, "unknown memory");                       \
         }                                                                      \
+        ensure(a < 32, "alignment must not be larger than natural");           \
         auto align = 1ull << a;                                                \
         ensure(align <= sizeof(type),                                          \
                "alignment must not be larger than natural");                   \
@@ -1096,6 +1063,8 @@ HANDLER(br_table) {
     stack.pop(valtype::i32);
     // todo: maybe a different function for low n could be good?
     auto n_targets = safe_read_leb128<uint32_t>(iter);
+    ensure(n_targets <= limits::MaxWasmFunctionBrTableSize,
+           "too many br_table targets");
 
     auto targets = std::span(
         (uint32_t *)alloca(sizeof(uint32_t) * (n_targets + 1)), n_targets + 1);

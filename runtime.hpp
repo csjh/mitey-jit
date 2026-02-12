@@ -251,7 +251,6 @@ struct Segment {
 };
 
 struct WasmMemory {
-    static constexpr uint32_t MAX_PAGES = 65536;
     static constexpr uint32_t PAGE_SIZE = 65536;
 
     // :(
@@ -268,7 +267,8 @@ struct WasmMemory {
     WasmMemory(uint32_t initial, uint32_t maximum,
                decltype(default_make_memory) make_memory,
                decltype(default_grow_memory) grow_memory)
-        : current(initial), maximum(std::min(maximum, MAX_PAGES)),
+        : current(initial),
+          maximum(std::min(maximum, (uint32_t)limits::MaxMemoryPages)),
           memory(make_memory(PAGE_SIZE * initial, AllocationKind::Heap)),
           grow_memory(grow_memory) {}
     WasmMemory(uint32_t initial, uint32_t maximum)

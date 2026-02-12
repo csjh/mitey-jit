@@ -81,8 +81,8 @@ std::tuple<uint32_t, uint32_t> get_limits(safe_byte_iterator &iter,
 }
 
 std::tuple<uint32_t, uint32_t> get_memory_limits(safe_byte_iterator &iter) {
-    auto [initial, max] = get_limits(iter, Module::MAX_PAGES);
-    if (initial > Module::MAX_PAGES || max > Module::MAX_PAGES) {
+    auto [initial, max] = get_limits(iter, limits::MaxMemoryPages);
+    if (initial > limits::MaxMemoryPages || max > limits::MaxMemoryPages) {
         error<validation_error>(
             "memory size must be at most 65536 pages (4GiB)");
     }
@@ -122,6 +122,7 @@ WasmSignature &read_blocktype(std::vector<WasmSignature> &types,
         return singles[byte];
     } else {
         int64_t n = safe_read_leb128<int64_t, 33>(iter);
+        ensure(0 <= n && n < types.size(), "unknown type");
         return types[n];
     }
 }
