@@ -221,6 +221,8 @@ struct WasmTable {
                                 calloc(initial, sizeof(WasmValue)))),
           maximum(maximum), type(type) {}
 
+    ~WasmTable() { free(elements); }
+
     WasmTable() = delete;
     WasmTable(const WasmTable &) = delete;
     WasmTable(WasmTable &&) = delete;
